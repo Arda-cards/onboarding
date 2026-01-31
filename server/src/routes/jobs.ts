@@ -1,0 +1,620 @@
+// Jobs API - Background email processing
+import { Router, Request, Response } from 'express';
+import { google } from 'googleapis';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+import { getValidAccessToken } from './auth.js';
+import { 
+  jobManager,
+  Job,
+  ProcessedOrder,
+} from '../services/jobManager.js';
+
+const router = Router();
+
+// Initialize Gemini AI client
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
+
+const EXTRACTION_PROMPT = `You are an order extraction AI. Your job is to extract purchase data from emails.
+
+CRITICAL RULE: DEFAULT TO isOrder: true
+If the email contains ANY of these, it IS an order - set isOrder: true:
+- Dollar amounts ($XX.XX)
+- Product names or SKUs
+- Order numbers or confirmation numbers
+- Invoice numbers
+- Tracking numbers
+- "Order", "purchase", "receipt", "invoice", "shipment", "shipped", "delivered"
+- Any company that sells products (Amazon, Costco, ULine, Grainger, etc.)
+
+SUPPLIER RECOGNITION - These are ALWAYS orders:
+- Amazon, Costco, Walmart, Target, Home Depot, Lowes
+- ULine, Grainger, Fastenal, McMaster-Carr, MSC Industrial
+- Sysco, US Foods, Zoro, Global Industrial
+- FedEx/UPS shipping confirmations (they reference orders)
+
+EXTRACT ITEMS AGGRESSIVELY:
+- Look for product descriptions ANYWHERE in the email
+- Part numbers like "S-1234", "100-4456", "GRN-78900"
+- Any text that looks like: Qty x Product Name @ $XX.XX
+- Table rows with product info
+
+Return JSON with this structure:
+{
+  "isOrder": true,
+  "supplier": "Company Name",
+  "orderDate": "${new Date().toISOString().split('T')[0]}",
+  "totalAmount": 0,
+  "items": [{"name": "Item", "quantity": 1, "unit": "ea", "unitPrice": null, "totalPrice": null}],
+  "confidence": 0.8
+}
+
+ONLY set isOrder: false for:
+- Pure marketing with no product mentions
+- Password reset emails
+- Account notifications with no purchases
+- Newsletter content only
+
+REMEMBER: When in doubt, isOrder: true. Extract any products you can find.
+
+EMAIL:
+`;
+
+// Helper function to delay execution
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Recursively extract text from email parts
+function extractTextFromParts(parts: any[]): string {
+  let text = '';
+  
+  for (const part of parts) {
+    if (part.mimeType === 'text/plain' && part.body?.data) {
+      const decoded = Buffer.from(part.body.data, 'base64').toString('utf-8');
+      if (decoded.length > text.length) {
+        text = decoded;
+      }
+    } else if (part.mimeType === 'text/html' && part.body?.data && text.length === 0) {
+      // Only use HTML if we don't have plain text
+      text = Buffer.from(part.body.data, 'base64').toString('utf-8');
+    } else if (part.parts) {
+      // Recursively check nested parts
+      const nestedText = extractTextFromParts(part.parts);
+      if (nestedText.length > text.length) {
+        text = nestedText;
+      }
+    }
+  }
+  
+  return text;
+}
+
+// Strip HTML tags for cleaner analysis - preserves table structure
+function stripHtml(html: string): string {
+  return html
+    // Remove style and script tags entirely
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '')
+    // Convert table structure to readable format
+    .replace(/<\/tr>/gi, '\n')
+    .replace(/<\/td>/gi, ' | ')
+    .replace(/<\/th>/gi, ' | ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<\/div>/gi, '\n')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<hr[^>]*>/gi, '\n---\n')
+    // Remove remaining HTML tags
+    .replace(/<[^>]+>/g, '')
+    // Decode HTML entities
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&dollar;/g, '$')
+    .replace(/&#36;/g, '$')
+    // Clean up whitespace while preserving line structure
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n\s*\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// Analyze a single email with retry logic
+async function analyzeEmailWithRetry(
+  model: any,
+  email: { id: string; subject: string; sender: string; body: string },
+  maxRetries: number = 3
+): Promise<any> {
+  // Clean the body - strip HTML if needed
+  let cleanBody = email.body;
+  if (cleanBody.includes('<html') || cleanBody.includes('<div') || cleanBody.includes('<table')) {
+    cleanBody = stripHtml(cleanBody);
+  }
+  
+  const emailContent = `
+Subject: ${email.subject}
+From: ${email.sender}
+Content:
+${cleanBody.substring(0, 8000)}
+`;
+
+  // Debug: log what we're analyzing
+  console.log(`🔍 Analyzing: "${email.subject}" from ${email.sender}`);
+  console.log(`   Body length: ${cleanBody.length} chars (original: ${email.body.length})`);
+  if (cleanBody.length < 50) {
+    console.log(`   ⚠️ Very short body: "${cleanBody.substring(0, 100)}"`);
+  }
+
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      const result = await model.generateContent(EXTRACTION_PROMPT + emailContent);
+      const response = result.response;
+      const text = response.text();
+      
+      // Debug: log raw response
+      console.log(`   Gemini response (${text.length} chars): ${text.substring(0, 200)}...`);
+      
+      // Parse JSON from response
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        console.log(`   ❌ No JSON found in response`);
+        // Fallback: check for order keywords in the original email
+        const fallbackResult = keywordFallbackDetection(email, cleanBody);
+        if (fallbackResult.isOrder) {
+          console.log(`   🔄 Keyword fallback triggered: detected as order`);
+          return fallbackResult;
+        }
+        return { emailId: email.id, isOrder: false, items: [], confidence: 0 };
+      }
+      
+      let parsed = JSON.parse(jsonMatch[0]);
+      
+      // FALLBACK: If Gemini says not an order but we see clear signals, override
+      if (!parsed.isOrder) {
+        const fallbackResult = keywordFallbackDetection(email, cleanBody);
+        if (fallbackResult.isOrder) {
+          console.log(`   🔄 Keyword fallback OVERRIDE: Gemini said no order but keywords detected`);
+          parsed = { ...parsed, ...fallbackResult };
+        }
+      }
+      
+      console.log(`   Result: isOrder=${parsed.isOrder}, items=${parsed.items?.length || 0}, supplier=${parsed.supplier}`);
+      
+      return {
+        emailId: email.id,
+        ...parsed,
+      };
+    } catch (error: any) {
+      const isRateLimit = error.status === 429 || error.status === 403;
+      const isLastAttempt = attempt === maxRetries - 1;
+      
+      if (isRateLimit && !isLastAttempt) {
+        // Exponential backoff: 2s, 4s, 8s...
+        const waitTime = Math.pow(2, attempt + 1) * 1000;
+        console.log(`   ⏳ Rate limited, waiting ${waitTime/1000}s...`);
+        await delay(waitTime);
+        continue;
+      }
+      
+      console.error(`   ❌ Parse error for email ${email.id}:`, error.message || error);
+      // Try keyword fallback on error too
+      const fallbackResult = keywordFallbackDetection(email, cleanBody);
+      if (fallbackResult.isOrder) {
+        console.log(`   🔄 Error recovery: keyword fallback detected order`);
+        return fallbackResult;
+      }
+      return { emailId: email.id, isOrder: false, items: [], confidence: 0 };
+    }
+  }
+  
+  return { emailId: email.id, isOrder: false, items: [], confidence: 0 };
+}
+
+// Keyword-based fallback detection when Gemini fails
+function keywordFallbackDetection(
+  email: { id: string; subject: string; sender: string },
+  body: string
+): { emailId: string; isOrder: boolean; supplier: string | null; items: any[]; confidence: number; orderDate: string } {
+  const combined = `${email.subject} ${email.sender} ${body}`.toLowerCase();
+  
+  // Strong order signal keywords
+  const orderKeywords = [
+    'order confirmation', 'order #', 'order number', 'order placed',
+    'invoice', 'receipt', 'payment received', 'payment confirmation',
+    'your order', 'purchase', 'transaction', 'shipped', 'shipment',
+    'tracking number', 'delivered', 'out for delivery',
+    'qty', 'quantity', 'subtotal', 'total:', 'grand total', 'amount due'
+  ];
+  
+  // Known supplier domains/names
+  const knownSuppliers: Record<string, string> = {
+    'amazon': 'Amazon',
+    'costco': 'Costco',
+    'walmart': 'Walmart',
+    'target': 'Target',
+    'uline': 'ULine',
+    'grainger': 'Grainger',
+    'fastenal': 'Fastenal',
+    'mcmaster': 'McMaster-Carr',
+    'msc': 'MSC Industrial',
+    'homedepot': 'Home Depot',
+    'lowes': 'Lowes',
+    'sysco': 'Sysco',
+    'usfoods': 'US Foods',
+    'zoro': 'Zoro',
+    'staples': 'Staples',
+    'officedepot': 'Office Depot',
+    'newegg': 'Newegg',
+    'chewy': 'Chewy',
+    'ebay': 'eBay',
+    'fedex': 'FedEx',
+    'ups': 'UPS',
+    'usps': 'USPS'
+  };
+  
+  // Check for keywords
+  const hasOrderKeyword = orderKeywords.some(kw => combined.includes(kw));
+  
+  // Check for dollar amounts
+  const hasDollarAmount = /\$\d+\.?\d*/i.test(combined);
+  
+  // Detect supplier
+  let detectedSupplier: string | null = null;
+  for (const [key, name] of Object.entries(knownSuppliers)) {
+    if (combined.includes(key)) {
+      detectedSupplier = name;
+      break;
+    }
+  }
+  
+  // If we have strong signals, return as order
+  if ((hasOrderKeyword && hasDollarAmount) || (detectedSupplier && hasDollarAmount)) {
+    return {
+      emailId: email.id,
+      isOrder: true,
+      supplier: detectedSupplier || extractSupplierFromSender(email.sender),
+      items: [], // Items would need deeper parsing
+      confidence: 0.6, // Lower confidence for fallback detection
+      orderDate: new Date().toISOString().split('T')[0]
+    };
+  }
+  
+  return {
+    emailId: email.id,
+    isOrder: false,
+    supplier: null,
+    items: [],
+    confidence: 0,
+    orderDate: new Date().toISOString().split('T')[0]
+  };
+}
+
+// Extract supplier name from email sender
+function extractSupplierFromSender(sender: string): string {
+  // Try to extract domain or name from sender
+  const emailMatch = sender.match(/@([^.]+)/);
+  if (emailMatch) {
+    return emailMatch[1].charAt(0).toUpperCase() + emailMatch[1].slice(1);
+  }
+  // Try to extract name before email
+  const nameMatch = sender.match(/^([^<]+)/);
+  if (nameMatch) {
+    return nameMatch[1].trim();
+  }
+  return 'Unknown Supplier';
+}
+
+// Run the actual processing in the background
+async function processEmailsInBackground(
+  jobId: string,
+  userId: string,
+  accessToken: string
+) {
+  const job = jobManager.getJob(jobId);
+  if (!job) return;
+
+  try {
+    // Update job status
+    jobManager.updateJob(jobId, { status: 'running' });
+    jobManager.addJobLog(jobId, '📧 Fetching emails from Gmail...');
+    jobManager.updateJobProgress(jobId, { currentTask: 'Fetching emails...' });
+
+    // Fetch Gmail messages
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    // Calculate 6 months ago for date filter
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const afterDate = sixMonthsAgo.toISOString().split('T')[0].replace(/-/g, '/');
+
+    const query = `subject:(order OR invoice OR receipt OR confirmation OR shipment OR purchase OR payment) after:${afterDate}`;
+    
+    const listResponse = await gmail.users.messages.list({
+      userId: 'me',
+      q: query,
+      maxResults: 500,
+    });
+
+    const messageIds = listResponse.data.messages || [];
+    jobManager.addJobLog(jobId, `📬 Found ${messageIds.length} matching emails`);
+    jobManager.updateJobProgress(jobId, { 
+      total: messageIds.length,
+      currentTask: 'Starting one-piece flow processing...' 
+    });
+
+    if (messageIds.length === 0) {
+      jobManager.addJobLog(jobId, '⚠️ No order-related emails found in the last 6 months');
+      jobManager.updateJob(jobId, { status: 'completed' });
+      return;
+    }
+
+    // Initialize Gemini model upfront
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+    // ONE-PIECE FLOW: Fetch small batch → Analyze immediately → Repeat
+    // Inspired by Shigeo Shingo's Toyota Production System principles
+    const FETCH_BATCH_SIZE = 10; // Small batches for quick feedback
+    let totalProcessed = 0;
+    let totalFetched = 0;
+    
+    jobManager.addJobLog(jobId, `🔄 One-piece flow: Processing in batches of ${FETCH_BATCH_SIZE} (fetch → analyze → repeat)`);
+
+    for (let batchStart = 0; batchStart < messageIds.length; batchStart += FETCH_BATCH_SIZE) {
+      const batchMessageIds = messageIds.slice(batchStart, batchStart + FETCH_BATCH_SIZE);
+      const batchNum = Math.floor(batchStart / FETCH_BATCH_SIZE) + 1;
+      const totalBatches = Math.ceil(messageIds.length / FETCH_BATCH_SIZE);
+      
+      jobManager.updateJobProgress(jobId, { 
+        currentTask: `Batch ${batchNum}/${totalBatches}: Fetching...` 
+      });
+
+      // STEP 1: Fetch this small batch of emails
+      const batchEmails: Array<{ id: string; subject: string; sender: string; body: string }> = [];
+      
+      for (const msg of batchMessageIds) {
+        try {
+          const fullMsg = await gmail.users.messages.get({
+            userId: 'me',
+            id: msg.id!,
+            format: 'full',
+          });
+          
+          const headers = fullMsg.data.payload?.headers || [];
+          const getHeader = (name: string) => 
+            headers.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+
+          let body = '';
+          const parts = fullMsg.data.payload?.parts || [];
+          
+          if (fullMsg.data.payload?.body?.data) {
+            body = Buffer.from(fullMsg.data.payload.body.data, 'base64').toString('utf-8');
+          } else if (parts.length > 0) {
+            body = extractTextFromParts(parts);
+          }
+          
+          if (!body || body.length < 20) {
+            const snippet = fullMsg.data.snippet || '';
+            body = snippet;
+          }
+
+          batchEmails.push({
+            id: msg.id!,
+            subject: getHeader('Subject'),
+            sender: getHeader('From'),
+            body,
+          });
+          totalFetched++;
+        } catch (error) {
+          console.error(`Failed to load email ${msg.id}:`, error);
+        }
+      }
+
+      // STEP 2: Immediately analyze this batch (don't wait for all emails)
+      jobManager.updateJobProgress(jobId, { 
+        currentTask: `Batch ${batchNum}/${totalBatches}: Analyzing ${batchEmails.length} emails...` 
+      });
+      
+      if (batchNum === 1) {
+        jobManager.addJobLog(jobId, `⚡ First batch ready! Analyzing ${batchEmails.length} emails immediately...`);
+      }
+
+      for (const email of batchEmails) {
+        jobManager.setJobCurrentEmail(jobId, {
+          id: email.id,
+          subject: email.subject,
+          sender: email.sender,
+          snippet: email.body.substring(0, 100) + '...',
+        });
+
+        const result = await analyzeEmailWithRetry(model, email);
+        processAnalysisResult(jobId, email, result);
+        totalProcessed++;
+        
+        // Update progress after each email for smooth UI updates
+        jobManager.updateJobProgress(jobId, { 
+          processed: totalProcessed,
+          currentTask: `Batch ${batchNum}/${totalBatches}: ${totalProcessed}/${messageIds.length}`
+        });
+        
+        // Small delay between requests to avoid rate limits
+        await delay(50);
+      }
+
+      // Log batch completion
+      const currentJob = jobManager.getJob(jobId);
+      const ordersFound = currentJob?.progress.success || 0;
+      
+      if (batchNum === 1) {
+        jobManager.addJobLog(jobId, `✅ First batch complete! ${ordersFound} orders found so far`);
+      } else if (batchNum % 5 === 0) {
+        // Log progress every 5 batches
+        jobManager.addJobLog(jobId, `📊 Progress: ${totalProcessed}/${messageIds.length} emails, ${ordersFound} orders found`);
+      }
+
+      // Small delay between batches
+      if (batchStart + FETCH_BATCH_SIZE < messageIds.length) {
+        await delay(200);
+      }
+    }
+
+    // Complete
+    const finalJob = jobManager.getJob(jobId);
+    jobManager.updateJob(jobId, { status: 'completed' });
+    jobManager.setJobCurrentEmail(jobId, null);
+    jobManager.updateJobProgress(jobId, { 
+      processed: totalProcessed,
+      currentTask: '✅ Complete' 
+    });
+    jobManager.addJobLog(jobId, `🎉 Pipeline Complete. ${finalJob?.progress.success || 0} orders identified from ${totalProcessed} emails.`);
+
+  } catch (error: any) {
+    console.error('Background job error:', error);
+    jobManager.updateJob(jobId, { 
+      status: 'failed', 
+      error: error.message || 'Unknown error' 
+    });
+    jobManager.addJobLog(jobId, `❌ Error: ${error.message}`);
+  }
+}
+
+// Helper to process analysis result
+function processAnalysisResult(
+  jobId: string, 
+  email: { id: string; subject: string; sender: string; body: string },
+  result: any
+) {
+  const job = jobManager.getJob(jobId);
+  if (!job) return;
+
+  if (result.isOrder) {
+    // Always create an order if isOrder is true
+    let items = result.items || [];
+    
+    // If no items extracted, create a placeholder from the email subject
+    if (items.length === 0 && result.supplier) {
+      items = [{
+        name: email.subject.replace(/^(re:|fwd:|fw:)\s*/gi, '').substring(0, 100),
+        quantity: 1,
+        unit: 'ea',
+        unitPrice: result.totalAmount || 0,
+        totalPrice: result.totalAmount || 0,
+      }];
+    }
+    
+    const order: ProcessedOrder = {
+      id: result.emailId,
+      supplier: result.supplier || extractSupplierFromSender(email.sender),
+      orderDate: result.orderDate || new Date().toISOString().split('T')[0],
+      totalAmount: result.totalAmount || 0,
+      items: items.map((item: any, idx: number) => ({
+        id: `${result.emailId}-${idx}`,
+        name: item.name || 'Unknown Item',
+        quantity: item.quantity || 1,
+        unit: item.unit || 'ea',
+        unitPrice: item.unitPrice || 0,
+      })),
+      confidence: result.confidence || 0.5,
+    };
+    
+    jobManager.addJobOrder(jobId, order);
+    jobManager.updateJobProgress(jobId, { success: job.progress.success + 1 });
+    jobManager.addJobLog(jobId, `✅ Order: ${order.supplier} - $${order.totalAmount.toFixed(2)} (${order.items.length} items)`);
+  } else {
+    jobManager.updateJobProgress(jobId, { failed: job.progress.failed + 1 });
+  }
+}
+
+// Middleware to require authentication
+function requireAuth(req: Request, res: Response, next: Function) {
+  if (!req.session.userId) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+  next();
+}
+
+// Start a new processing job
+router.post('/start', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = req.session.userId!;
+    const accessToken = await getValidAccessToken(userId);
+    
+    if (!accessToken) {
+      return res.status(401).json({ error: 'Token expired, please re-authenticate' });
+    }
+
+    // Create job
+    const job = jobManager.createJob(userId);
+    jobManager.addJobLog(job.id, '🚀 Job created, starting processing...');
+
+    // Start processing in background (don't await)
+    processEmailsInBackground(job.id, userId, accessToken);
+
+    // Return immediately with job ID
+    res.json({ 
+      jobId: job.id,
+      status: 'started',
+      message: 'Processing started in background'
+    });
+  } catch (error: any) {
+    console.error('Failed to start job:', error);
+    res.status(500).json({ error: 'Failed to start processing job' });
+  }
+});
+
+// Get job status (for polling)
+router.get('/status', requireAuth, async (req: Request, res: Response) => {
+  const userId = req.session.userId!;
+  const jobId = req.query.jobId as string;
+  
+  let job: Job | undefined;
+  
+  if (jobId) {
+    job = jobManager.getJob(jobId);
+  } else {
+    // Get latest job for user
+    job = jobManager.getJobForUser(userId);
+  }
+  
+  if (!job) {
+    return res.json({ 
+      hasJob: false,
+      message: 'No active job found'
+    });
+  }
+
+  res.json({
+    hasJob: true,
+    jobId: job.id,
+    status: job.status,
+    progress: job.progress,
+    currentEmail: job.currentEmail,
+    orders: job.orders,
+    logs: job.logs.slice(0, 20), // Last 20 logs
+    error: job.error,
+  });
+});
+
+// Get full job results
+router.get('/:jobId', requireAuth, async (req: Request, res: Response) => {
+  const job = jobManager.getJob(req.params.jobId);
+  
+  if (!job) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+
+  // Verify job belongs to user
+  if (job.userId !== req.session.userId) {
+    return res.status(403).json({ error: 'Access denied' });
+  }
+
+  res.json(job);
+});
+
+export { router as jobsRouter };
