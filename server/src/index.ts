@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import session from 'express-session';
-import connectRedis from 'connect-redis';
+import RedisStore from 'connect-redis';
 import * as Sentry from '@sentry/node';
 import redisClient from './utils/redisClient.js';
 import { authRouter } from './routes/auth.js';
@@ -64,8 +64,8 @@ if (isProduction) {
 }
 
 const sessionSecret = process.env.SESSION_SECRET || 'dev-secret-change-in-production';
-const RedisSessionStore = connectRedis(session);
-const sessionStore = redisClient ? new RedisSessionStore({ client: redisClient }) : undefined;
+// @ts-ignore - connect-redis type issues
+const sessionStore = redisClient ? new RedisStore({ client: redisClient }) : undefined;
 
 // Security middleware
 app.use(helmet());
