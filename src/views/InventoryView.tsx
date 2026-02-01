@@ -72,6 +72,8 @@ const EditableCell: React.FC<{
         onBlur={handleSave}
         onKeyDown={handleKeyDown}
         autoFocus
+        aria-label="Edit value"
+        placeholder={placeholder}
         className={`w-full px-2 py-1 text-sm border border-arda-accent rounded bg-white focus:outline-none focus:ring-2 focus:ring-arda-accent/30 ${className}`}
       />
     );
@@ -349,6 +351,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
           </div>
           <button
             onClick={() => setBulkSyncError(null)}
+            title="Dismiss error"
+            aria-label="Dismiss error"
             className="text-red-400 hover:text-red-600 p-1"
           >
             <Icons.X className="w-4 h-4" />
@@ -601,6 +605,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
               </div>
               <button 
                 onClick={() => setHistoryItem(null)}
+                title="Close history"
+                aria-label="Close history"
                 className="text-arda-text-muted hover:text-arda-text-primary transition-colors p-1"
               >
                 <Icons.X className="w-6 h-6" />

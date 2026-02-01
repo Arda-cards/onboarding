@@ -31,20 +31,31 @@ const ASIN_PATTERN = /\b(B0[A-Z0-9]{8}|[0-9]{10})\b/gi;
 // Extract ASINs from email content
 export function extractAsinsFromEmail(emailBody: string, emailSubject: string): string[] {
   const text = `${emailSubject} ${emailBody}`;
-  const matches = text.match(ASIN_PATTERN) || [];
   
-  // Deduplicate and filter
-  const asins = [...new Set(matches)]
-    .filter(asin => {
-      // Filter out common false positives (phone numbers, zip codes, etc.)
-      if (/^[0-9]{10}$/.test(asin)) {
-        // 10-digit numbers are more likely to be false positives
-        // Only accept if it appears near Amazon-related context
-        const context = text.toLowerCase();
-        return context.includes('amazon') || context.includes('asin');
-      }
-      return true;
-    });
+  // First, extract ASINs from Amazon product URLs (most reliable)
+  const urlPattern = /amazon\.com(?:\/[^\/]*)?\/(?:dp|gp\/product)\/([A-Z0-9]{10})/gi;
+  const urlMatches = [...text.matchAll(urlPattern)].map(m => m[1]);
+  
+  // Then look for B0-prefixed ASINs (very reliable pattern)
+  const b0Pattern = /\b(B0[A-Z0-9]{8})\b/gi;
+  const b0Matches = [...text.matchAll(b0Pattern)].map(m => m[1]);
+  
+  // Combine and deduplicate
+  const allMatches = [...new Set([...urlMatches, ...b0Matches])];
+  
+  // Filter out any remaining false positives
+  const asins = allMatches.filter(asin => {
+    // Must be exactly 10 characters
+    if (asin.length !== 10) return false;
+    
+    // If all digits, reject - these are likely timestamps, phone numbers, etc.
+    // Real ASINs with all digits are rare and we'd rather miss them than include false positives
+    if (/^[0-9]{10}$/.test(asin)) return false;
+    
+    return true;
+  });
+  
+  console.log(`📦 Extracted ${asins.length} ASINs from email (${urlMatches.length} from URLs, ${b0Matches.length} from B0 pattern)`);
   
   return asins;
 }

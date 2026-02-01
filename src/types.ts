@@ -127,6 +127,7 @@ export interface ExtractedOrder {
 }
 
 export type ItemColor = 'Red' | 'Orange' | 'Yellow' | 'Green' | 'Blue' | 'Gray' | 'Pink' | 'Purple';
+export type ReviewStatus = 'pending' | 'approved' | 'excluded';
 
 export interface InventoryItem {
   id: string;

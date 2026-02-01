@@ -864,6 +864,168 @@ export const IngestionEngine: React.FC<IngestionEngineProps> = ({
         </div>
 
       </div>
+
+      {isConnected && (visibleQueueItems.length > 0 || isProcessing) && (
+        <InventoryView
+          inventory={visibleQueueItems}
+          onUpdateItem={handleQueueUpdate}
+          title="Item Review Queue"
+          subtitle="Items appear here as they are detected. Edit fields, approve/exclude, and sync to Arda."
+          showHistoryAction={false}
+          showReorderAction={false}
+          showReviewColumn={true}
+          reviewStatusById={itemReview}
+          onReviewStatusChange={handleItemReviewChange}
+          showAmazonLookupAction={true}
+          onAmazonLookup={handleAmazonLookup}
+          amazonLookupLoadingIds={amazonLookupLoadingIds}
+          emptyMessage="No items detected yet. Keep scanning to populate the queue."
+        />
+      )}
+
+      {isConnected && (orderRows.length > 0 || supplierRows.length > 0) && (
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          {/* Order Review */}
+          <div className="bg-white border border-arda-border rounded-xl shadow-arda p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-arda-text-primary">Order Review</h3>
+              <span className="text-xs text-arda-text-secondary bg-arda-bg-tertiary px-2 py-1 rounded-lg">
+                {orderRows.length} orders
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-arda-bg-secondary border-b border-arda-border">
+                  <tr className="text-arda-text-muted font-medium text-xs uppercase tracking-wide">
+                    <th className="px-3 py-2 text-left min-w-[140px]">Supplier</th>
+                    <th className="px-3 py-2 text-left w-24">Date</th>
+                    <th className="px-3 py-2 text-right w-16">Items</th>
+                    <th className="px-3 py-2 text-right w-20">Total</th>
+                    <th className="px-3 py-2 text-left w-24">Status</th>
+                    <th className="px-3 py-2 text-right w-32">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-arda-border">
+                  {orderRows.map(order => {
+                    const status = orderReview[order.id] || 'pending';
+                    return (
+                      <tr key={order.id} className="hover:bg-arda-bg-tertiary/50 transition-colors">
+                        <td className="px-3 py-2">
+                          <span className="text-arda-text-primary font-medium">{order.supplier}</span>
+                        </td>
+                        <td className="px-3 py-2 text-arda-text-secondary">
+                          {order.orderDate}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-arda-text-secondary">
+                          {order.items.length}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-arda-accent">
+                          ${(order.totalAmount ?? 0).toFixed(2)}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full border ${reviewBadgeClasses[status]}`}>
+                            {status.toUpperCase()}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleOrderReviewChange(order.id, status === 'approved' ? 'pending' : 'approved')}
+                              className="text-xs px-2 py-1 rounded border border-green-200 text-green-700 hover:bg-green-50 transition-colors"
+                              title="Approve order"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOrderReviewChange(order.id, status === 'excluded' ? 'pending' : 'excluded')}
+                              className="text-xs px-2 py-1 rounded border border-red-200 text-red-700 hover:bg-red-50 transition-colors"
+                              title="Exclude order"
+                            >
+                              Exclude
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Supplier Review */}
+          <div className="bg-white border border-arda-border rounded-xl shadow-arda p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-semibold text-arda-text-primary">Supplier Review</h3>
+              <span className="text-xs text-arda-text-secondary bg-arda-bg-tertiary px-2 py-1 rounded-lg">
+                {supplierRows.length} suppliers
+              </span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-arda-bg-secondary border-b border-arda-border">
+                  <tr className="text-arda-text-muted font-medium text-xs uppercase tracking-wide">
+                    <th className="px-3 py-2 text-left min-w-[140px]">Supplier</th>
+                    <th className="px-3 py-2 text-right w-16">Orders</th>
+                    <th className="px-3 py-2 text-right w-16">Items</th>
+                    <th className="px-3 py-2 text-right w-20">Total</th>
+                    <th className="px-3 py-2 text-left w-24">Status</th>
+                    <th className="px-3 py-2 text-right w-32">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-arda-border">
+                  {supplierRows.map(supplier => {
+                    const status = supplierReview[supplierKey(supplier.supplier)] || 'pending';
+                    return (
+                      <tr key={supplierKey(supplier.supplier)} className="hover:bg-arda-bg-tertiary/50 transition-colors">
+                        <td className="px-3 py-2">
+                          <span className="text-arda-text-primary font-medium">{supplier.supplier}</span>
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-arda-text-secondary">
+                          {supplier.orderCount}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-arda-text-secondary">
+                          {supplier.itemCount}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono text-arda-accent">
+                          ${supplier.totalAmount.toFixed(2)}
+                        </td>
+                        <td className="px-3 py-2">
+                          <span className={`text-[10px] px-2 py-0.5 rounded-full border ${reviewBadgeClasses[status]}`}>
+                            {status.toUpperCase()}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2">
+                          <div className="flex justify-end gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleSupplierReviewChange(supplier.supplier, status === 'approved' ? 'pending' : 'approved')}
+                              className="text-xs px-2 py-1 rounded border border-green-200 text-green-700 hover:bg-green-50 transition-colors"
+                              title="Approve supplier"
+                            >
+                              Approve
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSupplierReviewChange(supplier.supplier, status === 'excluded' ? 'pending' : 'excluded')}
+                              className="text-xs px-2 py-1 rounded border border-red-200 text-red-700 hover:bg-red-50 transition-colors"
+                              title="Exclude supplier"
+                            >
+                              Exclude
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
