@@ -1147,8 +1147,11 @@ async function processAmazonEmailsInBackground(
       return;
     }
 
+    // Progress phases: 50% for email scanning, 50% for API enrichment
+    // We use total = messageIds.length * 2 to account for both phases
+    const emailCount = messageIds.length;
     jobManager.updateJobProgress(jobId, { 
-      total: messageIds.length,
+      total: emailCount * 2, // Double for two-phase progress
       processed: 0,
       currentTask: 'Extracting ASINs from Amazon emails...' 
     });
@@ -1259,10 +1262,10 @@ async function processAmazonEmailsInBackground(
           jobManager.addJobLog(jobId, `${typeEmoji} Found ${items.length} items in: ${subject.substring(0, 50)}...`);
         }
 
-        // Update progress
+        // Update progress (phase 1: email scanning = 0-50%)
         jobManager.updateJobProgress(jobId, {
           processed: i + 1,
-          currentTask: `Scanning email ${i + 1}/${messageIds.length}... Found ${emailOrders.length} orders`
+          currentTask: `Scanning email ${i + 1}/${emailCount}... Found ${emailOrders.length} orders`
         });
 
       } catch (error) {
@@ -1272,9 +1275,11 @@ async function processAmazonEmailsInBackground(
 
       jobManager.addJobLog(jobId, `🎯 Found ${emailOrders.length} emails with ${allAsins.size} unique items`);
 
-    // Now enrich all unique ASINs with Amazon Product Advertising API
+    // Now enrich all unique ASINs with Amazon Product Advertising API (phase 2: 50-100%)
     if (allAsins.size > 0) {
+      // Progress: 50% done with email scanning, starting API phase
       jobManager.updateJobProgress(jobId, {
+        processed: emailCount, // 50% mark
         currentTask: `Calling Amazon Product Advertising API for ${allAsins.size} items...`
       });
       jobManager.addJobLog(jobId, '🛒 Calling Amazon Product Advertising API...');
@@ -1282,12 +1287,14 @@ async function processAmazonEmailsInBackground(
       const asinArray = Array.from(allAsins);
       const enrichedData = await getAmazonItemDetails(asinArray.slice(0, 100)); // Limit to 100
 
+      // Progress: 75% - API done
+      jobManager.updateJobProgress(jobId, {
+        processed: Math.floor(emailCount * 1.5), // 75% mark
+        currentTask: `Got ${enrichedData.size} products, humanizing names...`
+      });
       jobManager.addJobLog(jobId, `✅ Got ${enrichedData.size} products from Amazon API`);
 
       // Step 2: Humanize product names
-      jobManager.updateJobProgress(jobId, {
-        currentTask: `Humanizing ${enrichedData.size} product names for shop floor...`
-      });
       jobManager.addJobLog(jobId, '📝 Creating shop-floor friendly names...');
       
       const productNamesToHumanize = Array.from(enrichedData.values())
@@ -1296,6 +1303,12 @@ async function processAmazonEmailsInBackground(
       
       const humanizedNames = await humanizeProductNames(productNamesToHumanize);
       jobManager.addJobLog(jobId, `✅ Humanized ${humanizedNames.size} verbose product names`);
+      
+      // Progress: 90% - humanization done, building orders
+      jobManager.updateJobProgress(jobId, {
+        processed: Math.floor(emailCount * 1.8), // 90% mark
+        currentTask: 'Building order data...'
+      });
 
       // Build raw orders for consolidation
       const rawAmazonOrders: RawOrderData[] = [];
