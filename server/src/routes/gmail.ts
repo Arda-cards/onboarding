@@ -28,16 +28,54 @@ router.get('/messages', requireAuth, async (req: Request, res: Response) => {
 
 
 
-    // Search parameters - comprehensive query for industrial suppliers and carriers
+    // Search parameters - focus on PHYSICAL products: industrial, office supplies, food, retail
+    // Excludes: SaaS, financial institutions, tech companies
     const defaultQuery = `(
-      from:(@mcmaster.com OR @uline.com OR @grainger.com OR @fastenal.com OR @delcity.net OR @delcity.com OR
-            @mscdirect.com OR @globalindustrial.com OR @zoro.com OR @applied.com OR @motion.com OR
-            @digikey.com OR @mouser.com OR @newark.com OR @element14.com OR @alliedelec.com OR @amazon.com OR
-            @automationdirect.com OR @misumiusa.com OR @misumi.com OR @rs-online.com OR @rsonline.com OR @rsdelivers.com)
-      subject:(invoice OR receipt OR "order confirmation" OR "order acknowledgment" OR "thank you for your order" OR "order number")
+      from:(
+        @mcmaster.com OR @mcmaster-carr.com OR
+        @uline.com OR
+        @grainger.com OR
+        @fastenal.com OR
+        @delcity.net OR @delcity.com OR
+        @mscdirect.com OR
+        @globalindustrial.com OR
+        @zoro.com OR
+        @applied.com OR
+        @motion.com OR
+        @digikey.com OR
+        @mouser.com OR
+        @newark.com OR
+        @element14.com OR
+        @alliedelec.com OR
+        @automationdirect.com OR
+        @misumiusa.com OR @misumi.com OR
+        @rs-online.com OR @rsonline.com OR @rsdelivers.com OR
+        @amazon.com OR @amazon.business OR
+        @costco.com OR
+        @homedepot.com OR
+        @lowes.com OR
+        @staples.com OR
+        @officedepot.com OR @officedepot.com OR
+        @webstaurantstore.com OR
+        @sysco.com OR
+        @usfoods.com OR
+        @samsclub.com OR
+        @walmart.com OR
+        @target.com OR
+        @bestbuy.com OR
+        @newegg.com OR
+        @bhphotovideo.com OR
+        @adorama.com OR
+        @monoprice.com OR
+        @cableorganizer.com OR
+        @crutchfield.com OR
+        @sweetwater.com
+      )
+      subject:(invoice OR receipt OR "order confirmation" OR "order acknowledgment" OR "thank you for your order" OR "order number" OR "shipped")
     ) OR (
-      from:(@ups.com OR @fedex.com OR @dhl.com) (invoice OR charges OR receipt)
-    )`;
+      from:(@ups.com OR @fedex.com OR @dhl.com OR @usps.com) (invoice OR charges OR receipt OR "delivery")
+    )
+    -from:(@google.com OR @cursor.com OR @cursor.sh OR @mercury.com OR @stripe.com OR @paypal.com OR @venmo.com OR @chase.com OR @bankofamerica.com OR @wellsfargo.com OR @citi.com OR @capitalone.com OR @amex.com OR @vercel.com OR @heroku.com OR @netlify.com OR @github.com OR @gitlab.com OR @digitalocean.com OR @aws.amazon.com OR @cloud.google.com OR @azure.com OR @slack.com OR @zoom.com OR @dropbox.com OR @notion.so OR @figma.com OR @canva.com OR @adobe.com OR @atlassian.com OR @jira.com OR @asana.com OR @monday.com OR @hubspot.com OR @salesforce.com OR @zendesk.com OR @intercom.com OR @twilio.com OR @sendgrid.com OR @mailchimp.com OR @klaviyo.com OR @shopify.com OR @squarespace.com OR @wix.com OR @godaddy.com OR @namecheap.com OR @cloudflare.com)`;
     const baseQuery = req.query.q as string || defaultQuery;
     const query = `${baseQuery} newer_than:6m`;
     const maxResults = parseInt(req.query.maxResults as string) || 500; // Increased default
