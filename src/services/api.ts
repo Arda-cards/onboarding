@@ -180,6 +180,37 @@ export const jobsApi = {
     fetchApi<JobStatus>(`/api/jobs/${jobId}`),
 };
 
+// Amazon API
+export interface AmazonItemData {
+  ASIN: string;
+  ItemName?: string;
+  Price?: string;
+  ImageURL?: string;
+  AmazonURL?: string;
+  Quantity?: string;
+  Units?: string;
+  UnitCount?: number;
+  UnitPrice?: number;
+  UPC?: string;
+}
+
+export const amazonApi = {
+  getItem: (asin: string) =>
+    fetchApi<{ item: AmazonItemData }>(`/api/amazon/item/${asin}`),
+  
+  getItems: (asins: string[]) =>
+    fetchApi<{ items: Record<string, AmazonItemData>; requested: number; found: number }>('/api/amazon/items', {
+      method: 'POST',
+      body: JSON.stringify({ asins }),
+    }),
+    
+  extractAsins: (text: string, subject?: string) =>
+    fetchApi<{ asins: string[] }>('/api/amazon/extract-asins', {
+      method: 'POST',
+      body: JSON.stringify({ text, subject }),
+    }),
+};
+
 // Orders API
 export interface Order {
   id: string;

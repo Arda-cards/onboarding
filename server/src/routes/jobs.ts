@@ -70,6 +70,12 @@ ITEM EXTRACTION RULES:
 4. Look for item tables, order summaries, and line-by-line breakdowns
 5. If you cannot find specific item names, set items to an EMPTY array []
 
+AMAZON-SPECIFIC RULES:
+- For Amazon orders, ALWAYS extract the ASIN (10-character code starting with B0 or 10 digits)
+- Find ASINs in product URLs like amazon.com/dp/B08N5WRWNW or amazon.com/gp/product/B08N5WRWNW
+- Also look for ASINs in image URLs or product links
+- Set the "asin" field for each Amazon item
+
 WHERE TO FIND ITEMS:
 - Order confirmation tables
 - Invoice line items
@@ -90,8 +96,8 @@ Return JSON:
   "orderDate": "${new Date().toISOString().split('T')[0]}",
   "totalAmount": 123.45,
   "items": [
-    {"name": "ACTUAL product name from email", "quantity": 2, "unit": "ea", "unitPrice": 10.50, "partNumber": "ABC-123"},
-    {"name": "Second item name", "quantity": 5, "unit": "pk", "unitPrice": 25.00, "partNumber": null}
+    {"name": "ACTUAL product name from email", "quantity": 2, "unit": "ea", "unitPrice": 10.50, "partNumber": "ABC-123", "asin": null},
+    {"name": "Amazon Product Name", "quantity": 1, "unit": "ea", "unitPrice": 25.00, "partNumber": null, "asin": "B08N5WRWNW"}
   ],
   "confidence": 0.9
 }

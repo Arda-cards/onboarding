@@ -10,6 +10,21 @@ export interface LineItem {
   sourceOrderId?: string;
   normalizedName?: string;  // For matching across orders
   sku?: string;  // Part number/SKU if available
+  // Amazon-specific fields
+  asin?: string;  // Amazon Standard Identification Number
+  amazonEnriched?: AmazonItemData;  // Enriched data from Amazon API
+}
+
+// Amazon Product Advertising API enriched data
+export interface AmazonItemData {
+  asin: string;
+  itemName: string;
+  price?: string;
+  imageUrl?: string;
+  amazonUrl?: string;
+  unitCount?: number;
+  unitPrice?: number;
+  upc?: string;
 }
 
 // Cross-order item tracking for velocity analysis

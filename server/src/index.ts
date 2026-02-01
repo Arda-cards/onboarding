@@ -9,6 +9,7 @@ import { analysisRouter } from './routes/analysis.js';
 import { ordersRouter } from './routes/orders.js';
 import { jobsRouter } from './routes/jobs.js';
 import { discoverRouter } from './routes/discover.js';
+import { amazonRouter } from './routes/amazon.js';
 import ardaRouter from './routes/arda.js';
 import cognitoRouter from './routes/cognito.js';
 import { cognitoService } from './services/cognito.js';
@@ -70,6 +71,7 @@ app.use('/api/arda', ardaRouter);
 app.use('/api/jobs', jobsRouter);
 app.use('/api/cognito', cognitoRouter);
 app.use('/api/discover', discoverRouter);
+app.use('/api/amazon', amazonRouter);
 
 // Error handler
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
