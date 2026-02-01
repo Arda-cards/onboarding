@@ -18,10 +18,18 @@ import {
   Mail,
   X,
   Upload,
+  Download,
   Check,
   CreditCard,
   Clock,
-  LogOut
+  LogOut,
+  ChevronRight,
+  ChevronDown,
+  Zap,
+  GitBranch,
+  Box,
+  FileText,
+  Activity
 } from 'lucide-react';
 
 export const Icons = {
@@ -44,10 +52,18 @@ export const Icons = {
   Mail,
   X,
   Upload,
+  Download,
   Check,
   CreditCard,
   Clock,
-  LogOut
+  LogOut,
+  ChevronRight,
+  ChevronDown,
+  Zap,
+  GitBranch,
+  Box,
+  FileText,
+  Activity
 };
 
 
