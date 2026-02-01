@@ -600,13 +600,13 @@ export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryIte
 
     // Calc Recommendations (two-bin system with pack-size rounding)
     const coverageDays = Math.max(item.averageCadenceDays, 1);
-    const packSize = item.packSize || 1;
-    const binQty = roundUpToMultiple(item.dailyBurnRate * coverageDays, packSize);
+    const itemPackSize = item.packSize || 1;
+    const binQty = roundUpToMultiple(item.dailyBurnRate * coverageDays, itemPackSize);
     item.recommendedMin = binQty;
     item.recommendedOrderQty = binQty;
 
     // Clean up temp field before returning
-    const { orderIds, packSize, ...cleanItem } = item;
+    const { orderIds, packSize: _packSize, ...cleanItem } = item;
     return cleanItem as InventoryItem;
   });
 };
