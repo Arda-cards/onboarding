@@ -33,7 +33,8 @@ import {
   Building2,
   Sparkles,
   Power,
-  ScanLine
+  ScanLine,
+  ExternalLink
 } from 'lucide-react';
 
 export const Icons = {
@@ -71,7 +72,8 @@ export const Icons = {
   Building2,
   Sparkles,
   Power,
-  ScanLine
+  ScanLine,
+  ExternalLink
 };
 
 

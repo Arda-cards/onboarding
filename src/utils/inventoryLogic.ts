@@ -204,9 +204,14 @@ export const buildVelocityProfiles = (
       if (!profileMap.has(normalizedName)) {
         profileMap.set(normalizedName, {
           normalizedName,
-          displayName: item.name,
+          displayName: item.amazonEnriched?.itemName || item.name,
           supplier: order.supplier,
           sku: item.sku,
+          // Amazon enrichment
+          asin: item.asin,
+          imageUrl: item.amazonEnriched?.imageUrl,
+          amazonUrl: item.amazonEnriched?.amazonUrl,
+          // Initialize other fields
           orders: [],
           totalQuantityOrdered: 0,
           orderCount: 0,
@@ -217,6 +222,21 @@ export const buildVelocityProfiles = (
           recommendedMin: 0,
           recommendedOrderQty: 0,
         });
+      } else {
+        // Update Amazon data if we have it now but didn't before
+        const profile = profileMap.get(normalizedName)!;
+        if (!profile.imageUrl && item.amazonEnriched?.imageUrl) {
+          profile.imageUrl = item.amazonEnriched.imageUrl;
+        }
+        if (!profile.amazonUrl && item.amazonEnriched?.amazonUrl) {
+          profile.amazonUrl = item.amazonEnriched.amazonUrl;
+        }
+        if (!profile.asin && item.asin) {
+          profile.asin = item.asin;
+        }
+        if (!profile.displayName.includes(item.amazonEnriched?.itemName || '') && item.amazonEnriched?.itemName) {
+          profile.displayName = item.amazonEnriched.itemName;
+        }
       }
       
       const profile = profileMap.get(normalizedName)!;

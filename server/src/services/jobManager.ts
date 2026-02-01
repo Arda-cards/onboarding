@@ -18,13 +18,13 @@ export interface EmailPreview {
 }
 
 export interface AmazonEnrichedData {
-  ASIN: string;
-  ItemName?: string;
-  Price?: string;
-  ImageURL?: string;
-  AmazonURL?: string;
-  UnitCount?: number;
-  UPC?: string;
+  asin: string;
+  itemName?: string;
+  price?: string;
+  imageUrl?: string;
+  amazonUrl?: string;
+  unitCount?: number;
+  upc?: string;
 }
 
 export interface ProcessedOrderItem {

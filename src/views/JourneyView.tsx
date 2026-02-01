@@ -306,26 +306,58 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
       {/* Detail Panel */}
       {selectedItem && selectedProfile && (
         <div className="w-96 flex-shrink-0 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col">
-          {/* Header */}
+          {/* Header with Amazon Image */}
           <div className="p-5 border-b border-slate-800">
-            <div className="flex items-start justify-between">
+            <div className="flex items-start gap-4">
+              {/* Product Image from Amazon or placeholder */}
+              {selectedProfile.imageUrl ? (
+                <img 
+                  src={selectedProfile.imageUrl}
+                  alt=""
+                  className="w-20 h-20 rounded-lg object-contain bg-white flex-shrink-0"
+                />
+              ) : (
+                <div className="w-16 h-16 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0">
+                  <Icons.Package className="w-8 h-8 text-purple-400" />
+                </div>
+              )}
+              
               <div className="flex-1 min-w-0">
-                <h3 className="text-lg font-semibold text-white leading-tight">
-                  {selectedProfile.displayName}
-                </h3>
+                <div className="flex items-start justify-between">
+                  <h3 className="text-lg font-semibold text-white leading-tight">
+                    {selectedProfile.displayName}
+                  </h3>
+                  <button
+                    onClick={() => setSelectedItem(null)}
+                    className="p-1 text-slate-500 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                  >
+                    <Icons.X className="w-4 h-4" />
+                  </button>
+                </div>
                 <p className="text-sm text-slate-400 mt-1">{selectedProfile.supplier}</p>
-                {selectedProfile.sku && (
-                  <span className="inline-block mt-2 px-2 py-0.5 bg-slate-800 text-slate-300 text-xs rounded font-mono">
-                    {selectedProfile.sku}
-                  </span>
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {selectedProfile.sku && (
+                    <span className="px-2 py-0.5 bg-slate-800 text-slate-300 text-xs rounded font-mono">
+                      SKU: {selectedProfile.sku}
+                    </span>
+                  )}
+                  {selectedProfile.asin && (
+                    <span className="px-2 py-0.5 bg-orange-500/20 text-orange-400 text-xs rounded font-mono">
+                      ASIN: {selectedProfile.asin}
+                    </span>
+                  )}
+                </div>
+                {selectedProfile.amazonUrl && (
+                  <a 
+                    href={selectedProfile.amazonUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 mt-2 text-xs text-blue-400 hover:underline"
+                  >
+                    View on Amazon <Icons.ExternalLink className="w-3 h-3" />
+                  </a>
                 )}
               </div>
-              <button
-                onClick={() => setSelectedItem(null)}
-                className="p-1.5 text-slate-500 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
-              >
-                <Icons.X className="w-5 h-5" />
-              </button>
             </div>
           </div>
 
@@ -701,25 +733,48 @@ const OrderCard: React.FC<{
                   lineItemId: item.id || `${order.id}-${idx}`,
                   orderId: order.id,
                   emailId: order.originalEmailId,
-                  name: item.name,
+                  name: item.amazonEnriched?.itemName || item.name,
                   normalizedName,
                   quantity: item.quantity,
                   unit: item.unit,
                   unitPrice: item.unitPrice,
-                  sku: item.sku,
+                  sku: item.sku || item.asin,
                 })}
                 className="w-full flex items-center gap-3 p-3 rounded-lg bg-slate-800/50 hover:bg-slate-700/50 transition-colors text-left"
               >
-                <div className="w-8 h-8 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0">
-                  <Icons.Box className="w-4 h-4 text-purple-400" />
-                </div>
+                {/* Amazon product image or fallback icon */}
+                {item.amazonEnriched?.imageUrl ? (
+                  <img 
+                    src={item.amazonEnriched.imageUrl} 
+                    alt=""
+                    className="w-12 h-12 rounded-lg object-contain bg-white flex-shrink-0"
+                  />
+                ) : (
+                  <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0">
+                    <Icons.Box className="w-5 h-5 text-purple-400" />
+                  </div>
+                )}
                 
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm text-white truncate">{item.name}</div>
-                  <div className="text-xs text-slate-500">
-                    {item.quantity} {item.unit}
-                    {item.unitPrice && ` @ $${item.unitPrice.toFixed(2)}`}
+                  <div className="text-sm text-white truncate">
+                    {item.amazonEnriched?.itemName || item.name}
                   </div>
+                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                    <span>{item.quantity} {item.unit}</span>
+                    {item.unitPrice && <span className="text-green-400 font-medium">@ ${item.unitPrice.toFixed(2)}</span>}
+                    {item.asin && <span className="text-orange-400">ASIN: {item.asin}</span>}
+                  </div>
+                  {item.amazonEnriched?.amazonUrl && (
+                    <a 
+                      href={item.amazonEnriched.amazonUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-xs text-blue-400 hover:underline"
+                    >
+                      View on Amazon →
+                    </a>
+                  )}
                 </div>
 
                 {profile && profile.orderCount > 1 && (

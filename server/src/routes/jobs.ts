@@ -801,7 +801,7 @@ function processAnalysisResult(
 }
 
 // Middleware to require authentication
-function requireAuth(req: Request, res: Response, next: Function) {
+function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (!req.session.userId) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
@@ -809,7 +809,7 @@ function requireAuth(req: Request, res: Response, next: Function) {
 }
 
 // Start a new processing job
-router.post('/start', requireAuth, async (req: Request, res: Response) => {
+router.post('/start', jobsLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = req.session.userId!;
     const accessToken = await getValidAccessToken(userId);
@@ -818,19 +818,17 @@ router.post('/start', requireAuth, async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Token expired, please re-authenticate' });
     }
 
-    // Get supplier domains from request body (optional)
-    const { supplierDomains } = req.body as { supplierDomains?: string[] };
-    
-    // Validate supplier domains if provided
-    const validDomains = supplierDomains?.filter(d => 
-      typeof d === 'string' && d.length > 0 && d.includes('.')
-    );
+    const { supplierDomains } = req.body as { supplierDomains?: unknown };
+    const validDomains = sanitizeSupplierDomains(supplierDomains);
+    if (supplierDomains && validDomains.length === 0) {
+      return res.status(400).json({ error: 'supplierDomains must contain valid hostnames' });
+    }
 
     // Create job
     const job = jobManager.createJob(userId);
     
-    if (validDomains && validDomains.length > 0) {
-      jobManager.addJobLog(job.id, `🚀 Job created for ${validDomains.length} selected suppliers`);
+    if (validDomains.length > 0) {
+      jobManager.addJobLog(job.id, `🚀 Job created for ${validDomains.length} selected suppliers: ${validDomains.join(', ')}`);
     } else {
       jobManager.addJobLog(job.id, '🚀 Job created, processing all suppliers...');
     }
@@ -839,10 +837,10 @@ router.post('/start', requireAuth, async (req: Request, res: Response) => {
     processEmailsInBackground(job.id, userId, accessToken, validDomains);
 
     // Return immediately with job ID
-    res.json({ 
+    res.status(202).json({ 
       jobId: job.id,
       status: 'started',
-      message: validDomains?.length 
+      message: validDomains.length 
         ? `Processing ${validDomains.length} suppliers in background`
         : 'Processing all suppliers in background'
     });
@@ -854,7 +852,7 @@ router.post('/start', requireAuth, async (req: Request, res: Response) => {
 
 // Amazon-first processing: immediately start processing Amazon emails
 // This runs BEFORE supplier discovery and extracts ASINs + enriches via PA API
-router.post('/start-amazon', requireAuth, async (req: Request, res: Response) => {
+router.post('/start-amazon', amazonLimiter, requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = req.session.userId!;
     const accessToken = await getValidAccessToken(userId);
@@ -870,7 +868,7 @@ router.post('/start-amazon', requireAuth, async (req: Request, res: Response) =>
     // Start Amazon processing in background
     processAmazonEmailsInBackground(job.id, userId, accessToken);
 
-    res.json({ 
+    res.status(202).json({ 
       jobId: job.id,
       status: 'started',
       message: 'Amazon processing started - ASIN extraction and enrichment'
@@ -1031,13 +1029,13 @@ async function processAmazonEmailsInBackground(
             unitPrice: parseFloat(data?.Price?.replace(/[^0-9.]/g, '') || '0'),
             asin: asin,
             amazonEnriched: data ? {
-              ASIN: data.ASIN,
-              ItemName: data.ItemName,
-              Price: data.Price,
-              ImageURL: data.ImageURL,
-              AmazonURL: data.AmazonURL,
-              UnitCount: data.UnitCount,
-              UPC: data.UPC,
+              asin: data.ASIN,
+              itemName: data.ItemName,
+              price: data.Price,
+              imageUrl: data.ImageURL,
+              amazonUrl: data.AmazonURL,
+              unitCount: data.UnitCount,
+              upc: data.UPC,
             } : undefined,
           });
         }

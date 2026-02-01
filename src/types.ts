@@ -33,6 +33,11 @@ export interface ItemVelocityProfile {
   displayName: string;
   supplier: string;
   sku?: string;
+  // Amazon enrichment
+  asin?: string;
+  imageUrl?: string;
+  amazonUrl?: string;
+  // Order history
   orders: {
     orderId: string;
     emailId: string;
