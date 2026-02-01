@@ -11,7 +11,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth }) => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-white via-arda-bg-secondary to-white flex items-center justify-center p-4">
       {/* Background decoration */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-orange-500/10 rounded-full blur-3xl" />
@@ -24,15 +24,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth }) => {
           <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl shadow-lg shadow-orange-500/25 mb-4">
             <Icons.Inbox className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-white mb-2">OrderPulse</h1>
-          <p className="text-slate-400">AI-Powered Supply Chain Intelligence</p>
+          <h1 className="text-3xl font-bold text-arda-text-primary mb-2">OrderPulse</h1>
+          <p className="text-arda-text-muted">AI-Powered Supply Chain Intelligence</p>
         </div>
 
         {/* Login Card */}
-        <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700 rounded-2xl p-8 shadow-2xl">
+        <div className="bg-white/80 backdrop-blur-xl border border-arda-border rounded-2xl p-8 shadow-2xl">
           <div className="text-center mb-6">
-            <h2 className="text-xl font-semibold text-white mb-2">Welcome</h2>
-            <p className="text-slate-400 text-sm">
+            <h2 className="text-xl font-semibold text-arda-text-primary mb-2">Welcome</h2>
+            <p className="text-arda-text-muted text-sm">
               Sign in with your Google account to automatically analyze your purchase orders
             </p>
           </div>
@@ -40,13 +40,13 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth }) => {
           {onCheckingAuth ? (
             <div className="flex flex-col items-center py-4">
               <div className="animate-spin w-8 h-8 border-2 border-orange-500 border-t-transparent rounded-full mb-3" />
-              <span className="text-slate-400 text-sm">Checking authentication...</span>
+              <span className="text-arda-text-muted text-sm">Checking authentication...</span>
             </div>
           ) : (
             <>
               <button
                 onClick={handleGoogleLogin}
-                className="w-full flex items-center justify-center gap-3 bg-white hover:bg-gray-50 text-gray-800 font-medium py-3 px-4 rounded-xl transition-all shadow-lg hover:shadow-xl"
+                className="w-full flex items-center justify-center gap-3 bg-white hover:bg-gray-50 text-gray-800 font-medium py-3 px-4 rounded-xl transition-all shadow-lg hover:shadow-xl border border-arda-border"
               >
                 <svg className="w-5 h-5" viewBox="0 0 24 24">
                   <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -58,7 +58,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth }) => {
               </button>
 
               <div className="mt-6 text-center">
-                <p className="text-slate-500 text-xs">
+                <p className="text-arda-text-muted text-xs">
                   We'll read your Gmail to find purchase orders and invoices.
                   <br />
                   Your data stays private and secure.
@@ -70,15 +70,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth }) => {
 
         {/* Features */}
         <div className="mt-8 grid grid-cols-3 gap-4 text-center">
-          <div className="text-slate-400">
+          <div className="text-arda-text-muted">
             <Icons.Mail className="w-5 h-5 mx-auto mb-2 text-orange-400" />
             <span className="text-xs">Email Analysis</span>
           </div>
-          <div className="text-slate-400">
+          <div className="text-arda-text-muted">
             <Icons.TrendingUp className="w-5 h-5 mx-auto mb-2 text-blue-400" />
             <span className="text-xs">Order Tracking</span>
           </div>
-          <div className="text-slate-400">
+          <div className="text-arda-text-muted">
             <Icons.Calendar className="w-5 h-5 mx-auto mb-2 text-green-400" />
             <span className="text-xs">Cadence Insights</span>
           </div>

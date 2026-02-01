@@ -446,12 +446,15 @@ export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryIte
   orders.forEach(order => {
     order.items.forEach(lineItem => {
       // Normalize name (simple lowercasing and trimming for this demo)
-      const key = lineItem.name.trim().toLowerCase();
+      const key = lineItem.normalizedName || lineItem.name.trim().toLowerCase();
+      
+      // Use Amazon-enriched name if available, otherwise use original name
+      const displayName = lineItem.amazonEnriched?.itemName || lineItem.name;
       
       if (!itemMap.has(key)) {
         itemMap.set(key, {
           id: key,
-          name: lineItem.name,
+          name: displayName,
           supplier: order.supplier,
           totalQuantityOrdered: 0,
           orderCount: 0, // This will count unique ORDERS containing this item
@@ -464,6 +467,9 @@ export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryIte
           lastPrice: lineItem.unitPrice || 0,
           history: [],
           orderIds: new Set<string>(), // Track unique order IDs
+          // Amazon enrichment fields
+          imageUrl: lineItem.amazonEnriched?.imageUrl,
+          productUrl: lineItem.amazonEnriched?.amazonUrl,
         });
       }
 
@@ -481,6 +487,18 @@ export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryIte
       
       // Update price
       if (lineItem.unitPrice) entry.lastPrice = lineItem.unitPrice;
+      
+      // Update Amazon enrichment if we have it now but didn't before
+      if (!entry.imageUrl && lineItem.amazonEnriched?.imageUrl) {
+        entry.imageUrl = lineItem.amazonEnriched.imageUrl;
+      }
+      if (!entry.productUrl && lineItem.amazonEnriched?.amazonUrl) {
+        entry.productUrl = lineItem.amazonEnriched.amazonUrl;
+      }
+      // Prefer Amazon-enriched name over original
+      if (lineItem.amazonEnriched?.itemName && entry.name !== lineItem.amazonEnriched.itemName) {
+        entry.name = lineItem.amazonEnriched.itemName;
+      }
 
       // Add to history (one entry per line item occurrence)
       entry.history.push({ date: order.orderDate, quantity: lineItem.quantity });

@@ -46,24 +46,24 @@ const CustomTooltip = ({ active, payload }: any) => {
     const date = new Date(order.orderDate);
     
     return (
-      <div className="bg-slate-800 border border-slate-700 rounded-lg p-3 shadow-lg">
-        <div className="text-white font-semibold mb-2">{order.supplier}</div>
+      <div className="bg-white border border-arda-border rounded-lg p-3 shadow-lg">
+        <div className="text-arda-text-primary font-semibold mb-2">{order.supplier}</div>
         <div className="text-sm space-y-1">
-          <div className="text-slate-300">
-            Date: <span className="text-white">{date.toLocaleDateString('en-US', {
+          <div className="text-arda-text-secondary">
+            Date: <span className="text-arda-text-primary">{date.toLocaleDateString('en-US', {
               year: 'numeric',
               month: 'short',
               day: 'numeric',
             })}</span>
           </div>
-          <div className="text-slate-300">
-            Amount: <span className="text-white">${order.totalAmount?.toFixed(2) || 'N/A'}</span>
+          <div className="text-arda-text-secondary">
+            Amount: <span className="text-arda-text-primary">${order.totalAmount?.toFixed(2) || 'N/A'}</span>
           </div>
-          <div className="text-slate-300">
-            Items: <span className="text-white">{order.items.length}</span>
+          <div className="text-arda-text-secondary">
+            Items: <span className="text-arda-text-primary">{order.items.length}</span>
           </div>
           {order.confidence < 1 && (
-            <div className="text-slate-400 text-xs mt-1">
+            <div className="text-arda-text-muted text-xs mt-1">
               Confidence: {(order.confidence * 100).toFixed(0)}%
             </div>
           )}

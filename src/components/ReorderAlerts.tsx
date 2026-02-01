@@ -100,21 +100,21 @@ export const ReorderAlerts: React.FC<ReorderAlertsProps> = ({
 
   if (alertItems.length === 0) {
     return (
-      <div className="p-4 rounded-lg border border-slate-800 bg-slate-900/50">
+      <div className="p-4 rounded-lg border border-arda-border bg-white">
         <div className="flex items-center gap-2 mb-2">
           <Icons.CheckCircle2 className="w-5 h-5 text-green-400" />
-          <h3 className="text-sm font-semibold text-white">Reorder Alerts</h3>
+          <h3 className="text-sm font-semibold text-arda-text-primary">Reorder Alerts</h3>
         </div>
-        <p className="text-xs text-slate-400">No items need reordering in the next 14 days.</p>
+        <p className="text-xs text-arda-text-muted">No items need reordering in the next 14 days.</p>
       </div>
     );
   }
 
   return (
-    <div className="p-4 rounded-lg border border-slate-800 bg-slate-900/50">
+    <div className="p-4 rounded-lg border border-arda-border bg-white">
       <div className="flex items-center gap-2 mb-3">
         <Icons.AlertCircle className="w-5 h-5 text-orange-400" />
-        <h3 className="text-sm font-semibold text-white">Reorder Alerts</h3>
+        <h3 className="text-sm font-semibold text-arda-text-primary">Reorder Alerts</h3>
         <span className="text-xs px-2 py-0.5 bg-orange-500/20 text-orange-400 rounded-full">
           {alertItems.length}
         </span>
@@ -137,10 +137,10 @@ export const ReorderAlerts: React.FC<ReorderAlertsProps> = ({
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-white truncate">
+                    <div className="text-sm font-medium text-arda-text-primary truncate">
                       {item.profile.displayName}
                     </div>
-                    <div className="text-xs text-slate-400 mt-0.5">
+                    <div className="text-xs text-arda-text-muted mt-0.5">
                       {item.profile.supplier}
                     </div>
                     <div className="flex items-center gap-3 mt-2">
@@ -151,14 +151,14 @@ export const ReorderAlerts: React.FC<ReorderAlertsProps> = ({
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5">
-                        <Icons.Zap className="w-3.5 h-3.5 text-slate-400" />
-                        <span className="text-xs text-slate-400">
+                        <Icons.Zap className="w-3.5 h-3.5 text-arda-text-muted" />
+                        <span className="text-xs text-arda-text-muted">
                           {item.profile.dailyBurnRate.toFixed(1)}/day
                         </span>
                       </div>
                     </div>
                   </div>
-                  <Icons.ChevronRight className="w-4 h-4 text-slate-500 flex-shrink-0 mt-0.5" />
+                  <Icons.ChevronRight className="w-4 h-4 text-arda-text-muted flex-shrink-0 mt-0.5" />
                 </div>
               </div>
             </div>
@@ -167,13 +167,13 @@ export const ReorderAlerts: React.FC<ReorderAlertsProps> = ({
       </div>
 
       {hasMore && (
-        <div className="mt-3 pt-3 border-t border-slate-800">
+        <div className="mt-3 pt-3 border-t border-arda-border">
           <button
             onClick={() => {
               // Could navigate to a full alerts view or expand the list
               console.log('View all alerts');
             }}
-            className="w-full flex items-center justify-center gap-2 text-xs text-slate-400 hover:text-white transition-colors py-1.5"
+            className="w-full flex items-center justify-center gap-2 text-xs text-arda-text-muted hover:text-arda-text-primary transition-colors py-1.5"
           >
             <span>View All {alertItems.length} Alerts</span>
             <Icons.ArrowRight className="w-3.5 h-3.5" />

@@ -78,26 +78,26 @@ export const VelocityBadge: React.FC<VelocityBadgeProps> = ({
         <span className={`text-sm font-semibold ${velocityClass.color}`}>
           {dailyBurnRate.toFixed(1)}/day
         </span>
-        <span className="text-xs text-slate-500">
+        <span className="text-xs text-arda-text-muted">
           ({velocityClass.label})
         </span>
       </div>
       
       {/* Divider */}
-      <div className="w-px h-4 bg-slate-600" />
+      <div className="w-px h-4 bg-arda-border" />
       
       {/* Cadence */}
       <div className="flex items-center gap-1.5">
-        <Icons.Calendar className="w-4 h-4 text-slate-400" />
-        <span className="text-sm text-slate-300">
+        <Icons.Calendar className="w-4 h-4 text-arda-text-muted" />
+        <span className="text-sm text-arda-text-secondary">
           {Math.round(averageCadenceDays)} days
         </span>
       </div>
       
       {/* Order Count */}
       <div className="flex items-center gap-1.5">
-        <Icons.Package className="w-4 h-4 text-slate-400" />
-        <span className="text-sm text-slate-300">
+        <Icons.Package className="w-4 h-4 text-arda-text-muted" />
+        <span className="text-sm text-arda-text-secondary">
           {orderCount} order{orderCount !== 1 ? 's' : ''}
         </span>
       </div>
@@ -105,10 +105,10 @@ export const VelocityBadge: React.FC<VelocityBadgeProps> = ({
       {/* Next Predicted Order */}
       {nextPredictedOrder && (
         <>
-          <div className="w-px h-4 bg-slate-600" />
+          <div className="w-px h-4 bg-arda-border" />
           <div className="flex items-center gap-1.5">
-            <Icons.Clock className="w-4 h-4 text-slate-400" />
-            <span className="text-sm text-slate-300">
+            <Icons.Clock className="w-4 h-4 text-arda-text-muted" />
+            <span className="text-sm text-arda-text-secondary">
               Next: {new Date(nextPredictedOrder).toLocaleDateString()}
             </span>
           </div>
