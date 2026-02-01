@@ -16,18 +16,32 @@ export interface EmailPreview {
   snippet?: string;
 }
 
+export interface AmazonEnrichedData {
+  ASIN: string;
+  ItemName?: string;
+  Price?: string;
+  ImageURL?: string;
+  AmazonURL?: string;
+  UnitCount?: number;
+  UPC?: string;
+}
+
+export interface ProcessedOrderItem {
+  id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  asin?: string;
+  amazonEnriched?: AmazonEnrichedData;
+}
+
 export interface ProcessedOrder {
   id: string;
   supplier: string;
   orderDate: string;
   totalAmount: number;
-  items: Array<{
-    id: string;
-    name: string;
-    quantity: number;
-    unit: string;
-    unitPrice: number;
-  }>;
+  items: ProcessedOrderItem[];
   confidence: number;
 }
 

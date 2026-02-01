@@ -155,6 +155,23 @@ export interface JobStatus {
 }
 
 export const jobsApi = {
+  // Start Amazon-first processing immediately
+  startAmazon: async (): Promise<{ jobId: string }> => {
+    const response = await fetch(`${API_BASE_URL}/api/jobs/start-amazon`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!response.ok) {
+      const error: ApiError = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || `HTTP ${response.status}`);
+    }
+    return response.json();
+  },
+  
+  // Start processing for selected suppliers
   startJob: async (supplierDomains?: string[]): Promise<{ jobId: string }> => {
     const response = await fetch(`${API_BASE_URL}/api/jobs/start`, {
       method: 'POST',

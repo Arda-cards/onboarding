@@ -8,6 +8,10 @@ import {
   Job,
   ProcessedOrder,
 } from '../services/jobManager.js';
+import { 
+  extractAsinsFromEmail, 
+  getAmazonItemDetails 
+} from '../services/amazon.js';
 
 const router = Router();
 
@@ -651,6 +655,321 @@ router.post('/start', requireAuth, async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to start processing job' });
   }
 });
+
+// Amazon-first processing: immediately start processing Amazon emails
+// This runs BEFORE supplier discovery and extracts ASINs + enriches via PA API
+router.post('/start-amazon', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const userId = req.session.userId!;
+    const accessToken = await getValidAccessToken(userId);
+    
+    if (!accessToken) {
+      return res.status(401).json({ error: 'Token expired, please re-authenticate' });
+    }
+
+    // Create job specifically for Amazon
+    const job = jobManager.createJob(userId);
+    jobManager.addJobLog(job.id, '🛒 Starting Amazon-first processing...');
+
+    // Start Amazon processing in background
+    processAmazonEmailsInBackground(job.id, userId, accessToken);
+
+    res.json({ 
+      jobId: job.id,
+      status: 'started',
+      message: 'Amazon processing started - ASIN extraction and enrichment'
+    });
+  } catch (error: any) {
+    console.error('Failed to start Amazon job:', error);
+    res.status(500).json({ error: 'Failed to start Amazon processing' });
+  }
+});
+
+// Background processor specifically for Amazon emails with ASIN extraction
+async function processAmazonEmailsInBackground(
+  jobId: string,
+  userId: string,
+  accessToken: string
+) {
+  const job = jobManager.getJob(jobId);
+  if (!job) return;
+
+  try {
+    jobManager.updateJob(jobId, { status: 'running' });
+    jobManager.addJobLog(jobId, '📧 Fetching Amazon order emails...');
+    jobManager.updateJobProgress(jobId, { currentTask: 'Fetching Amazon emails...' });
+
+    // Set up Gmail client
+    const oauth2Client = new google.auth.OAuth2();
+    oauth2Client.setCredentials({ access_token: accessToken });
+    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
+
+    // Calculate 6 months ago
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const afterDate = sixMonthsAgo.toISOString().split('T')[0].replace(/-/g, '/');
+
+    // Amazon-specific query - look for order/shipment emails from Amazon
+    const query = `from:amazon.com subject:(order OR shipment OR shipped OR delivery) after:${afterDate}`;
+    
+    const listResponse = await gmail.users.messages.list({
+      userId: 'me',
+      q: query,
+      maxResults: 100, // Limit for faster processing
+    });
+
+    const messageIds = listResponse.data.messages || [];
+    jobManager.addJobLog(jobId, `📬 Found ${messageIds.length} Amazon emails`);
+    
+    if (messageIds.length === 0) {
+      jobManager.addJobLog(jobId, '⚠️ No Amazon order emails found');
+      jobManager.updateJob(jobId, { status: 'completed' });
+      return;
+    }
+
+    jobManager.updateJobProgress(jobId, { 
+      total: messageIds.length,
+      processed: 0,
+      currentTask: 'Extracting ASINs from Amazon emails...' 
+    });
+
+    // Collect all ASINs from emails
+    const allAsins: Set<string> = new Set();
+    const emailAsinMap: Map<string, { subject: string; date: string; asins: string[] }> = new Map();
+    
+    // Initialize Gemini model for order extraction
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+
+    for (let i = 0; i < messageIds.length; i++) {
+      const msg = messageIds[i];
+      
+      try {
+        const fullMsg = await gmail.users.messages.get({
+          userId: 'me',
+          id: msg.id!,
+          format: 'full',
+        });
+
+        const headers = fullMsg.data.payload?.headers || [];
+        const getHeader = (name: string) => 
+          headers.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+        
+        const subject = getHeader('subject');
+        const date = getHeader('date');
+        
+        // Get email body
+        let body = '';
+        const payload = fullMsg.data.payload;
+        
+        if (payload?.body?.data) {
+          body = Buffer.from(payload.body.data, 'base64').toString('utf-8');
+        } else if (payload?.parts) {
+          for (const part of payload.parts) {
+            if (part.mimeType === 'text/plain' && part.body?.data) {
+              body = Buffer.from(part.body.data, 'base64').toString('utf-8');
+              break;
+            } else if (part.mimeType === 'text/html' && part.body?.data) {
+              body = Buffer.from(part.body.data, 'base64').toString('utf-8');
+            }
+          }
+        }
+
+        // Extract ASINs from this email
+        const asins = extractAsinsFromEmail(body, subject);
+        
+        if (asins.length > 0) {
+          asins.forEach(asin => allAsins.add(asin));
+          emailAsinMap.set(msg.id!, { subject, date, asins });
+          jobManager.addJobLog(jobId, `📦 Found ${asins.length} ASINs in: ${subject.substring(0, 50)}...`);
+        }
+
+        // Update progress
+        jobManager.updateJobProgress(jobId, {
+          processed: i + 1,
+          currentTask: `Scanning email ${i + 1}/${messageIds.length}... Found ${allAsins.size} ASINs`
+        });
+
+      } catch (error) {
+        console.error(`Error processing Amazon email ${msg.id}:`, error);
+      }
+    }
+
+    jobManager.addJobLog(jobId, `🎯 Total unique ASINs found: ${allAsins.size}`);
+
+    // Now enrich with Amazon Product Advertising API
+    if (allAsins.size > 0) {
+      jobManager.updateJobProgress(jobId, {
+        currentTask: `Enriching ${allAsins.size} products via Amazon API...`
+      });
+      jobManager.addJobLog(jobId, '🛒 Calling Amazon Product Advertising API...');
+
+      const asinArray = Array.from(allAsins);
+      const enrichedData = await getAmazonItemDetails(asinArray.slice(0, 50)); // Limit to 50 for now
+
+      jobManager.addJobLog(jobId, `✅ Enriched ${enrichedData.size} products with images, prices, titles`);
+
+      // Now use AI to extract full order details, with enriched Amazon data
+      jobManager.updateJobProgress(jobId, {
+        currentTask: 'AI analyzing order details...'
+      });
+      
+      // Process in small batches with AI
+      const BATCH_SIZE = 5;
+      let ordersExtracted = 0;
+      
+      for (let i = 0; i < messageIds.length; i += BATCH_SIZE) {
+        const batchMessageIds = messageIds.slice(i, i + BATCH_SIZE);
+        
+        for (const msg of batchMessageIds) {
+          try {
+            const fullMsg = await gmail.users.messages.get({
+              userId: 'me',
+              id: msg.id!,
+              format: 'full',
+            });
+
+            const headers = fullMsg.data.payload?.headers || [];
+            const getHeader = (name: string) => 
+              headers.find(h => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+            
+            const subject = getHeader('subject');
+            const sender = getHeader('from');
+            
+            // Get email body
+            let body = '';
+            const payload = fullMsg.data.payload;
+            
+            if (payload?.body?.data) {
+              body = Buffer.from(payload.body.data, 'base64').toString('utf-8');
+            } else if (payload?.parts) {
+              for (const part of payload.parts) {
+                if (part.mimeType === 'text/plain' && part.body?.data) {
+                  body = Buffer.from(part.body.data, 'base64').toString('utf-8');
+                  break;
+                } else if (part.mimeType === 'text/html' && part.body?.data) {
+                  body = Buffer.from(part.body.data, 'base64').toString('utf-8');
+                }
+              }
+            }
+
+            // Get ASINs we found for this email
+            const emailAsins = emailAsinMap.get(msg.id!)?.asins || [];
+            
+            // Build enrichment context for AI
+            let enrichmentContext = '';
+            for (const asin of emailAsins) {
+              const data = enrichedData.get(asin);
+              if (data) {
+                enrichmentContext += `\nASIN ${asin}: ${data.ItemName || 'Unknown'} - $${data.Price || 'N/A'}`;
+              }
+            }
+
+            // AI extraction with Amazon context
+            const prompt = `Extract order information from this Amazon email.
+            
+Subject: ${subject}
+Sender: ${sender}
+
+Known ASINs and their details:${enrichmentContext || '\nNo enriched data available'}
+
+Email content:
+${body.substring(0, 8000)}
+
+Return ONLY valid JSON:
+{
+  "isOrder": true/false,
+  "vendor": "Amazon",
+  "orderNumber": "string or null",
+  "orderDate": "YYYY-MM-DD or null",
+  "total": number or null,
+  "items": [
+    {
+      "name": "product name",
+      "sku": "item number or null",
+      "asin": "ASIN if known",
+      "quantity": number,
+      "price": number or null
+    }
+  ]
+}`;
+
+            const result = await model.generateContent(prompt);
+            const responseText = result.response.text();
+            
+            // Parse JSON from response
+            const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+              const parsed = JSON.parse(jsonMatch[0]);
+              
+              if (parsed.isOrder && parsed.items?.length > 0) {
+                // Enrich items with Amazon data
+                const enrichedItems = parsed.items.map((item: any) => {
+                  const asin = item.asin || emailAsins.find((a: string) => 
+                    item.name?.toLowerCase().includes(enrichedData.get(a)?.ItemName?.toLowerCase().substring(0, 20) || '')
+                  );
+                  
+                  const amazonData = asin ? enrichedData.get(asin) : null;
+                  
+                  return {
+                    ...item,
+                    asin: asin || null,
+                    amazonEnriched: amazonData ? {
+                      ASIN: amazonData.ASIN,
+                      ItemName: amazonData.ItemName,
+                      Price: amazonData.Price,
+                      ImageURL: amazonData.ImageURL,
+                      AmazonURL: amazonData.AmazonURL,
+                      UnitCount: amazonData.UnitCount,
+                      UPC: amazonData.UPC,
+                    } : null,
+                  };
+                });
+
+                const order: ProcessedOrder = {
+                  id: `amazon-${Date.now()}-${ordersExtracted}`,
+                  supplier: 'Amazon',
+                  orderDate: parsed.orderDate || new Date().toISOString().split('T')[0],
+                  totalAmount: parsed.total || 0,
+                  items: enrichedItems.map((item: any, idx: number) => ({
+                    id: `item-${Date.now()}-${idx}`,
+                    name: item.name || 'Unknown Item',
+                    quantity: item.quantity || 1,
+                    unit: 'each',
+                    unitPrice: item.price || 0,
+                    asin: item.asin,
+                    amazonEnriched: item.amazonEnriched,
+                  })),
+                  confidence: 0.9,
+                };
+
+                jobManager.addJobOrder(jobId, order);
+                ordersExtracted++;
+                
+                jobManager.addJobLog(jobId, `✅ Extracted: ${parsed.orderNumber || 'Amazon order'} (${enrichedItems.length} items)`);
+              }
+            }
+          } catch (error) {
+            console.error('AI extraction error:', error);
+          }
+        }
+
+        jobManager.updateJobProgress(jobId, {
+          processed: Math.min(i + BATCH_SIZE, messageIds.length),
+          currentTask: `AI analyzed ${Math.min(i + BATCH_SIZE, messageIds.length)}/${messageIds.length} emails, ${ordersExtracted} orders found`
+        });
+      }
+
+      jobManager.addJobLog(jobId, `🎉 Amazon processing complete: ${ordersExtracted} orders extracted`);
+    }
+
+    jobManager.updateJob(jobId, { status: 'completed' });
+    
+  } catch (error: any) {
+    console.error('Amazon processing error:', error);
+    jobManager.addJobLog(jobId, `❌ Error: ${error.message}`);
+    jobManager.updateJob(jobId, { status: 'failed', error: error.message });
+  }
+}
 
 // Get job status (for polling)
 router.get('/status', requireAuth, async (req: Request, res: Response) => {
