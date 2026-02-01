@@ -221,7 +221,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     }
   }, [amazonJobId, priorityJobId]);
 
-  // Rotate lean wisdom while processing (every 8 seconds)
+  // Rotate lean wisdom (every 10 seconds, always running)
   const isCurrentlyProcessing = Boolean(
     (!isAmazonComplete && amazonJobId) || 
     (!isPriorityComplete && priorityJobId) || 
@@ -229,14 +229,12 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   );
   
   useEffect(() => {
-    if (!isCurrentlyProcessing) return;
-    
     const interval = setInterval(() => {
       setWisdomIndex(prev => (prev + 1) % LEAN_WISDOM.length);
-    }, 8000);
+    }, 10000);
     
     return () => clearInterval(interval);
-  }, [isCurrentlyProcessing]);
+  }, []);
 
   // 1. START PRIORITY SUPPLIERS - STAGGERED TO AVOID RATE LIMITS
   useEffect(() => {
@@ -598,27 +596,6 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         </div>
       )}
 
-      {/* Lean Wisdom - Displayed while batch processing (the irony!) */}
-      {isAnyProcessing && (
-        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-5 transition-all duration-500">
-          <div className="flex items-start gap-4">
-            <div className="flex-shrink-0 w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
-              <Icons.Lightbulb className="w-5 h-5 text-amber-600" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-amber-900 mb-1">
-                While you wait, a word about batching...
-              </p>
-              <blockquote className="text-amber-800 italic text-sm leading-relaxed">
-                "{LEAN_WISDOM[wisdomIndex].quote}"
-              </blockquote>
-              <p className="text-xs text-amber-600 mt-2 font-medium">
-                {LEAN_WISDOM[wisdomIndex].attribution}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Live Stats Bar - The "wow" moment */}
       {(allItems.length > 0 || totalOrders > 0) && (
@@ -985,6 +962,26 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
             <span className="text-arda-text-secondary">{discoveryProgress}</span>
           </div>
         )}
+
+        {/* Lean Wisdom - Always visible below Other Suppliers */}
+        <div className="mt-6 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-5">
+          <div className="flex items-start gap-4">
+            <div className="flex-shrink-0 w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+              <Icons.Lightbulb className="w-5 h-5 text-amber-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-amber-900 mb-1">
+                A word about batching...
+              </p>
+              <blockquote className="text-amber-800 italic text-sm leading-relaxed">
+                "{LEAN_WISDOM[wisdomIndex].quote}"
+              </blockquote>
+              <p className="text-xs text-amber-600 mt-2 font-medium">
+                {LEAN_WISDOM[wisdomIndex].attribution}
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Insights Preview Card - Tease value */}
