@@ -31,12 +31,12 @@ const OTHER_PRIORITY_SUPPLIERS: DiscoveredSupplier[] = [
 ];
 
 const CATEGORY_COLORS: Record<string, { bg: string; text: string; icon: string }> = {
-  industrial: { bg: 'bg-blue-500/20', text: 'text-blue-400', icon: '🏭' },
-  retail: { bg: 'bg-green-500/20', text: 'text-green-400', icon: '🛒' },
-  electronics: { bg: 'bg-cyan-500/20', text: 'text-cyan-400', icon: '⚡' },
-  office: { bg: 'bg-purple-500/20', text: 'text-purple-400', icon: '📎' },
-  food: { bg: 'bg-orange-500/20', text: 'text-orange-400', icon: '🍽️' },
-  unknown: { bg: 'bg-slate-500/20', text: 'text-slate-400', icon: '📦' },
+  industrial: { bg: 'bg-blue-50', text: 'text-blue-600', icon: '🏭' },
+  retail: { bg: 'bg-green-50', text: 'text-green-600', icon: '🛒' },
+  electronics: { bg: 'bg-cyan-50', text: 'text-cyan-600', icon: '⚡' },
+  office: { bg: 'bg-purple-50', text: 'text-purple-600', icon: '📎' },
+  food: { bg: 'bg-orange-50', text: 'text-orange-600', icon: '🍽️' },
+  unknown: { bg: 'bg-gray-50', text: 'text-gray-600', icon: '📦' },
 };
 
 export const SupplierSetup: React.FC<SupplierSetupProps> = ({
@@ -72,10 +72,8 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   const allSuppliers = useCallback(() => {
     const merged = new Map<string, DiscoveredSupplier>();
     
-    // Add priority suppliers first
     OTHER_PRIORITY_SUPPLIERS.forEach(s => merged.set(s.domain, { ...s }));
     
-    // Merge discovered suppliers (excluding Amazon since it's auto-processed)
     discoveredSuppliers
       .filter(s => !s.domain.includes('amazon'))
       .forEach(s => {
@@ -91,7 +89,6 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         }
       });
     
-    // Sort: priority first, then by score
     return Array.from(merged.values()).sort((a, b) => {
       const aPriority = OTHER_PRIORITY_SUPPLIERS.some(p => p.domain === a.domain);
       const bPriority = OTHER_PRIORITY_SUPPLIERS.some(p => p.domain === b.domain);
@@ -157,7 +154,6 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     }
   }, [amazonJobId]);
 
-  // Start Amazon polling
   useEffect(() => {
     if (amazonJobId && !isAmazonComplete) {
       pollAmazonStatus();
@@ -171,7 +167,6 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     }
   }, [amazonJobId, isAmazonComplete, pollAmazonStatus]);
 
-  // Poll for other suppliers job status
   const pollJobStatus = useCallback(async () => {
     if (!currentJobId) return;
     
@@ -204,7 +199,6 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     }
   }, [currentJobId]);
 
-  // Start polling when scanning other suppliers
   useEffect(() => {
     if (isScanning && currentJobId) {
       pollJobStatus();
@@ -230,7 +224,6 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       setDiscoveryProgress(`Found ${response.suppliers.length} potential suppliers`);
       setDiscoveredSuppliers(response.suppliers);
       
-      // Auto-enable all recommended suppliers (except Amazon)
       const newEnabled = new Set(enabledSuppliers);
       response.suppliers
         .filter(s => s.isRecommended && !s.domain.includes('amazon'))
@@ -282,7 +275,6 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   };
 
   const handleComplete = () => {
-    // Combine Amazon orders with other orders
     const allOrders = [...amazonOrders, ...otherOrders];
     onScanComplete(allOrders);
   };
@@ -292,19 +284,18 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   const totalOrders = amazonOrders.length + otherOrders.length;
   const isAnyProcessing = (!isAmazonComplete && amazonJobId) || isScanning;
 
-  // Calculate Amazon progress
   const amazonProgress = amazonStatus?.progress;
   const amazonProgressPercent = amazonProgress 
     ? (amazonProgress.processed / amazonProgress.total) * 100 
     : 0;
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Import Orders</h1>
-          <p className="text-slate-400 mt-1">
+          <h1 className="text-2xl font-bold text-arda-text-primary">Import Orders</h1>
+          <p className="text-arda-text-secondary mt-1">
             Amazon processing starts automatically. Select other suppliers below.
           </p>
         </div>
@@ -312,7 +303,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
           {!isAnyProcessing && totalOrders > 0 && (
             <button
               onClick={handleComplete}
-              className="bg-green-500 hover:bg-green-600 text-white px-5 py-2 rounded-lg font-medium transition-colors"
+              className="bg-arda-success hover:bg-green-600 text-white px-5 py-2 rounded-lg font-medium transition-colors"
             >
               Continue with {totalOrders} orders →
             </button>
@@ -320,7 +311,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
           {!isAnyProcessing && (
             <button
               onClick={onSkip}
-              className="text-sm text-slate-400 hover:text-white transition-colors"
+              className="text-sm text-arda-text-muted hover:text-arda-text-primary transition-colors"
             >
               Skip
             </button>
@@ -328,53 +319,76 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         </div>
       </div>
 
-      {/* Amazon Processing Card - Always visible at top */}
+      {/* Amazon Processing Card */}
       <div className={`border rounded-xl p-5 ${
-        isAmazonComplete 
-          ? amazonOrders.length > 0 
-            ? 'bg-green-500/10 border-green-500/30' 
-            : 'bg-slate-800/50 border-slate-700'
-          : 'bg-orange-500/10 border-orange-500/30'
+        amazonError
+          ? 'bg-red-50 border-red-200'
+          : isAmazonComplete 
+            ? amazonOrders.length > 0 
+              ? 'bg-green-50 border-green-200' 
+              : 'bg-gray-50 border-gray-200'
+            : 'bg-orange-50 border-orange-200'
       }`}>
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-3">
-            {!isAmazonComplete ? (
-              <Icons.Loader2 className="w-5 h-5 text-orange-400 animate-spin" />
+            {amazonError ? (
+              <Icons.AlertCircle className="w-5 h-5 text-red-500" />
+            ) : !isAmazonComplete ? (
+              <Icons.Loader2 className="w-5 h-5 text-orange-500 animate-spin" />
             ) : amazonOrders.length > 0 ? (
-              <Icons.CheckCircle2 className="w-5 h-5 text-green-400" />
+              <Icons.CheckCircle2 className="w-5 h-5 text-green-500" />
             ) : (
-              <Icons.AlertCircle className="w-5 h-5 text-slate-500" />
+              <Icons.AlertCircle className="w-5 h-5 text-gray-400" />
             )}
             <div>
-              <span className="text-lg font-semibold text-white">🛒 Amazon</span>
-              <span className="text-slate-400 ml-2 text-sm">
-                {!isAmazonComplete 
-                  ? 'Processing with ASIN enrichment...'
-                  : amazonOrders.length > 0 
-                    ? `${amazonOrders.length} orders imported`
-                    : 'No Amazon orders found'
+              <span className="text-lg font-semibold text-arda-text-primary">🛒 Amazon</span>
+              <span className={`ml-2 text-sm ${
+                amazonError ? 'text-red-600' : 'text-arda-text-secondary'
+              }`}>
+                {amazonError 
+                  ? amazonError
+                  : !isAmazonComplete 
+                    ? 'Processing with ASIN enrichment...'
+                    : amazonOrders.length > 0 
+                      ? `${amazonOrders.length} orders imported`
+                      : 'No Amazon orders found'
                 }
               </span>
             </div>
           </div>
           
-          {amazonProgress && !isAmazonComplete && (
-            <span className="text-slate-400 text-sm font-mono">
+          {amazonProgress && !isAmazonComplete && !amazonError && (
+            <span className="text-arda-text-muted text-sm font-mono">
               {amazonProgress.processed} / {amazonProgress.total}
             </span>
+          )}
+          
+          {amazonError && (
+            <button
+              onClick={() => {
+                setAmazonError(null);
+                setIsAmazonComplete(false);
+                jobsApi.startAmazon()
+                  .then(response => setAmazonJobId(response.jobId))
+                  .catch(err => setAmazonError(err.message));
+              }}
+              className="text-sm bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded transition-colors"
+            >
+              Retry
+            </button>
           )}
         </div>
 
         {/* Amazon Progress Bar */}
-        {!isAmazonComplete && amazonProgress && (
+        {!isAmazonComplete && amazonProgress && !amazonError && (
           <div className="mb-3">
-            <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+            <div className="h-2 bg-orange-100 rounded-full overflow-hidden">
               <div 
                 className="h-full bg-gradient-to-r from-orange-500 to-yellow-400 transition-all duration-300"
                 style={{ width: `${amazonProgressPercent}%` }}
               />
             </div>
-            <div className="text-xs text-slate-500 mt-1">
+            <div className="text-xs text-arda-text-muted mt-1">
               {amazonProgress.currentTask}
             </div>
           </div>
@@ -384,8 +398,8 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         {amazonOrders.length > 0 && (
           <div className="flex flex-wrap gap-2 mt-2">
             {amazonOrders.slice(-5).reverse().map((order, i) => (
-              <div key={order.id || i} className="text-xs bg-slate-900/50 text-slate-300 px-2 py-1 rounded flex items-center gap-1">
-                <span className="text-green-400">✓</span>
+              <div key={order.id || i} className="text-xs bg-white border border-green-200 text-arda-text-secondary px-2 py-1 rounded flex items-center gap-1">
+                <span className="text-green-500">✓</span>
                 {order.items.length} items
                 {order.items[0]?.amazonEnriched?.imageUrl && (
                   <img 
@@ -398,29 +412,22 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
             ))}
           </div>
         )}
-
-        {amazonError && (
-          <div className="text-red-400 text-sm mt-2 flex items-center gap-2">
-            <Icons.AlertCircle className="w-4 h-4" />
-            {amazonError}
-          </div>
-        )}
       </div>
 
       {/* Discovery Error */}
       {discoverError && (
-        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4">
           <div className="flex items-start gap-3">
-            <Icons.AlertCircle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+            <Icons.AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
             <div className="flex-1">
-              <div className="text-red-400 font-medium">Error</div>
-              <div className="text-red-300 text-sm mt-1">{discoverError}</div>
+              <div className="text-red-700 font-medium">Supplier Discovery Error</div>
+              <div className="text-red-600 text-sm mt-1">{discoverError}</div>
               <button
                 onClick={() => {
                   setDiscoverError(null);
-                  if (!hasDiscovered) handleDiscoverSuppliers();
+                  handleDiscoverSuppliers();
                 }}
-                className="mt-3 text-sm bg-red-500/20 hover:bg-red-500/30 text-red-300 px-3 py-1.5 rounded transition-colors"
+                className="mt-3 text-sm bg-red-100 hover:bg-red-200 text-red-700 px-3 py-1.5 rounded transition-colors"
               >
                 Try Again
               </button>
@@ -430,11 +437,11 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       )}
 
       {/* Other Suppliers Section */}
-      <div className="border-t border-slate-800 pt-6">
+      <div className="border-t border-arda-border pt-6">
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-white">Other Suppliers</h2>
+          <h2 className="text-lg font-semibold text-arda-text-primary">Other Suppliers</h2>
           {isDiscovering && (
-            <div className="flex items-center gap-2 text-sm text-slate-400">
+            <div className="flex items-center gap-2 text-sm text-arda-text-muted">
               <Icons.Loader2 className="w-4 h-4 animate-spin" />
               {discoveryProgress}
             </div>
@@ -443,14 +450,14 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
         {/* Scanning Progress for Other Suppliers */}
         {isScanning && (
-          <div className="bg-slate-800 border border-slate-700 rounded-xl p-5 mb-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 mb-4">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <Icons.Loader2 className="w-5 h-5 text-blue-400 animate-spin" />
-                <span className="text-white font-medium">Importing from {enabledCount} suppliers</span>
+                <Icons.Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
+                <span className="text-arda-text-primary font-medium">Importing from {enabledCount} suppliers</span>
               </div>
               {jobStatus?.progress && (
-                <span className="text-slate-400 text-sm font-mono">
+                <span className="text-arda-text-muted text-sm font-mono">
                   {jobStatus.progress.processed} / {jobStatus.progress.total}
                 </span>
               )}
@@ -458,7 +465,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
             {jobStatus?.progress && (
               <>
-                <div className="h-2 bg-slate-700 rounded-full overflow-hidden mb-3">
+                <div className="h-2 bg-blue-100 rounded-full overflow-hidden mb-3">
                   <div 
                     className="h-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-300"
                     style={{ 
@@ -468,10 +475,10 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
                 </div>
                 
                 <div className="flex justify-between text-sm">
-                  <span className="text-green-400">
+                  <span className="text-green-600">
                     ✓ {jobStatus.progress.success} orders found
                   </span>
-                  <span className="text-slate-500 text-xs">
+                  <span className="text-arda-text-muted text-xs">
                     {jobStatus.progress.currentTask}
                   </span>
                 </div>
@@ -479,11 +486,11 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
             )}
 
             {otherOrders.length > 0 && (
-              <div className="border-t border-slate-700 mt-4 pt-4">
-                <div className="text-xs text-slate-500 mb-2">Recent:</div>
+              <div className="border-t border-blue-200 mt-4 pt-4">
+                <div className="text-xs text-arda-text-muted mb-2">Recent:</div>
                 <div className="flex flex-wrap gap-2">
                   {otherOrders.slice(-6).reverse().map((order, i) => (
-                    <div key={order.id || i} className="text-xs bg-slate-900 text-slate-300 px-2 py-1 rounded">
+                    <div key={order.id || i} className="text-xs bg-white border border-blue-200 text-arda-text-secondary px-2 py-1 rounded">
                       {order.supplier} • {order.items.length} items
                     </div>
                   ))}
@@ -497,10 +504,10 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         {!isScanning && (
           <>
             {isDiscovering && !hasDiscovered ? (
-              <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-8 text-center">
-                <Icons.Loader2 className="w-8 h-8 text-blue-400 animate-spin mx-auto mb-3" />
-                <div className="text-white font-medium">{discoveryProgress}</div>
-                <div className="text-slate-500 text-sm mt-1">Discovering other suppliers...</div>
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-8 text-center">
+                <Icons.Loader2 className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-3" />
+                <div className="text-arda-text-primary font-medium">{discoveryProgress}</div>
+                <div className="text-arda-text-muted text-sm mt-1">Discovering other suppliers...</div>
               </div>
             ) : (
               <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
@@ -517,18 +524,18 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
                         relative aspect-square p-3 rounded-xl border-2 cursor-pointer transition-all
                         flex flex-col items-center justify-center text-center
                         ${isEnabled 
-                          ? 'bg-slate-800 border-blue-500 shadow-lg shadow-blue-500/10' 
-                          : 'bg-slate-900 border-slate-700 hover:border-slate-600 opacity-60 hover:opacity-100'
+                          ? 'bg-white border-arda-accent shadow-md' 
+                          : 'bg-gray-50 border-gray-200 hover:border-gray-300 opacity-60 hover:opacity-100'
                         }
                       `}
                     >
                       {isPriority && (
-                        <div className="absolute top-1 right-1 w-2 h-2 bg-blue-500 rounded-full" />
+                        <div className="absolute top-1 right-1 w-2 h-2 bg-arda-accent rounded-full" />
                       )}
 
                       {isEnabled && (
                         <div className="absolute top-1.5 left-1.5">
-                          <Icons.CheckCircle2 className="w-4 h-4 text-blue-400" />
+                          <Icons.CheckCircle2 className="w-4 h-4 text-arda-accent" />
                         </div>
                       )}
 
@@ -536,12 +543,14 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
                         {colors.icon}
                       </div>
 
-                      <div className={`text-xs font-medium truncate w-full ${isEnabled ? 'text-white' : 'text-slate-400'}`}>
+                      <div className={`text-xs font-medium truncate w-full ${
+                        isEnabled ? 'text-arda-text-primary' : 'text-arda-text-muted'
+                      }`}>
                         {supplier.displayName}
                       </div>
 
                       {supplier.emailCount > 0 && (
-                        <div className="text-[10px] text-slate-500 mt-0.5">
+                        <div className="text-[10px] text-arda-text-muted mt-0.5">
                           {supplier.emailCount} emails
                         </div>
                       )}
@@ -553,15 +562,15 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
             {/* Action Bar */}
             {!isDiscovering && (
-              <div className="flex items-center justify-between pt-4 mt-4 border-t border-slate-800">
+              <div className="flex items-center justify-between pt-4 mt-4 border-t border-arda-border">
                 <div className="flex items-center gap-4">
-                  <span className="text-sm text-slate-500">
+                  <span className="text-sm text-arda-text-muted">
                     {enabledCount} selected
                   </span>
                   {hasDiscovered && (
                     <button
                       onClick={handleDiscoverSuppliers}
-                      className="text-sm text-slate-400 hover:text-white transition-colors flex items-center gap-1"
+                      className="text-sm text-arda-text-muted hover:text-arda-text-primary transition-colors flex items-center gap-1"
                     >
                       <Icons.RefreshCw className="w-3 h-3" />
                       Refresh
@@ -571,7 +580,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
                 <button
                   onClick={handleStartScan}
                   disabled={enabledCount === 0 || isScanning}
-                  className="px-6 py-2.5 bg-blue-500 hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+                  className="px-6 py-2.5 bg-arda-accent hover:bg-arda-accent-hover disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors flex items-center gap-2"
                 >
                   <Icons.Download className="w-4 h-4" />
                   Import from {enabledCount} Suppliers
@@ -583,12 +592,12 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
         {/* Other Suppliers Complete */}
         {!isScanning && jobStatus?.status === 'completed' && otherOrders.length > 0 && (
-          <div className="bg-green-500/10 border border-green-500/30 rounded-xl p-5 mt-4">
+          <div className="bg-green-50 border border-green-200 rounded-xl p-5 mt-4">
             <div className="flex items-center gap-3">
-              <Icons.CheckCircle2 className="w-6 h-6 text-green-400" />
+              <Icons.CheckCircle2 className="w-6 h-6 text-green-500" />
               <div>
-                <div className="text-green-400 font-medium">Import Complete</div>
-                <div className="text-green-300/70 text-sm">
+                <div className="text-green-700 font-medium">Import Complete</div>
+                <div className="text-green-600 text-sm">
                   {otherOrders.length} additional orders imported
                 </div>
               </div>
@@ -599,17 +608,17 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
       {/* Summary Bar at Bottom */}
       {(amazonOrders.length > 0 || otherOrders.length > 0) && !isAnyProcessing && (
-        <div className="fixed bottom-0 left-0 right-0 bg-slate-900/95 border-t border-slate-700 p-4">
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-arda-border shadow-lg p-4">
           <div className="max-w-5xl mx-auto flex items-center justify-between">
-            <div className="text-white">
+            <div className="text-arda-text-primary">
               <span className="font-semibold">{totalOrders} orders</span>
-              <span className="text-slate-400 ml-2">
+              <span className="text-arda-text-muted ml-2">
                 ({amazonOrders.length} Amazon, {otherOrders.length} other)
               </span>
             </div>
             <button
               onClick={handleComplete}
-              className="bg-green-500 hover:bg-green-600 text-white px-6 py-2.5 rounded-lg font-medium transition-colors"
+              className="bg-arda-success hover:bg-green-600 text-white px-6 py-2.5 rounded-lg font-medium transition-colors"
             >
               Continue to Dashboard →
             </button>
