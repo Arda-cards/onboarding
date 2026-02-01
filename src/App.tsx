@@ -14,7 +14,7 @@ import { useAutoIngestion } from './hooks/useAutoIngestion';
 import { authApi } from './services/api';
 
 export default function App() {
-  const [activeView, setActiveView] = useState('pipeline'); // Start with pipeline view
+  const [activeView, setActiveView] = useState('setup'); // Start with supplier setup
   
   // Auth State
   const [isCheckingAuth, setIsCheckingAuth] = useState(true);
@@ -24,8 +24,8 @@ export default function App() {
   const [orders, setOrders] = useState<ExtractedOrder[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   
-  // Track if pipeline has been viewed
-  const [hasSeenPipeline, setHasSeenPipeline] = useState(false);
+  // Track if user has completed initial setup
+  const [hasCompletedSetup, setHasCompletedSetup] = useState(false);
   
   // Email Draft State for integrated reordering
   const [emailDraft, setEmailDraft] = useState<{ to: string, subject: string, body: string } | null>(null);
@@ -47,9 +47,15 @@ export default function App() {
             name: data.user.name,
             picture: data.user.picture_url,
           });
-          // If user is already logged in and has data, skip pipeline
-          setHasSeenPipeline(true);
-          setActiveView('dashboard');
+          // Check if user has seen setup before (stored in localStorage)
+          const setupComplete = localStorage.getItem('orderPulse_setupComplete');
+          if (setupComplete === 'true') {
+            setHasCompletedSetup(true);
+            setActiveView('dashboard');
+          } else {
+            // New user or returning user who hasn't completed setup
+            setActiveView('setup');
+          }
         }
       } catch {
         // Not authenticated
@@ -126,12 +132,21 @@ export default function App() {
     setUserProfile(null);
     setOrders([]);
     setInventory([]);
-    setHasSeenPipeline(false);
-    setActiveView('pipeline');
+    setHasCompletedSetup(false);
+    localStorage.removeItem('orderPulse_setupComplete');
+    setActiveView('setup');
   };
 
-  const handleContinueToDashboard = () => {
-    setHasSeenPipeline(true);
+  const handleSetupComplete = (newOrders: ExtractedOrder[]) => {
+    setOrders(prev => [...prev, ...newOrders]);
+    setHasCompletedSetup(true);
+    localStorage.setItem('orderPulse_setupComplete', 'true');
+    setActiveView('journey'); // Go to journey view to see results
+  };
+
+  const handleSkipSetup = () => {
+    setHasCompletedSetup(true);
+    localStorage.setItem('orderPulse_setupComplete', 'true');
     setActiveView('dashboard');
   };
 
@@ -139,8 +154,9 @@ export default function App() {
     // Clear local state
     setOrders([]);
     setInventory([]);
-    setHasSeenPipeline(false);
-    setActiveView('pipeline');
+    setHasCompletedSetup(false);
+    localStorage.removeItem('orderPulse_setupComplete');
+    setActiveView('setup');
     
     // Trigger the ingestion hook to reset and restart
     await ingestion.resetAndRestart();
@@ -155,18 +171,17 @@ export default function App() {
     return <LoginScreen />;
   }
 
-  // Show pipeline view while ingesting or if user hasn't seen it yet
-  if (activeView === 'pipeline' || (!hasSeenPipeline && (ingestion.isIngesting || orders.length === 0))) {
+  // Show supplier setup view if user hasn't completed setup yet
+  if (!hasCompletedSetup && activeView === 'setup') {
     return (
-      <PipelineView
-        isIngesting={ingestion.isIngesting}
-        progress={ingestion.progress}
-        currentEmail={ingestion.currentEmail}
-        orders={orders}
-        inventory={inventory}
-        logs={ingestion.logs}
-        onContinueToDashboard={handleContinueToDashboard}
-      />
+      <div className="min-h-screen bg-arda-bg-secondary text-arda-text-primary font-sans">
+        <div className="max-w-4xl mx-auto p-8">
+          <SupplierSetup
+            onScanComplete={handleSetupComplete}
+            onSkip={handleSkipSetup}
+          />
+        </div>
+      </div>
     );
   }
 
@@ -211,11 +226,8 @@ export default function App() {
       case 'setup':
         return (
           <SupplierSetup
-            onScanComplete={(newOrders) => {
-              setOrders(prev => [...prev, ...newOrders]);
-              setActiveView('dashboard');
-            }}
-            onSkip={() => setActiveView('dashboard')}
+            onScanComplete={handleSetupComplete}
+            onSkip={handleSkipSetup}
           />
         );
       default:

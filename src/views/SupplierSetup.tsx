@@ -100,17 +100,21 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     }
   }, [isScanning, currentJobId, pollJobStatus]);
 
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
+
   const handleDiscoverSuppliers = async () => {
     setIsDiscovering(true);
+    setDiscoverError(null);
     try {
       const response = await discoverApi.discoverSuppliers();
       setDiscoveredSuppliers(response.suppliers);
-      // Auto-enable all discovered suppliers by default
-      setEnabledSuppliers(response.suppliers.map(s => s.domain));
+      // Auto-enable recommended suppliers by default
+      setEnabledSuppliers(response.suppliers.filter(s => s.isRecommended).map(s => s.domain));
       setCurrentStep('configure');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to discover suppliers:', error);
-      alert('Failed to discover suppliers. Please try again.');
+      const errorMsg = error.message || 'Failed to discover suppliers';
+      setDiscoverError(errorMsg);
     } finally {
       setIsDiscovering(false);
     }
@@ -283,6 +287,21 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
             {isDiscovering && (
               <div className="text-center text-sm text-arda-text-secondary">
                 <p>Scanning your email for supplier information...</p>
+              </div>
+            )}
+
+            {discoverError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 max-w-md mx-auto">
+                <div className="flex items-start gap-3">
+                  <Icons.AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="text-sm font-medium text-red-800">Discovery Failed</h4>
+                    <p className="text-sm text-red-600 mt-1">{discoverError}</p>
+                    <p className="text-xs text-red-500 mt-2">
+                      Try refreshing the page or re-authenticating with Google.
+                    </p>
+                  </div>
+                </div>
               </div>
             )}
           </div>

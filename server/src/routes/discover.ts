@@ -263,7 +263,25 @@ router.get('/discover-suppliers', requireAuth, async (req: Request, res: Respons
     res.json({ suppliers });
   } catch (error: any) {
     console.error('Discover suppliers error:', error);
-    res.status(500).json({ error: 'Failed to discover suppliers' });
+    console.error('Error details:', {
+      message: error.message,
+      code: error.code,
+      status: error.status,
+      stack: error.stack?.split('\n').slice(0, 5),
+    });
+    
+    // Handle specific Gmail API errors
+    if (error.code === 401 || error.message?.includes('invalid_grant')) {
+      return res.status(401).json({ error: 'Token expired, please re-authenticate' });
+    }
+    if (error.code === 403) {
+      return res.status(403).json({ error: 'Gmail access denied. Please grant email permissions.' });
+    }
+    
+    res.status(500).json({ 
+      error: 'Failed to discover suppliers',
+      details: error.message || 'Unknown error'
+    });
   }
 });
 
