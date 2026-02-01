@@ -1,5 +1,6 @@
-export const APP_NAME = "OrderPulse";
-export const APP_DESCRIPTION = "Email-to-Inventory Intelligence";
+export const APP_NAME = "Arda";
+export const APP_DESCRIPTION = "Order Intelligence";
+export const APP_TAGLINE = "The easiest way to never run out";
 
 export const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: 'LayoutDashboard' },

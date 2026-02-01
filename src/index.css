@@ -23,6 +23,28 @@ body {
   font-family: 'Geist', 'Inter', system-ui, sans-serif;
 }
 
+/* Arda proprietary look */
+.arda-mesh {
+  background: radial-gradient(circle at 20% 20%, rgba(252, 90, 41, 0.16), transparent 25%),
+              radial-gradient(circle at 80% 10%, rgba(59, 130, 246, 0.16), transparent 22%),
+              radial-gradient(circle at 70% 80%, rgba(99, 102, 241, 0.18), transparent 28%),
+              linear-gradient(135deg, #ffffff 0%, #f9fafb 40%, #f3f4f6 100%);
+}
+
+.arda-glass {
+  backdrop-filter: blur(14px);
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(229, 231, 235, 0.7);
+  box-shadow: 0 25px 80px rgba(15, 23, 42, 0.06), 0 8px 30px rgba(252, 90, 41, 0.08);
+}
+
+.arda-pill {
+  @apply inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold;
+  background: linear-gradient(120deg, rgba(252, 90, 41, 0.15), rgba(59, 130, 246, 0.12));
+  color: #FC5A29;
+  border: 1px solid rgba(252, 90, 41, 0.25);
+}
+
 /* Custom Scrollbar - Light theme */
 ::-webkit-scrollbar {
   width: 8px;

@@ -1,10 +1,10 @@
 import './utils/loadEnv.js';
 import express from 'express';
 import cors from 'cors';
-import helmet from 'helmet';
 import session from 'express-session';
 import RedisStore from 'connect-redis';
 import * as Sentry from '@sentry/node';
+import compression from 'compression';
 import redisClient from './utils/redisClient.js';
 import { authRouter } from './routes/auth.js';
 import { gmailRouter } from './routes/gmail.js';
@@ -18,6 +18,11 @@ import cognitoRouter from './routes/cognito.js';
 import { cognitoService } from './services/cognito.js';
 import { initializeJobManager } from './services/jobManager.js';
 import { startCognitoSyncScheduler } from './services/cognitoScheduler.js';
+import { appLogger, requestLogger } from './middleware/requestLogger.js';
+import { securityHeaders } from './middleware/securityHeaders.js';
+import { defaultLimiter, authLimiter } from './middleware/rateLimiter.js';
+import { errorHandler } from './middleware/errorHandler.js';
+import { corsOrigin, env, isProduction, port } from './config.js';
 
 // Debug: Log OAuth config status
 console.log('🔐 OAuth Config:', {
@@ -36,8 +41,7 @@ if (sentryDsn) {
     tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE) || 0.1,
   });
 }
-const PORT = process.env.PORT || 3001;
-const isProduction = process.env.NODE_ENV === 'production' || process.env.RAILWAY_ENVIRONMENT === 'production';
+const PORT = port;
 const requiredSecrets = [
   'SESSION_SECRET',
   'GOOGLE_CLIENT_ID',
@@ -67,12 +71,14 @@ const sessionSecret = process.env.SESSION_SECRET || 'dev-secret-change-in-produc
 // @ts-ignore - connect-redis type issues
 const sessionStore = redisClient ? new RedisStore({ client: redisClient }) : undefined;
 
-// Security middleware
-app.use(helmet());
+// Core middleware
+app.use(requestLogger);
+app.use(securityHeaders);
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+  origin: corsOrigin,
   credentials: true,
 }));
+app.use(compression());
 // Increase body parser limit for large email payloads (500 emails can be ~10MB)
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -96,38 +102,31 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// API routes
-app.use('/auth', authRouter);
+// API routes (rate-limited where appropriate)
+app.use('/auth', authLimiter, authRouter);
 app.use('/api/gmail', gmailRouter);
 app.use('/api/analyze', analysisRouter);
 app.use('/api/orders', ordersRouter);
 app.use('/api/arda', ardaRouter);
-app.use('/api/jobs', jobsRouter);
+app.use('/api/jobs', defaultLimiter, jobsRouter);
 app.use('/api/cognito', cognitoRouter);
-app.use('/api/discover', discoverRouter);
+app.use('/api/discover', defaultLimiter, discoverRouter);
 app.use('/api/amazon', amazonRouter);
 
 // Error handler
-
-app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('Server error:', err);
-  if (sentryDsn) {
-    Sentry.captureException(err);
-  }
-  res.status(500).json({ error: 'Internal server error' });
-});
+app.use(errorHandler);
 
 async function startServer() {
   await initializeJobManager();
 
   app.listen(PORT, () => {
-    console.log(`🚀 OrderPulse API running on http://localhost:${PORT}`);
-    console.log(`📧 Frontend URL: ${process.env.FRONTEND_URL}`);
+    appLogger.info(`🚀 OrderPulse API running on http://localhost:${PORT}`);
+    appLogger.info(`📧 Frontend URL: ${process.env.FRONTEND_URL}`);
     
     startCognitoSyncScheduler();
     
     const status = cognitoService.getSyncStatus();
-    console.log(`👥 Cognito users: ${status.userCount} loaded`);
+    appLogger.info(`👥 Cognito users: ${status.userCount} loaded`);
   });
 }
 

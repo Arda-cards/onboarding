@@ -232,7 +232,16 @@ export const IngestionEngine: React.FC<IngestionEngineProps> = ({
         imageUrl: data.ImageURL || item.imageUrl,
         productUrl: data.AmazonURL || item.productUrl,
         lastPrice: parsePrice(data.Price) ?? item.lastPrice,
-        amazonEnriched: data,
+        amazonEnriched: {
+          asin: data.ASIN || asin,
+          itemName: data.ItemName || '',
+          price: data.Price,
+          imageUrl: data.ImageURL,
+          amazonUrl: data.AmazonURL,
+          unitCount: data.UnitCount,
+          unitPrice: data.UnitPrice,
+          upc: data.UPC,
+        },
       });
       addLog(`✅ Amazon lookup complete for ${asin}`);
     } catch (error) {

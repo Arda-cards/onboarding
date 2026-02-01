@@ -655,16 +655,18 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                   <Icons.Upload className="w-3 h-3" />
                   Sync to Arda
                 </button>
-                <button
-                  onClick={() => {
-                    onReorder(historyItem);
-                    setHistoryItem(null);
-                  }}
-                  className="bg-arda-accent text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-arda-accent-hover transition-all flex items-center gap-2"
-                >
-                  <Icons.Send className="w-3 h-3" />
-                  Reorder Item
-                </button>
+                {onReorder && (
+                  <button
+                    onClick={() => {
+                      onReorder(historyItem);
+                      setHistoryItem(null);
+                    }}
+                    className="bg-arda-accent text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-arda-accent-hover transition-all flex items-center gap-2"
+                  >
+                    <Icons.Send className="w-3 h-3" />
+                    Reorder Item
+                  </button>
+                )}
               </div>
             </div>
           </div>

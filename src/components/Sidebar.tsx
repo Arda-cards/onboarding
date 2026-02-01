@@ -1,4 +1,4 @@
-import { NAV_ITEMS, APP_NAME } from '../constants';
+import { NAV_ITEMS, APP_NAME, APP_DESCRIPTION } from '../constants';
 import { Icons } from './Icons';
 import { GoogleUserProfile } from '../types';
 
@@ -20,6 +20,15 @@ interface SidebarProps {
   ingestionProgress?: IngestionProgress;
 }
 
+// Arda logo SVG
+const ArdaLogo = ({ className = "h-7 w-auto" }: { className?: string }) => (
+  <svg viewBox="0 0 80 28" className={className}>
+    <text x="0" y="22" fill="#FC5A29" fontSize="24" fontWeight="bold" fontFamily="system-ui, -apple-system, sans-serif">
+      arda
+    </text>
+  </svg>
+);
+
 export const Sidebar: React.FC<SidebarProps> = ({ 
   activeView, 
   onChangeView,
@@ -33,11 +42,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     <div className="w-64 h-screen bg-white border-r border-arda-border flex flex-col fixed left-0 top-0 z-20">
       {/* Header */}
       <div className="p-6 border-b border-arda-border">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-arda-accent rounded-lg flex items-center justify-center">
-            <Icons.Package className="text-white w-5 h-5" />
-          </div>
-          <h1 className="text-xl font-bold text-arda-text-primary tracking-tight">{APP_NAME}</h1>
+        <div className="flex items-center gap-2">
+          <ArdaLogo />
+          <span className="text-xs font-medium text-arda-text-muted uppercase tracking-wider">{APP_DESCRIPTION}</span>
         </div>
         
         {/* Sync Status */}
