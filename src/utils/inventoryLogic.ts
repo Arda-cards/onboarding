@@ -1,9 +1,9 @@
 import { ExtractedOrder, InventoryItem } from '../types';
 
 export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryItem[] => {
-  const itemMap = new Map<string, InventoryItem>();
+  const itemMap = new Map<string, InventoryItem & { orderIds: Set<string> }>();
 
-  // 1. Group items
+  // 1. Group items by name, track unique orders
   orders.forEach(order => {
     order.items.forEach(lineItem => {
       // Normalize name (simple lowercasing and trimming for this demo)
@@ -15,7 +15,7 @@ export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryIte
           name: lineItem.name,
           supplier: order.supplier,
           totalQuantityOrdered: 0,
-          orderCount: 0,
+          orderCount: 0, // This will count unique ORDERS containing this item
           firstOrderDate: order.orderDate,
           lastOrderDate: order.orderDate,
           averageCadenceDays: 0,
@@ -23,7 +23,8 @@ export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryIte
           recommendedMin: 0,
           recommendedOrderQty: 0,
           lastPrice: lineItem.unitPrice || 0,
-          history: []
+          history: [],
+          orderIds: new Set<string>(), // Track unique order IDs
         });
       }
 
@@ -31,7 +32,9 @@ export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryIte
       
       // Update basic stats
       entry.totalQuantityOrdered += lineItem.quantity;
-      entry.orderCount += 1;
+      
+      // Track unique orders - an item may appear multiple times in one order
+      entry.orderIds.add(order.id);
       
       // Update dates
       if (new Date(order.orderDate) < new Date(entry.firstOrderDate)) entry.firstOrderDate = order.orderDate;
@@ -40,13 +43,16 @@ export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryIte
       // Update price
       if (lineItem.unitPrice) entry.lastPrice = lineItem.unitPrice;
 
-      // Add to history
+      // Add to history (one entry per line item occurrence)
       entry.history.push({ date: order.orderDate, quantity: lineItem.quantity });
     });
   });
 
   // 2. Calculate Analytics
   return Array.from(itemMap.values()).map(item => {
+    // Count unique orders containing this item
+    item.orderCount = item.orderIds.size;
+    
     // Sort history by date
     item.history.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
@@ -79,6 +85,9 @@ export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryIte
     const targetDays = Math.max(item.averageCadenceDays, 30);
     item.recommendedOrderQty = Math.ceil(item.dailyBurnRate * targetDays);
 
-    return item;
+    // Clean up temp field before returning
+    const { orderIds, ...cleanItem } = item;
+    return cleanItem as InventoryItem;
   });
 };
+

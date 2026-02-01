@@ -45,11 +45,11 @@ export const CadenceView: React.FC<CadenceViewProps> = ({ inventory, orders = []
     .slice(0, 50); // Last 50 transactions
 
   // Summary stats
-  const totalItems = inventory.length;
+  const totalItems = inventory.length; // Unique item types
   const avgCadence = inventory.length > 0
     ? Math.round(inventory.reduce((sum, i) => sum + i.averageCadenceDays, 0) / inventory.length)
     : 0;
-  const totalOrders = inventory.reduce((sum, i) => sum + i.orderCount, 0);
+  const totalLineItems = inventory.reduce((sum, i) => sum + i.history.length, 0); // Total line item occurrences
   const fastestMover = velocityData[0];
 
   if (inventory.length === 0) {
@@ -102,7 +102,7 @@ export const CadenceView: React.FC<CadenceViewProps> = ({ inventory, orders = []
               <Icons.Inbox className="text-green-400 w-5 h-5" />
             </div>
             <div>
-              <div className="text-2xl font-bold text-white">{totalOrders}</div>
+              <div className="text-2xl font-bold text-white">{totalLineItems}</div>
               <div className="text-xs text-arda-500">Total Line Items</div>
             </div>
           </div>
