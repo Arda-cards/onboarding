@@ -21,30 +21,30 @@ const getVelocityClass = (dailyBurnRate: number): {
   if (dailyBurnRate >= 10) {
     return {
       label: 'Fast',
-      color: 'text-orange-400',
-      bgColor: 'bg-orange-500/20',
-      borderColor: 'border-orange-500/50',
+      color: 'text-arda-accent',
+      bgColor: 'bg-orange-100',
+      borderColor: 'border-orange-200',
     };
   } else if (dailyBurnRate >= 3) {
     return {
       label: 'Medium',
-      color: 'text-yellow-400',
-      bgColor: 'bg-yellow-500/20',
-      borderColor: 'border-yellow-500/50',
+      color: 'text-arda-accent',
+      bgColor: 'bg-orange-100',
+      borderColor: 'border-orange-200',
     };
   } else if (dailyBurnRate >= 1) {
     return {
       label: 'Slow',
-      color: 'text-blue-400',
-      bgColor: 'bg-blue-500/20',
-      borderColor: 'border-blue-500/50',
+      color: 'text-arda-text-secondary',
+      bgColor: 'bg-arda-bg-tertiary',
+      borderColor: 'border-arda-border',
     };
   } else {
     return {
       label: 'Rare',
-      color: 'text-slate-400',
-      bgColor: 'bg-slate-500/20',
-      borderColor: 'border-slate-500/50',
+      color: 'text-arda-text-muted',
+      bgColor: 'bg-arda-bg-tertiary',
+      borderColor: 'border-arda-border',
     };
   }
 };

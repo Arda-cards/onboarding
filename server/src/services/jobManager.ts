@@ -24,6 +24,7 @@ export interface AmazonEnrichedData {
   imageUrl?: string;
   amazonUrl?: string;
   unitCount?: number;
+  unitPrice?: number;
   upc?: string;
 }
 

@@ -374,22 +374,30 @@ export const buildJourneyTree = (
             const normalizedName = item.normalizedName || normalizeItemName(item.name);
             const velocityProfile = velocityProfiles.get(normalizedName);
             
+            const displayName = item.amazonEnriched?.itemName || item.name;
+            const unitPrice = item.unitPrice;
+            const totalPrice = unitPrice ? unitPrice * item.quantity : undefined;
             const lineItemNode: JourneyNode = {
               id: item.id || `${order.id}-item-${idx}`,
               type: 'lineItem',
-              label: item.name,
-              subtitle: `Qty: ${item.quantity} ${item.unit}${item.unitPrice ? ` • $${item.unitPrice.toFixed(2)}/ea` : ''}`,
+              label: displayName,
+              subtitle: `Qty: ${item.quantity} ${item.unit}${unitPrice ? ` • $${unitPrice.toFixed(2)}/ea` : ''}${totalPrice ? ` • $${totalPrice.toFixed(2)} total` : ''}`,
               isExpanded: false,
               data: {
                 lineItemId: item.id || `${order.id}-item-${idx}`,
                 orderId: order.id,
                 emailId: order.originalEmailId,
-                name: item.name,
+                name: displayName,
                 normalizedName,
                 quantity: item.quantity,
                 unit: item.unit,
-                unitPrice: item.unitPrice,
+                unitPrice: unitPrice,
                 sku: item.sku,
+                asin: item.asin,
+                supplier: order.supplier,
+                orderDate: order.orderDate,
+                totalPrice,
+                amazonEnriched: item.amazonEnriched,
               },
               children: velocityProfile ? [{
                 id: `velocity-${normalizedName}`,

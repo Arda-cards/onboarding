@@ -14,6 +14,26 @@ interface JourneyViewProps {
 
 type ViewMode = 'timeline' | 'suppliers' | 'items';
 
+const isCodeLikeName = (name: string): boolean => {
+  const trimmed = name.trim();
+  return /^[A-Z0-9-]{8,}$/.test(trimmed) || /^amazon product/i.test(trimmed);
+};
+
+const parsePriceValue = (price?: string): number | undefined => {
+  if (!price) return undefined;
+  const parsed = parseFloat(price.replace(/[^0-9.]/g, ''));
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const getHumanItemName = (item: { name: string; amazonEnriched?: { itemName?: string }; asin?: string }): string => {
+  const enrichedName = item.amazonEnriched?.itemName?.trim();
+  if (enrichedName) return enrichedName;
+  const raw = item.name?.trim() || '';
+  if (!raw) return item.asin ? 'Amazon product' : 'Item';
+  if (isCodeLikeName(raw)) return item.asin ? 'Amazon product' : 'Item';
+  return raw;
+};
+
 export const JourneyView: React.FC<JourneyViewProps> = ({
   orders,
   inventory,
@@ -39,6 +59,16 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
   const matchingInventoryItem = selectedItem 
     ? inventory.find(i => i.name.toLowerCase().trim() === selectedItem.normalizedName)
     : undefined;
+
+  // Selected item details (prefer Amazon enrichment)
+  const selectedAmazon = selectedItem?.amazonEnriched;
+  const selectedDisplayName = selectedItem ? getHumanItemName(selectedItem) : '';
+  const selectedUnitPrice = selectedItem?.unitPrice ?? selectedAmazon?.unitPrice ?? parsePriceValue(selectedAmazon?.price);
+  const selectedTotalPrice = selectedUnitPrice
+    ? selectedUnitPrice * (selectedItem?.quantity || 1)
+    : selectedItem?.totalPrice;
+  const selectedImage = selectedAmazon?.imageUrl || selectedProfile?.imageUrl;
+  const selectedAmazonUrl = selectedAmazon?.amazonUrl || selectedProfile?.amazonUrl;
 
   // Stats
   const stats = useMemo(() => {
@@ -124,11 +154,11 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
   if (orders.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-12rem)] text-center">
-        <div className="w-16 h-16 rounded-2xl bg-slate-800 flex items-center justify-center mb-4">
-          <Icons.GitBranch className="w-8 h-8 text-slate-600" />
+        <div className="w-16 h-16 rounded-2xl bg-arda-bg-tertiary flex items-center justify-center mb-4">
+          <Icons.GitBranch className="w-8 h-8 text-arda-text-muted" />
         </div>
-        <h2 className="text-xl font-semibold text-white mb-2">No Orders Yet</h2>
-        <p className="text-slate-400 max-w-md">
+        <h2 className="text-xl font-semibold text-arda-text-primary mb-2">No Orders Yet</h2>
+        <p className="text-arda-text-muted max-w-md">
           Run the ingestion engine to process your emails and see your complete order journey here.
         </p>
       </div>
@@ -142,22 +172,22 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white">Order Journey</h1>
-            <p className="text-slate-400 text-sm mt-1">
+            <h1 className="text-2xl font-bold text-arda-text-primary">Order Journey</h1>
+            <p className="text-arda-text-secondary text-sm mt-1">
               Trace the flow from suppliers to orders to items
             </p>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={handleExportOrders}
-              className="flex items-center gap-2 px-3 py-2 text-sm bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors"
+              className="flex items-center gap-2 px-3 py-2 text-sm bg-white hover:bg-arda-bg-tertiary text-arda-text-secondary border border-arda-border rounded-lg transition-colors"
             >
               <Icons.Download className="w-4 h-4" />
               Orders
             </button>
             <button
               onClick={handleExportItems}
-              className="flex items-center gap-2 px-3 py-2 text-sm bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors"
+              className="flex items-center gap-2 px-3 py-2 text-sm bg-white hover:bg-arda-bg-tertiary text-arda-text-secondary border border-arda-border rounded-lg transition-colors"
             >
               <Icons.Download className="w-4 h-4" />
               Items
@@ -167,47 +197,47 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
 
         {/* Stats Row */}
         <div className="grid grid-cols-4 gap-4 mb-6">
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="bg-white rounded-xl p-4 border border-arda-border">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                <Icons.Building2 className="w-5 h-5 text-blue-400" />
+              <div className="w-10 h-10 rounded-lg bg-arda-bg-tertiary flex items-center justify-center">
+                <Icons.Building2 className="w-5 h-5 text-arda-accent" />
               </div>
               <div>
-                <div className="text-2xl font-bold text-white">{stats.suppliers}</div>
-                <div className="text-xs text-slate-500">Suppliers</div>
+                <div className="text-2xl font-bold text-arda-text-primary">{stats.suppliers}</div>
+                <div className="text-xs text-arda-text-muted">Suppliers</div>
               </div>
             </div>
           </div>
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="bg-white rounded-xl p-4 border border-arda-border">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
-                <Icons.Package className="w-5 h-5 text-green-400" />
+              <div className="w-10 h-10 rounded-lg bg-arda-bg-tertiary flex items-center justify-center">
+                <Icons.Package className="w-5 h-5 text-arda-accent" />
               </div>
               <div>
-                <div className="text-2xl font-bold text-white">{stats.orders}</div>
-                <div className="text-xs text-slate-500">Orders</div>
+                <div className="text-2xl font-bold text-arda-text-primary">{stats.orders}</div>
+                <div className="text-xs text-arda-text-muted">Orders</div>
               </div>
             </div>
           </div>
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="bg-white rounded-xl p-4 border border-arda-border">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
-                <Icons.Box className="w-5 h-5 text-purple-400" />
+              <div className="w-10 h-10 rounded-lg bg-arda-bg-tertiary flex items-center justify-center">
+                <Icons.Box className="w-5 h-5 text-arda-accent" />
               </div>
               <div>
-                <div className="text-2xl font-bold text-white">{stats.items}</div>
-                <div className="text-xs text-slate-500">Line Items</div>
+                <div className="text-2xl font-bold text-arda-text-primary">{stats.items}</div>
+                <div className="text-xs text-arda-text-muted">Line Items</div>
               </div>
             </div>
           </div>
-          <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+          <div className="bg-white rounded-xl p-4 border border-arda-border">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-orange-500/20 flex items-center justify-center">
-                <Icons.Activity className="w-5 h-5 text-orange-400" />
+              <div className="w-10 h-10 rounded-lg bg-arda-bg-tertiary flex items-center justify-center">
+                <Icons.Activity className="w-5 h-5 text-arda-accent" />
               </div>
               <div>
-                <div className="text-2xl font-bold text-white">{stats.uniqueItems}</div>
-                <div className="text-xs text-slate-500">Unique Items</div>
+                <div className="text-2xl font-bold text-arda-text-primary">{stats.uniqueItems}</div>
+                <div className="text-xs text-arda-text-muted">Unique Items</div>
               </div>
             </div>
           </div>
@@ -216,13 +246,13 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
         {/* View Controls */}
         <div className="flex items-center gap-4 mb-4">
           {/* View Mode Toggle */}
-          <div className="flex bg-slate-800 rounded-lg p-1">
+          <div className="flex bg-arda-bg-tertiary rounded-lg p-1 border border-arda-border">
             <button
               onClick={() => setViewMode('timeline')}
               className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                 viewMode === 'timeline'
                   ? 'bg-arda-accent text-white'
-                  : 'text-slate-400 hover:text-white'
+                  : 'text-arda-text-secondary hover:text-arda-text-primary'
               }`}
             >
               By Date
@@ -232,7 +262,7 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
               className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                 viewMode === 'suppliers'
                   ? 'bg-arda-accent text-white'
-                  : 'text-slate-400 hover:text-white'
+                  : 'text-arda-text-secondary hover:text-arda-text-primary'
               }`}
             >
               By Supplier
@@ -242,7 +272,7 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
               className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
                 viewMode === 'items'
                   ? 'bg-arda-accent text-white'
-                  : 'text-slate-400 hover:text-white'
+                  : 'text-arda-text-secondary hover:text-arda-text-primary'
               }`}
             >
               By Item
@@ -251,18 +281,19 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
 
           {/* Search */}
           <div className="flex-1 relative">
-            <Icons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+            <Icons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-arda-text-muted" />
             <input
               type="text"
               placeholder="Search orders, suppliers, items..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-10 pr-10 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-arda-accent focus:border-transparent"
+              className="w-full bg-white border border-arda-border rounded-lg pl-10 pr-10 py-2 text-sm text-arda-text-primary placeholder-arda-text-muted focus:outline-none focus:ring-2 focus:ring-arda-accent focus:border-transparent"
             />
             {searchQuery && (
               <button
                 onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white"
+                aria-label="Clear search"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-arda-text-muted hover:text-arda-text-primary"
               >
                 <Icons.X className="w-4 h-4" />
               </button>
@@ -271,7 +302,7 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 overflow-y-auto bg-slate-900/50 rounded-xl border border-slate-800 p-4">
+        <div className="flex-1 overflow-y-auto bg-white rounded-xl border border-arda-border p-4">
           {viewMode === 'timeline' && (
             <TimelineView 
               orders={filteredOrders}
@@ -305,54 +336,55 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
 
       {/* Detail Panel */}
       {selectedItem && selectedProfile && (
-        <div className="w-96 flex-shrink-0 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden flex flex-col">
+        <div className="w-96 flex-shrink-0 bg-white border border-arda-border rounded-xl overflow-hidden flex flex-col">
           {/* Header with Amazon Image */}
-          <div className="p-5 border-b border-slate-800">
+          <div className="p-5 border-b border-arda-border">
             <div className="flex items-start gap-4">
               {/* Product Image from Amazon or placeholder */}
-              {selectedProfile.imageUrl ? (
+              {selectedImage ? (
                 <img 
-                  src={selectedProfile.imageUrl}
+                  src={selectedImage}
                   alt=""
                   className="w-20 h-20 rounded-lg object-contain bg-white flex-shrink-0"
                 />
               ) : (
-                <div className="w-16 h-16 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0">
-                  <Icons.Package className="w-8 h-8 text-purple-400" />
+                <div className="w-16 h-16 rounded-lg bg-arda-bg-tertiary flex items-center justify-center flex-shrink-0">
+                  <Icons.Package className="w-8 h-8 text-arda-accent" />
                 </div>
               )}
               
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between">
-                  <h3 className="text-lg font-semibold text-white leading-tight">
-                    {selectedProfile.displayName}
+                  <h3 className="text-lg font-semibold text-arda-text-primary leading-tight">
+                    {selectedDisplayName}
                   </h3>
                   <button
                     onClick={() => setSelectedItem(null)}
-                    className="p-1 text-slate-500 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                    aria-label="Close item details"
+                    className="p-1 text-arda-text-muted hover:text-arda-text-primary hover:bg-arda-bg-tertiary rounded-lg transition-colors"
                   >
                     <Icons.X className="w-4 h-4" />
                   </button>
                 </div>
-                <p className="text-sm text-slate-400 mt-1">{selectedProfile.supplier}</p>
+                <p className="text-sm text-arda-text-secondary mt-1">{selectedItem.supplier || selectedProfile.supplier}</p>
                 <div className="flex flex-wrap gap-1 mt-2">
-                  {selectedProfile.sku && (
-                    <span className="px-2 py-0.5 bg-slate-800 text-slate-300 text-xs rounded font-mono">
-                      SKU: {selectedProfile.sku}
+                  {(selectedItem.sku || selectedProfile.sku) && (
+                    <span className="px-2 py-0.5 bg-arda-bg-tertiary text-arda-text-secondary text-xs rounded font-mono">
+                      SKU: {selectedItem.sku || selectedProfile.sku}
                     </span>
                   )}
-                  {selectedProfile.asin && (
-                    <span className="px-2 py-0.5 bg-orange-500/20 text-orange-400 text-xs rounded font-mono">
-                      ASIN: {selectedProfile.asin}
+                  {(selectedItem.asin || selectedProfile.asin) && (
+                    <span className="px-2 py-0.5 bg-orange-100 text-orange-700 text-xs rounded font-mono">
+                      ASIN: {selectedItem.asin || selectedProfile.asin}
                     </span>
                   )}
                 </div>
-                {selectedProfile.amazonUrl && (
+                {selectedAmazonUrl && (
                   <a 
-                    href={selectedProfile.amazonUrl}
+                    href={selectedAmazonUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1 mt-2 text-xs text-blue-400 hover:underline"
+                    className="inline-flex items-center gap-1 mt-2 text-xs text-arda-accent hover:underline"
                   >
                     View on Amazon <Icons.ExternalLink className="w-3 h-3" />
                   </a>
@@ -361,8 +393,53 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
             </div>
           </div>
 
+          {/* Item Details */}
+          <div className="p-5 border-b border-arda-border space-y-3">
+            <h4 className="text-sm font-medium text-arda-text-primary">Item Details</h4>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-arda-text-secondary">Order Date</span>
+                <span className="text-arda-text-primary">{selectedItem.orderDate || selectedProfile.lastOrderDate}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-arda-text-secondary">Quantity</span>
+                <span className="text-arda-text-primary">{selectedItem.quantity} {selectedItem.unit}</span>
+              </div>
+              {selectedUnitPrice !== undefined && (
+                <div className="flex items-center justify-between">
+                  <span className="text-arda-text-secondary">Unit Price</span>
+                  <span className="text-arda-accent font-semibold">${selectedUnitPrice.toFixed(2)}</span>
+                </div>
+              )}
+              {selectedTotalPrice !== undefined && (
+                <div className="flex items-center justify-between">
+                  <span className="text-arda-text-secondary">Total</span>
+                  <span className="text-arda-accent font-semibold">${selectedTotalPrice.toFixed(2)}</span>
+                </div>
+              )}
+              {selectedAmazon?.price && (
+                <div className="flex items-center justify-between">
+                  <span className="text-arda-text-secondary">Amazon Price</span>
+                  <span className="text-arda-text-primary">{selectedAmazon.price}</span>
+                </div>
+              )}
+              {selectedAmazon?.unitCount !== undefined && (
+                <div className="flex items-center justify-between">
+                  <span className="text-arda-text-secondary">Unit Count</span>
+                  <span className="text-arda-text-primary">{selectedAmazon.unitCount}</span>
+                </div>
+              )}
+              {selectedAmazon?.upc && (
+                <div className="flex items-center justify-between">
+                  <span className="text-arda-text-secondary">UPC</span>
+                  <span className="text-arda-text-primary font-mono">{selectedAmazon.upc}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
           {/* Stats */}
-          <div className="grid grid-cols-2 gap-3 p-5 border-b border-slate-800">
+          <div className="grid grid-cols-2 gap-3 p-5 border-b border-arda-border">
             <StatCard 
               value={selectedProfile.dailyBurnRate.toFixed(1)} 
               label="Units/Day" 
@@ -386,25 +463,25 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
           </div>
 
           {/* Recommendations */}
-          <div className="p-5 border-b border-slate-800">
-            <h4 className="text-sm font-medium text-white mb-3">Kanban Settings</h4>
+          <div className="p-5 border-b border-arda-border">
+            <h4 className="text-sm font-medium text-arda-text-primary mb-3">Kanban Settings</h4>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">Min Qty (Reorder Point)</span>
-                <span className="text-sm font-semibold text-white bg-slate-800 px-2 py-1 rounded">
+                <span className="text-sm text-arda-text-secondary">Min Qty (Reorder Point)</span>
+                <span className="text-sm font-semibold text-arda-text-primary bg-arda-bg-tertiary px-2 py-1 rounded">
                   {selectedProfile.recommendedMin}
                 </span>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-sm text-slate-400">Order Qty</span>
-                <span className="text-sm font-semibold text-white bg-slate-800 px-2 py-1 rounded">
+                <span className="text-sm text-arda-text-secondary">Order Qty</span>
+                <span className="text-sm font-semibold text-arda-text-primary bg-arda-bg-tertiary px-2 py-1 rounded">
                   {selectedProfile.recommendedOrderQty}
                 </span>
               </div>
               {selectedProfile.nextPredictedOrder && (
                 <div className="flex items-center justify-between">
-                  <span className="text-sm text-slate-400">Next Predicted Order</span>
-                  <span className="text-sm font-semibold text-yellow-400">
+                  <span className="text-sm text-arda-text-secondary">Next Predicted Order</span>
+                  <span className="text-sm font-semibold text-arda-accent">
                     {new Date(selectedProfile.nextPredictedOrder).toLocaleDateString()}
                   </span>
                 </div>
@@ -414,17 +491,17 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
 
           {/* Order History */}
           <div className="flex-1 overflow-y-auto p-5">
-            <h4 className="text-sm font-medium text-white mb-3">Order History</h4>
+          <h4 className="text-sm font-medium text-arda-text-primary mb-3">Order History</h4>
             <div className="space-y-2">
               {selectedProfile.orders
                 .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
                 .map((order, idx) => (
                   <div 
                     key={`${order.orderId}-${idx}`}
-                    className="flex items-center justify-between p-3 bg-slate-800/50 rounded-lg hover:bg-slate-800 transition-colors"
+                  className="flex items-center justify-between p-3 bg-arda-bg-tertiary rounded-lg hover:bg-arda-bg-secondary transition-colors"
                   >
                     <div>
-                      <div className="text-sm text-white font-medium">
+                    <div className="text-sm text-arda-text-primary font-medium">
                         {new Date(order.date).toLocaleDateString('en-US', {
                           month: 'short',
                           day: 'numeric',
@@ -433,11 +510,11 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="text-sm font-semibold text-white">
+                    <div className="text-sm font-semibold text-arda-text-primary">
                         ×{order.quantity}
                       </div>
                       {order.unitPrice && (
-                        <div className="text-xs text-slate-500">
+                      <div className="text-xs text-arda-text-muted">
                           ${order.unitPrice.toFixed(2)} ea
                         </div>
                       )}
@@ -448,7 +525,7 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
           </div>
 
           {/* Actions */}
-          <div className="p-5 border-t border-slate-800 space-y-2">
+        <div className="p-5 border-t border-arda-border space-y-2">
             {matchingInventoryItem && onReorder && (
               <button
                 onClick={() => onReorder(matchingInventoryItem)}
@@ -459,7 +536,7 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
               </button>
             )}
             <button
-              className="w-full bg-slate-800 hover:bg-slate-700 text-white py-2.5 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+            className="w-full bg-white hover:bg-arda-bg-tertiary text-arda-text-primary py-2.5 px-4 rounded-lg font-medium transition-colors flex items-center justify-center gap-2 border border-arda-border"
             >
               <Icons.Upload className="w-4 h-4" />
               Push to Arda
@@ -474,16 +551,16 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
 // Stat Card Component
 const StatCard: React.FC<{ value: string; label: string; color: string }> = ({ value, label, color }) => {
   const colorClasses: Record<string, string> = {
-    orange: 'text-orange-400',
-    blue: 'text-blue-400',
-    green: 'text-green-400',
-    purple: 'text-purple-400',
+    orange: 'text-arda-accent',
+    blue: 'text-arda-accent',
+    green: 'text-arda-accent',
+    purple: 'text-arda-accent',
   };
   
   return (
-    <div className="bg-slate-800/50 rounded-lg p-3">
+    <div className="bg-arda-bg-tertiary rounded-lg p-3 border border-arda-border">
       <div className={`text-2xl font-bold ${colorClasses[color]}`}>{value}</div>
-      <div className="text-xs text-slate-500 mt-1">{label}</div>
+      <div className="text-xs text-arda-text-muted mt-1">{label}</div>
     </div>
   );
 };
@@ -541,21 +618,21 @@ const SupplierView: React.FC<{
   return (
     <div className="space-y-4">
       {filtered.map(([supplier, supplierOrders]) => (
-        <div key={supplier} className="bg-slate-800/30 rounded-lg overflow-hidden">
+        <div key={supplier} className="bg-white rounded-lg overflow-hidden border border-arda-border">
           {/* Supplier Header */}
           <button
             onClick={() => toggleSupplier(supplier)}
-            className="w-full flex items-center gap-3 p-4 hover:bg-slate-800/50 transition-colors"
+            className="w-full flex items-center gap-3 p-4 hover:bg-arda-bg-tertiary transition-colors"
           >
-            <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center flex-shrink-0">
-              <Icons.Building2 className="w-5 h-5 text-blue-400" />
+            <div className="w-10 h-10 rounded-lg bg-arda-bg-tertiary flex items-center justify-center flex-shrink-0">
+              <Icons.Building2 className="w-5 h-5 text-arda-accent" />
             </div>
             <div className="flex-1 text-left">
-              <div className="text-white font-medium">{supplier}</div>
-              <div className="text-sm text-slate-400">{supplierOrders.length} orders</div>
+              <div className="text-arda-text-primary font-medium">{supplier}</div>
+              <div className="text-sm text-arda-text-secondary">{supplierOrders.length} orders</div>
             </div>
             <Icons.ChevronRight 
-              className={`w-5 h-5 text-slate-400 transition-transform ${
+              className={`w-5 h-5 text-arda-text-muted transition-transform ${
                 expandedSuppliers.has(supplier) ? 'rotate-90' : ''
               }`}
             />
@@ -614,24 +691,32 @@ const ItemsView: React.FC<{
               quantity: profile.totalQuantityOrdered,
               unit: 'total',
               sku: profile.sku,
+              asin: profile.asin,
+              supplier: profile.supplier,
+              amazonEnriched: profile.asin ? {
+                asin: profile.asin,
+                itemName: profile.displayName,
+                imageUrl: profile.imageUrl,
+                amazonUrl: profile.amazonUrl,
+              } : undefined,
             })}
             className={`w-full text-left p-4 rounded-lg transition-all ${
               isSelected 
                 ? 'bg-arda-accent/20 border-2 border-arda-accent' 
-                : 'bg-slate-800/50 border border-slate-700/50 hover:bg-slate-800 hover:border-slate-600'
+                : 'bg-white border border-arda-border hover:bg-arda-bg-tertiary'
             }`}
           >
             <div className="flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-white font-medium truncate">{profile.displayName}</span>
+                  <span className="text-arda-text-primary font-medium truncate">{profile.displayName}</span>
                   {profile.sku && (
-                    <span className="text-xs text-slate-500 font-mono bg-slate-800 px-1.5 py-0.5 rounded">
+                    <span className="text-xs text-arda-text-muted font-mono bg-arda-bg-tertiary px-1.5 py-0.5 rounded">
                       {profile.sku}
                     </span>
                   )}
                 </div>
-                <div className="text-sm text-slate-400 mt-1">{profile.supplier}</div>
+                <div className="text-sm text-arda-text-secondary mt-1">{profile.supplier}</div>
               </div>
               <VelocityBadge
                 dailyBurnRate={profile.dailyBurnRate}
@@ -649,14 +734,14 @@ const ItemsView: React.FC<{
                 .map((order, idx) => (
                   <span
                     key={idx}
-                    className="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded"
+                    className="text-xs bg-arda-bg-tertiary text-arda-text-secondary px-2 py-0.5 rounded"
                   >
                     {new Date(order.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                    <span className="text-slate-500 ml-1">×{order.quantity}</span>
+                    <span className="text-arda-text-muted ml-1">×{order.quantity}</span>
                   </span>
                 ))}
               {profile.orders.length > 5 && (
-                <span className="text-xs text-slate-500">
+                <span className="text-xs text-arda-text-muted">
                   +{profile.orders.length - 5} more
                 </span>
               )}
@@ -678,23 +763,23 @@ const OrderCard: React.FC<{
   compact?: boolean;
 }> = ({ order, isExpanded, onToggle, onItemClick, velocityProfiles, compact = false }) => {
   return (
-    <div className={`bg-slate-800/50 rounded-lg overflow-hidden border border-slate-700/50 ${
+    <div className={`bg-white rounded-lg overflow-hidden border border-arda-border ${
       compact ? '' : ''
     }`}>
       {/* Order Header */}
       <button
         onClick={onToggle}
-        className="w-full flex items-center gap-3 p-4 hover:bg-slate-800 transition-colors"
+        className="w-full flex items-center gap-3 p-4 hover:bg-arda-bg-tertiary transition-colors"
       >
         <div className={`rounded-lg flex items-center justify-center flex-shrink-0 ${
-          compact ? 'w-8 h-8 bg-green-500/10' : 'w-10 h-10 bg-green-500/20'
+          compact ? 'w-8 h-8 bg-arda-bg-tertiary' : 'w-10 h-10 bg-arda-bg-tertiary'
         }`}>
-          <Icons.Package className={`text-green-400 ${compact ? 'w-4 h-4' : 'w-5 h-5'}`} />
+          <Icons.Package className={`text-arda-accent ${compact ? 'w-4 h-4' : 'w-5 h-5'}`} />
         </div>
         
         <div className="flex-1 text-left min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-white font-medium">
+            <span className="text-arda-text-primary font-medium">
               {compact ? '' : `${order.supplier} - `}
               {new Date(order.orderDate).toLocaleDateString('en-US', {
                 month: 'short',
@@ -703,45 +788,58 @@ const OrderCard: React.FC<{
               })}
             </span>
             {order.confidence && order.confidence < 0.8 && (
-              <span className="text-xs bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded">
+              <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">
                 Low confidence
               </span>
             )}
           </div>
-          <div className="text-sm text-slate-400">
+          <div className="text-sm text-arda-text-secondary">
             {order.items.length} item{order.items.length !== 1 ? 's' : ''}
             {order.totalAmount && ` • $${order.totalAmount.toFixed(2)}`}
           </div>
         </div>
 
         <Icons.ChevronRight 
-          className={`w-5 h-5 text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+          className={`w-5 h-5 text-arda-text-muted transition-transform ${isExpanded ? 'rotate-90' : ''}`}
         />
       </button>
 
       {/* Order Items */}
       {isExpanded && (
-        <div className="border-t border-slate-700/50 p-3 space-y-2">
+        <div className="border-t border-arda-border p-3 space-y-2">
           {order.items.map((item, idx) => {
             const normalizedName = item.normalizedName || item.name.toLowerCase().trim();
             const profile = velocityProfiles.get(normalizedName);
+            const displayName = getHumanItemName(item);
+            const unitPrice = item.unitPrice ?? item.amazonEnriched?.unitPrice ?? parsePriceValue(item.amazonEnriched?.price);
+            const totalPrice = unitPrice ? unitPrice * item.quantity : undefined;
             
+            const itemData: LineItemNodeData = {
+              lineItemId: item.id || `${order.id}-${idx}`,
+              orderId: order.id,
+              emailId: order.originalEmailId,
+              name: displayName,
+              normalizedName,
+              quantity: item.quantity,
+              unit: item.unit,
+              unitPrice: unitPrice,
+              sku: item.sku || item.asin,
+              asin: item.asin,
+              supplier: order.supplier,
+              orderDate: order.orderDate,
+              totalPrice,
+              amazonEnriched: item.amazonEnriched,
+            };
+
             return (
-              <button
+              <div
                 key={idx}
-                onClick={() => onItemClick({
-                  lineItemId: item.id || `${order.id}-${idx}`,
-                  orderId: order.id,
-                  emailId: order.originalEmailId,
-                  name: item.amazonEnriched?.itemName || item.name,
-                  normalizedName,
-                  quantity: item.quantity,
-                  unit: item.unit,
-                  unitPrice: item.unitPrice,
-                  sku: item.sku || item.asin,
-                })}
-                className="w-full flex items-center gap-3 p-3 rounded-lg bg-slate-800/50 hover:bg-slate-700/50 transition-colors text-left"
+                className="w-full rounded-lg bg-arda-bg-tertiary border border-arda-border"
               >
+                <button
+                  onClick={() => onItemClick(itemData)}
+                  className="w-full flex items-center gap-3 p-3 hover:bg-arda-bg-secondary transition-colors text-left rounded-lg"
+                >
                 {/* Amazon product image or fallback icon */}
                 {item.amazonEnriched?.imageUrl ? (
                   <img 
@@ -750,31 +848,21 @@ const OrderCard: React.FC<{
                     className="w-12 h-12 rounded-lg object-contain bg-white flex-shrink-0"
                   />
                 ) : (
-                  <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center flex-shrink-0">
-                    <Icons.Box className="w-5 h-5 text-purple-400" />
+                  <div className="w-10 h-10 rounded-lg bg-arda-bg-tertiary flex items-center justify-center flex-shrink-0">
+                    <Icons.Box className="w-5 h-5 text-arda-accent" />
                   </div>
                 )}
                 
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm text-white truncate">
-                    {item.amazonEnriched?.itemName || item.name}
+                  <div className="text-sm text-arda-text-primary truncate">
+                    {displayName}
                   </div>
-                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <div className="flex items-center flex-wrap gap-2 text-xs text-arda-text-muted">
                     <span>{item.quantity} {item.unit}</span>
-                    {item.unitPrice && <span className="text-green-400 font-medium">@ ${item.unitPrice.toFixed(2)}</span>}
-                    {item.asin && <span className="text-orange-400">ASIN: {item.asin}</span>}
+                    {unitPrice && <span className="text-arda-accent font-medium">@ ${unitPrice.toFixed(2)}</span>}
+                    {totalPrice && <span className="text-arda-accent">Total: ${totalPrice.toFixed(2)}</span>}
+                    {item.asin && <span className="text-arda-accent">ASIN: {item.asin}</span>}
                   </div>
-                  {item.amazonEnriched?.amazonUrl && (
-                    <a 
-                      href={item.amazonEnriched.amazonUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="text-xs text-blue-400 hover:underline"
-                    >
-                      View on Amazon →
-                    </a>
-                  )}
                 </div>
 
                 {profile && profile.orderCount > 1 && (
@@ -785,7 +873,20 @@ const OrderCard: React.FC<{
                     compact
                   />
                 )}
-              </button>
+                </button>
+                {item.amazonEnriched?.amazonUrl && (
+                  <div className="px-3 pb-3 pl-16">
+                    <a 
+                      href={item.amazonEnriched.amazonUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-arda-accent hover:underline"
+                    >
+                      View on Amazon →
+                    </a>
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>

@@ -929,12 +929,12 @@ async function processAmazonEmailsInBackground(
     });
 
     // Each email with ASINs becomes an order
-    // Structure: { emailId, subject, date, asins[] }
+    // Structure: { emailId, subject, date, items[] }
     interface EmailOrder {
       emailId: string;
       subject: string;
       date: string;
-      asins: string[];
+      items: { asin: string; quantity: number }[];
     }
     const emailOrders: EmailOrder[] = [];
     const allAsins: Set<string> = new Set();
@@ -977,15 +977,27 @@ async function processAmazonEmailsInBackground(
         const asins = extractAsinsFromEmail(body, subject);
         
         if (asins.length > 0) {
+          // Try to extract quantities (best-effort)
+          const qtyMatches = Array.from(body.matchAll(/(?:qty|quantity)\s*[:x]?\s*(\d+)/gi))
+            .map(match => parseInt(match[1], 10))
+            .filter(qty => !isNaN(qty) && qty > 0);
+          
+          // If we have the same number of quantities as ASINs, map them by position
+          const quantities = qtyMatches.length === asins.length ? qtyMatches : [];
+          const items = asins.map((asin, index) => ({
+            asin,
+            quantity: quantities[index] || 1,
+          }));
+          
           // Each email with ASINs = one order
           emailOrders.push({
             emailId: msg.id!,
             subject,
             date,
-            asins,
+            items,
           });
-          asins.forEach(asin => allAsins.add(asin));
-          jobManager.addJobLog(jobId, `📦 Found ${asins.length} items in: ${subject.substring(0, 50)}...`);
+          items.forEach(item => allAsins.add(item.asin));
+          jobManager.addJobLog(jobId, `📦 Found ${items.length} items in: ${subject.substring(0, 50)}...`);
         }
 
         // Update progress
@@ -999,7 +1011,7 @@ async function processAmazonEmailsInBackground(
       }
     }
 
-    jobManager.addJobLog(jobId, `🎯 Found ${emailOrders.length} orders with ${allAsins.size} unique items`);
+      jobManager.addJobLog(jobId, `🎯 Found ${emailOrders.length} orders with ${allAsins.size} unique items`);
 
     // Now enrich all unique ASINs with Amazon Product Advertising API
     if (allAsins.size > 0) {
@@ -1018,16 +1030,16 @@ async function processAmazonEmailsInBackground(
       for (const emailOrder of emailOrders) {
         const items: ProcessedOrder['items'] = [];
         
-        for (const asin of emailOrder.asins) {
-          const data = enrichedData.get(asin);
+        for (const orderItem of emailOrder.items) {
+          const data = enrichedData.get(orderItem.asin);
           
           items.push({
-            id: `amazon-item-${asin}-${emailOrder.emailId}`,
-            name: data?.ItemName || `Amazon Product ${asin}`,
-            quantity: 1,
+            id: `amazon-item-${orderItem.asin}-${emailOrder.emailId}`,
+            name: data?.ItemName || `Amazon Product ${orderItem.asin}`,
+            quantity: orderItem.quantity || 1,
             unit: 'each',
             unitPrice: parseFloat(data?.Price?.replace(/[^0-9.]/g, '') || '0'),
-            asin: asin,
+            asin: orderItem.asin,
             amazonEnriched: data ? {
               asin: data.ASIN,
               itemName: data.ItemName,
@@ -1035,6 +1047,7 @@ async function processAmazonEmailsInBackground(
               imageUrl: data.ImageURL,
               amazonUrl: data.AmazonURL,
               unitCount: data.UnitCount,
+              unitPrice: data.UnitPrice,
               upc: data.UPC,
             } : undefined,
           });
@@ -1054,7 +1067,7 @@ async function processAmazonEmailsInBackground(
           id: `amazon-${emailOrder.emailId}`,
           supplier: 'Amazon',
           orderDate,
-          totalAmount: items.reduce((sum, item) => sum + (item.unitPrice || 0), 0),
+          totalAmount: items.reduce((sum, item) => sum + (item.unitPrice || 0) * (item.quantity || 1), 0),
           items,
           confidence: 1.0, // Direct from API
         };

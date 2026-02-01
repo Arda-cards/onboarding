@@ -99,6 +99,11 @@ export interface LineItemNodeData {
   unit: string;
   unitPrice?: number;
   sku?: string;
+  asin?: string;
+  supplier?: string;
+  orderDate?: string;
+  totalPrice?: number;
+  amazonEnriched?: AmazonItemData;
 }
 
 export interface VelocityNodeData {

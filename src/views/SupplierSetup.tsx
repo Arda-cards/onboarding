@@ -31,6 +31,8 @@ const OTHER_PRIORITY_SUPPLIERS: DiscoveredSupplier[] = [
   },
 ];
 
+const PRIORITY_SUPPLIER_DOMAINS = new Set(['mcmaster.com', 'uline.com']);
+
 const CATEGORY_COLORS: Record<string, { bg: string; text: string; icon: string }> = {
   industrial: { bg: 'bg-blue-50', text: 'text-blue-600', icon: '🏭' },
   retail: { bg: 'bg-green-50', text: 'text-green-600', icon: '🛒' },
@@ -138,7 +140,11 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     return allItems.reduce((sum, item) => sum + (item.price || 0), 0);
   }, [allItems]);
 
-  const totalOrders = amazonOrders.length + priorityOrders.length + otherOrders.length;
+  const combinedOrders = useMemo(() => {
+    return [...amazonOrders, ...priorityOrders, ...otherOrders];
+  }, [amazonOrders, priorityOrders, otherOrders]);
+
+  const totalOrders = combinedOrders.length;
   const uniqueSuppliers = useMemo(() => {
     const suppliers = new Set<string>();
     allItems.forEach(item => suppliers.add(item.supplier));
@@ -381,11 +387,10 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   }, [currentJobId, isScanning, pollJobStatus]);
 
   // Scan selected suppliers
-  const handleScanSuppliers = async () => {
+  const handleScanSuppliers = useCallback(async () => {
     // Filter to only non-Amazon, non-priority enabled suppliers
-    const priorityDomains = new Set(['mcmaster.com', 'uline.com']);
     const domainsToScan = Array.from(enabledSuppliers).filter(
-      d => !d.includes('amazon') && !priorityDomains.has(d)
+      d => !d.includes('amazon') && !PRIORITY_SUPPLIER_DOMAINS.has(d)
     );
     
     if (domainsToScan.length === 0) {
@@ -402,24 +407,25 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       console.error('Scan error:', error);
       setIsScanning(false);
     }
-  };
+  }, [enabledSuppliers]);
 
-  const handleToggleSupplier = (domain: string) => {
-    const newEnabled = new Set(enabledSuppliers);
-    if (newEnabled.has(domain)) {
-      newEnabled.delete(domain);
-    } else {
-      newEnabled.add(domain);
-    }
-    setEnabledSuppliers(newEnabled);
-  };
+  const handleToggleSupplier = useCallback((domain: string) => {
+    setEnabledSuppliers(prev => {
+      const next = new Set(prev);
+      if (next.has(domain)) {
+        next.delete(domain);
+      } else {
+        next.add(domain);
+      }
+      return next;
+    });
+  }, []);
 
-  const handleComplete = () => {
-    const allOrders = [...amazonOrders, ...priorityOrders, ...otherOrders];
-    onScanComplete(allOrders);
-  };
+  const handleComplete = useCallback(() => {
+    onScanComplete(combinedOrders);
+  }, [combinedOrders, onScanComplete]);
 
-  const suppliers = allSuppliers;
+  const supplierCount = allSuppliers.length;
   const enabledCount = enabledSuppliers.size;
   const isPriorityProcessing = (!isPriorityComplete && priorityJobId);
   const isAnyProcessing = (!isAmazonComplete && amazonJobId) || isPriorityProcessing || isScanning;
@@ -435,6 +441,17 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   const amazonProgressPercent = amazonProgress 
     ? (amazonProgress.processed / Math.max(amazonProgress.total, 1)) * 100 
     : 0;
+
+  const supplierGridItems = useMemo(() => {
+    return allSuppliers.map(supplier => {
+      const colors = CATEGORY_COLORS[supplier.category] || CATEGORY_COLORS.unknown;
+      return {
+        supplier,
+        colors,
+        isEnabled: enabledSuppliers.has(supplier.domain),
+      };
+    });
+  }, [allSuppliers, enabledSuppliers]);
 
   // Milestone celebration messages
   const getMilestoneMessage = (milestone: string): { title: string; subtitle: string; emoji: string } => {
@@ -773,7 +790,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
             <p className="text-sm text-arda-text-secondary">
               {isDiscovering 
                 ? 'Discovering...' 
-                : `${suppliers.length} additional suppliers found`}
+                : `${supplierCount} additional suppliers found`}
             </p>
           </div>
           
@@ -828,42 +845,37 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         )}
 
         {/* Supplier Grid */}
-        {!isScanning && hasDiscovered && suppliers.length > 0 && (
+        {!isScanning && hasDiscovered && supplierCount > 0 && (
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 gap-3">
-            {suppliers.map((supplier) => {
-              const isEnabled = enabledSuppliers.has(supplier.domain);
-              const colors = CATEGORY_COLORS[supplier.category] || CATEGORY_COLORS.unknown;
-              
-              return (
-                <div
-                  key={supplier.domain}
-                  onClick={() => handleToggleSupplier(supplier.domain)}
-                  className={`
-                    relative aspect-square p-3 rounded-xl border-2 cursor-pointer transition-all
-                    flex flex-col items-center justify-center text-center
-                    ${isEnabled 
-                      ? 'bg-white border-arda-accent shadow-md scale-105' 
-                      : 'bg-gray-50 border-gray-200 hover:border-gray-300 opacity-60 hover:opacity-100'
-                    }
-                  `}
-                >
-                  {isEnabled && (
-                    <div className="absolute top-2 right-2">
-                      <Icons.CheckCircle2 className="w-5 h-5 text-arda-accent" />
-                    </div>
-                  )}
-                  <div className="text-2xl mb-1">{colors.icon}</div>
-                  <div className="text-sm font-medium text-arda-text-primary truncate w-full">
-                    {supplier.displayName}
+            {supplierGridItems.map(({ supplier, colors, isEnabled }) => (
+              <div
+                key={supplier.domain}
+                onClick={() => handleToggleSupplier(supplier.domain)}
+                className={`
+                  relative aspect-square p-3 rounded-xl border-2 cursor-pointer transition-all
+                  flex flex-col items-center justify-center text-center
+                  ${isEnabled 
+                    ? 'bg-white border-arda-accent shadow-md scale-105' 
+                    : 'bg-gray-50 border-gray-200 hover:border-gray-300 opacity-60 hover:opacity-100'
+                  }
+                `}
+              >
+                {isEnabled && (
+                  <div className="absolute top-2 right-2">
+                    <Icons.CheckCircle2 className="w-5 h-5 text-arda-accent" />
                   </div>
-                  {supplier.emailCount > 0 && (
-                    <div className="text-xs text-arda-text-muted">
-                      {supplier.emailCount} emails
-                    </div>
-                  )}
+                )}
+                <div className="text-2xl mb-1">{colors.icon}</div>
+                <div className="text-sm font-medium text-arda-text-primary truncate w-full">
+                  {supplier.displayName}
                 </div>
-              );
-            })}
+                {supplier.emailCount > 0 && (
+                  <div className="text-xs text-arda-text-muted">
+                    {supplier.emailCount} emails
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         )}
 

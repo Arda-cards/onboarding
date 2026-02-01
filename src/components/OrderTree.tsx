@@ -328,9 +328,9 @@ export const OrderTree: React.FC<OrderTreeProps> = ({
   if (orders.length === 0) {
     return (
       <div className={`flex flex-col items-center justify-center py-12 ${className}`}>
-        <Icons.GitBranch className="w-12 h-12 text-slate-600 mb-4" />
-        <p className="text-slate-400 text-lg">No order data to display</p>
-        <p className="text-slate-500 text-sm mt-1">
+        <Icons.GitBranch className="w-12 h-12 text-arda-text-muted mb-4" />
+        <p className="text-arda-text-secondary text-lg">No order data to display</p>
+        <p className="text-arda-text-muted text-sm mt-1">
           Process emails from the Ingestion Engine to see your order journey
         </p>
       </div>
@@ -343,24 +343,24 @@ export const OrderTree: React.FC<OrderTreeProps> = ({
       <div className="flex-shrink-0 mb-4">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h2 className="text-xl font-semibold text-white flex items-center gap-2">
+            <h2 className="text-xl font-semibold text-arda-text-primary flex items-center gap-2">
               <Icons.GitBranch className="w-5 h-5 text-arda-accent" />
               Order Journey
             </h2>
-            <p className="text-sm text-slate-400 mt-1">
+            <p className="text-sm text-arda-text-secondary mt-1">
               Trace the flow from email to order to line items
             </p>
           </div>
           
           {/* View Mode Toggle and Expand/Collapse Controls */}
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 bg-slate-800 rounded-lg p-1">
+            <div className="flex items-center gap-2 bg-arda-bg-tertiary border border-arda-border rounded-lg p-1">
               <button
                 onClick={() => setViewMode('chronological')}
                 className={`px-3 py-1.5 rounded text-sm transition-colors ${
                   viewMode === 'chronological'
                     ? 'bg-arda-accent text-white'
-                    : 'text-slate-400 hover:text-white'
+                    : 'text-arda-text-secondary hover:text-arda-text-primary'
                 }`}
               >
                 Timeline
@@ -370,7 +370,7 @@ export const OrderTree: React.FC<OrderTreeProps> = ({
                 className={`px-3 py-1.5 rounded text-sm transition-colors ${
                   viewMode === 'bySupplier'
                     ? 'bg-arda-accent text-white'
-                    : 'text-slate-400 hover:text-white'
+                    : 'text-arda-text-secondary hover:text-arda-text-primary'
                 }`}
               >
                 By Supplier
@@ -380,7 +380,7 @@ export const OrderTree: React.FC<OrderTreeProps> = ({
                 className={`px-3 py-1.5 rounded text-sm transition-colors ${
                   viewMode === 'byItem'
                     ? 'bg-arda-accent text-white'
-                    : 'text-slate-400 hover:text-white'
+                    : 'text-arda-text-secondary hover:text-arda-text-primary'
                 }`}
               >
                 By Item
@@ -388,10 +388,10 @@ export const OrderTree: React.FC<OrderTreeProps> = ({
             </div>
             
             {/* Expand/Collapse All Buttons */}
-            <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1">
+            <div className="flex items-center gap-1 bg-arda-bg-tertiary border border-arda-border rounded-lg p-1">
               <button
                 onClick={handleExpandAll}
-                className="px-3 py-1.5 rounded text-sm text-slate-400 hover:text-white transition-colors flex items-center gap-1.5"
+                className="px-3 py-1.5 rounded text-sm text-arda-text-secondary hover:text-arda-text-primary transition-colors flex items-center gap-1.5"
                 title="Expand All"
               >
                 <Icons.ChevronDown className="w-4 h-4" />
@@ -399,7 +399,7 @@ export const OrderTree: React.FC<OrderTreeProps> = ({
               </button>
               <button
                 onClick={handleCollapseAll}
-                className="px-3 py-1.5 rounded text-sm text-slate-400 hover:text-white transition-colors flex items-center gap-1.5"
+                className="px-3 py-1.5 rounded text-sm text-arda-text-secondary hover:text-arda-text-primary transition-colors flex items-center gap-1.5"
                 title="Collapse All"
               >
                 <Icons.ChevronRight className="w-4 h-4" />
@@ -412,37 +412,37 @@ export const OrderTree: React.FC<OrderTreeProps> = ({
         {/* Stats Bar */}
         <div className="flex items-center gap-4 text-sm">
           <div className="flex items-center gap-1.5">
-            <Icons.Mail className="w-4 h-4 text-blue-400" />
-            <span className="text-slate-300">{stats.emails} emails</span>
+            <Icons.Mail className="w-4 h-4 text-arda-accent" />
+            <span className="text-arda-text-secondary">{stats.emails} emails</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <Icons.Package className="w-4 h-4 text-green-400" />
-            <span className="text-slate-300">{stats.orders} orders</span>
+            <Icons.Package className="w-4 h-4 text-arda-accent" />
+            <span className="text-arda-text-secondary">{stats.orders} orders</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <Icons.Box className="w-4 h-4 text-purple-400" />
-            <span className="text-slate-300">{stats.lineItems} line items</span>
+            <Icons.Box className="w-4 h-4 text-arda-accent" />
+            <span className="text-arda-text-secondary">{stats.lineItems} line items</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <Icons.Activity className="w-4 h-4 text-orange-400" />
-            <span className="text-slate-300">{stats.uniqueItems} unique items</span>
+            <Icons.Activity className="w-4 h-4 text-arda-accent" />
+            <span className="text-arda-text-secondary">{stats.uniqueItems} unique items</span>
           </div>
         </div>
 
         {/* Search Bar */}
         <div className="relative mt-3">
-          <Icons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+          <Icons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-arda-text-muted" />
           <input
             type="text"
             placeholder="Search items, suppliers, orders..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-10 pr-4 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-arda-accent"
+            className="w-full bg-white border border-arda-border rounded-lg pl-10 pr-4 py-2 text-sm text-arda-text-primary placeholder-arda-text-muted focus:outline-none focus:border-arda-accent"
           />
           {searchQuery && (
             <button
               onClick={() => setSearchQuery('')}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-arda-text-muted hover:text-arda-text-primary"
               title="Clear search"
               aria-label="Clear search"
             >
@@ -455,7 +455,7 @@ export const OrderTree: React.FC<OrderTreeProps> = ({
       {/* Tree View */}
       <div 
         ref={treeContainerRef}
-        className="flex-1 overflow-y-auto bg-slate-900/50 rounded-lg border border-slate-800 p-2"
+        className="flex-1 overflow-y-auto bg-white rounded-lg border border-arda-border p-2"
         tabIndex={0}
         onFocus={() => {
           // Set focus to first node if none focused
@@ -466,8 +466,8 @@ export const OrderTree: React.FC<OrderTreeProps> = ({
       >
         {displayTree.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-8">
-            <Icons.Search className="w-8 h-8 text-slate-600 mb-2" />
-            <p className="text-slate-400">No results match your search</p>
+            <Icons.Search className="w-8 h-8 text-arda-text-muted mb-2" />
+            <p className="text-arda-text-secondary">No results match your search</p>
           </div>
         ) : (
           displayTree.map((node) => (

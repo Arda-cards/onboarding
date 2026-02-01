@@ -66,9 +66,9 @@ const getNodeColors = (type: JourneyNodeType) => {
       };
     default:
       return {
-        iconBg: 'bg-slate-500/20',
-        iconColor: 'text-slate-400',
-        border: 'border-slate-500/30',
+        iconBg: 'bg-arda-bg-tertiary',
+        iconColor: 'text-arda-text-muted',
+        border: 'border-arda-border',
       };
   }
 };
@@ -125,10 +125,10 @@ export const TreeNode: React.FC<TreeNodeProps> = ({
         className={`
           flex items-center gap-2 py-2 px-2 rounded-lg cursor-pointer
           transition-all duration-200 ease-in-out group
-          hover:bg-slate-800/50 hover:scale-[1.01]
-          ${level === 0 ? 'bg-slate-800/30' : ''}
-          ${isFocused ? 'ring-2 ring-arda-accent ring-offset-2 ring-offset-slate-900 bg-slate-800/70' : ''}
-          ${isNew ? 'animate-pulse ring-2 ring-green-400/50 ring-offset-2 ring-offset-slate-900' : ''}
+          hover:bg-arda-bg-tertiary hover:scale-[1.01]
+          ${level === 0 ? 'bg-arda-bg-secondary' : ''}
+          ${isFocused ? 'ring-2 ring-arda-accent ring-offset-2 ring-offset-white bg-arda-bg-tertiary' : ''}
+          ${isNew ? 'animate-pulse ring-2 ring-green-400/50 ring-offset-2 ring-offset-white' : ''}
         `}
         style={{ paddingLeft: `${level * 20 + 8}px` }}
         onClick={handleClick}
@@ -141,20 +141,20 @@ export const TreeNode: React.FC<TreeNodeProps> = ({
           className={`
             w-5 h-5 flex items-center justify-center rounded relative
             transition-all duration-200 ease-in-out
-            hover:bg-slate-700 hover:scale-110
+            hover:bg-arda-bg-tertiary hover:scale-110
             ${hasChildren ? 'visible' : 'invisible'}
           `}
         >
           <Icons.ChevronRight 
             className={`
-              w-4 h-4 text-slate-400 absolute
+              w-4 h-4 text-arda-text-muted absolute
               transition-opacity duration-200 ease-in-out
               ${isExpanded ? 'opacity-0' : 'opacity-100'}
             `} 
           />
           <Icons.ChevronDown 
             className={`
-              w-4 h-4 text-slate-400 absolute
+              w-4 h-4 text-arda-text-muted absolute
               transition-opacity duration-200 ease-in-out
               ${isExpanded ? 'opacity-100' : 'opacity-0'}
             `} 
@@ -174,7 +174,7 @@ export const TreeNode: React.FC<TreeNodeProps> = ({
         {/* Node Content */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-slate-200 truncate">
+            <span className="text-sm font-medium text-arda-text-primary truncate">
               {node.label}
             </span>
             
@@ -190,7 +190,7 @@ export const TreeNode: React.FC<TreeNodeProps> = ({
           </div>
           
           {node.subtitle && (
-            <div className="text-xs text-slate-500 truncate">
+            <div className="text-xs text-arda-text-muted truncate">
               {node.subtitle}
             </div>
           )}
@@ -212,14 +212,14 @@ export const TreeNode: React.FC<TreeNodeProps> = ({
         
         {/* Order amount badge */}
         {node.type === 'order' && (node.data as OrderNodeData)?.totalAmount && (
-          <span className="text-sm font-medium text-green-400">
+          <span className="text-sm font-medium text-arda-accent">
             ${((node.data as OrderNodeData).totalAmount || 0).toFixed(2)}
           </span>
         )}
         
         {/* Date for emails */}
         {node.type === 'email' && (node.data as EmailNodeData)?.date && (
-          <span className="text-xs text-slate-500">
+          <span className="text-xs text-arda-text-muted">
             {new Date((node.data as EmailNodeData).date).toLocaleDateString()}
           </span>
         )}
@@ -251,7 +251,7 @@ export const TreeNode: React.FC<TreeNodeProps> = ({
         >
           {/* Connecting line */}
           <div 
-            className="absolute left-0 top-0 bottom-0 w-px bg-slate-700 transition-opacity duration-300"
+            className="absolute left-0 top-0 bottom-0 w-px bg-arda-border transition-opacity duration-300"
             style={{ left: `${level * 20 + 18}px` }}
           />
           
