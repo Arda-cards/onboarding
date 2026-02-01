@@ -1045,9 +1045,10 @@ router.post('/start', jobsLimiter, requireAuth, async (req: Request, res: Respon
     }
 
     // Create job with specified type (defaults to 'suppliers')
+    // allowConcurrent=true ensures this job won't cancel other job types
     const effectiveJobType = typeof jobType === 'string' && jobType.length > 0 ? jobType : 'suppliers';
     console.log(`📥 /start request: userId=${userId.substring(0, 8)}, jobType=${effectiveJobType}, domains=${validDomains.length}`);
-    const job = jobManager.createJob(userId, { jobType: effectiveJobType });
+    const job = jobManager.createJob(userId, { jobType: effectiveJobType, allowConcurrent: true });
     
     if (validDomains.length > 0) {
       jobManager.addJobLog(job.id, `🚀 Job created for ${validDomains.length} selected suppliers: ${validDomains.join(', ')}`);
@@ -1084,8 +1085,9 @@ router.post('/start-amazon', amazonLimiter, requireAuth, async (req: Request, re
     }
 
     // Create job specifically for Amazon
+    // allowConcurrent=true ensures this job won't cancel other job types
     console.log(`📥 /start-amazon request: userId=${userId.substring(0, 8)}`);
-    const job = jobManager.createJob(userId, { jobType: 'amazon' });
+    const job = jobManager.createJob(userId, { jobType: 'amazon', allowConcurrent: true });
     jobManager.addJobLog(job.id, '🛒 Starting Amazon-first processing...');
 
     // Start Amazon processing in background
