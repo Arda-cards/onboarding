@@ -23,7 +23,7 @@ export interface AmazonItemData {
   price?: string;
   imageUrl?: string;
   amazonUrl?: string;
-  unitCount?: number;
+  unitCount?: number | string;
   unitPrice?: number;
   upc?: string;
 }
@@ -34,6 +34,7 @@ export interface ItemVelocityProfile {
   displayName: string;
   supplier: string;
   sku?: string;
+  packSize?: number;
   // Amazon enrichment
   asin?: string;
   imageUrl?: string;

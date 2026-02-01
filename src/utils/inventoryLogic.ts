@@ -54,6 +54,49 @@ export const normalizeItemName = (name: string): string => {
   return normalized;
 };
 
+const normalizePackSizeValue = (value: number | null | undefined): number | null => {
+  if (!Number.isFinite(value)) return null;
+  const rounded = Math.round(Number(value));
+  if (rounded <= 1 || rounded > 10000) return null;
+  return rounded;
+};
+
+const parsePackSizeFromText = (text?: string): number | null => {
+  if (!text) return null;
+  const patterns = [
+    /\b(\d+)\s*(?:pack|pk|ct|count|pcs|pieces|units|unit|each|ea|bag|box|case)\b/i,
+    /\b(?:pack|box|case|bag)\s+of\s+(\d+)\b/i,
+    /\b(\d+)\s*[-\s]?(?:pk|ct)\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match) {
+      const value = parseInt(match[1], 10);
+      const normalized = normalizePackSizeValue(value);
+      if (normalized) return normalized;
+    }
+  }
+  return null;
+};
+
+const getPackSizeForItem = (item: LineItem): number => {
+  const amazonPack = normalizePackSizeValue(
+    typeof item.amazonEnriched?.unitCount === 'string'
+      ? parseFloat(item.amazonEnriched.unitCount)
+      : item.amazonEnriched?.unitCount
+  );
+  if (amazonPack) return amazonPack;
+  const fromName = parsePackSizeFromText(item.amazonEnriched?.itemName || item.name);
+  if (fromName) return fromName;
+  return 1;
+};
+
+const roundUpToMultiple = (value: number, multiple: number): number => {
+  if (multiple <= 1) return Math.ceil(value);
+  const rounded = Math.ceil(value / multiple) * multiple;
+  return Math.max(rounded, multiple);
+};
+
 /**
  * Calculate simple string similarity using Levenshtein-like distance
  * Returns a value between 0 (identical) and 1 (completely different)
@@ -201,6 +244,7 @@ export const buildVelocityProfiles = (
     order.items.forEach(item => {
       const normalizedName = item.normalizedName || normalizeItemName(item.name);
       const amazonData = item.amazonEnriched;
+      const packSize = getPackSizeForItem(item);
       
       // Use humanized name > enriched name > original name
       const displayName = amazonData?.humanizedName || amazonData?.itemName || item.name;
@@ -215,6 +259,7 @@ export const buildVelocityProfiles = (
           asin: item.asin,
           imageUrl: amazonData?.imageUrl,
           amazonUrl: amazonData?.amazonUrl,
+          packSize,
           // Initialize other fields
           orders: [],
           totalQuantityOrdered: 0,
@@ -238,6 +283,9 @@ export const buildVelocityProfiles = (
         if (!profile.asin && item.asin) {
           profile.asin = item.asin;
         }
+        if (!profile.packSize || (packSize > 1 && profile.packSize === 1)) {
+          profile.packSize = packSize;
+        }
         // Update displayName - prefer humanized > enriched
         if (amazonData?.humanizedName && profile.displayName !== amazonData.humanizedName) {
           profile.displayName = amazonData.humanizedName;
@@ -247,17 +295,18 @@ export const buildVelocityProfiles = (
       }
       
       const profile = profileMap.get(normalizedName)!;
+      const effectiveQuantity = item.quantity * packSize;
       
       // Add order occurrence
       profile.orders.push({
         orderId: order.id,
         emailId: order.originalEmailId,
         date: order.orderDate,
-        quantity: item.quantity,
+        quantity: effectiveQuantity,
         unitPrice: item.unitPrice,
       });
       
-      profile.totalQuantityOrdered += item.quantity;
+      profile.totalQuantityOrdered += effectiveQuantity;
       
       // Update dates
       if (new Date(order.orderDate) < new Date(profile.firstOrderDate)) {
@@ -295,13 +344,12 @@ export const buildVelocityProfiles = (
     const effectiveSpan = daySpan === 0 ? 30 : daySpan;
     profile.dailyBurnRate = profile.totalQuantityOrdered / effectiveSpan;
     
-    // Calculate recommendations
-    const LEAD_TIME = 7;
-    const SAFETY_FACTOR = 1.5;
-    profile.recommendedMin = Math.ceil(profile.dailyBurnRate * LEAD_TIME * SAFETY_FACTOR);
-    
-    const targetDays = Math.max(profile.averageCadenceDays, 30);
-    profile.recommendedOrderQty = Math.ceil(profile.dailyBurnRate * targetDays);
+    // Calculate recommendations (two-bin system with pack-size rounding)
+    const coverageDays = Math.max(profile.averageCadenceDays, 1);
+    const packSize = profile.packSize || 1;
+    const binQty = roundUpToMultiple(profile.dailyBurnRate * coverageDays, packSize);
+    profile.recommendedMin = binQty;
+    profile.recommendedOrderQty = binQty;
     
     // Predict next order date
     if (profile.orderCount >= 2) {
@@ -447,7 +495,7 @@ export const buildJourneyTree = (
 // ============================================
 
 export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryItem[] => {
-  const itemMap = new Map<string, InventoryItem & { orderIds: Set<string> }>();
+  const itemMap = new Map<string, InventoryItem & { orderIds: Set<string>; packSize?: number }>();
 
   // 1. Group items by name, track unique orders
   orders.forEach(order => {
@@ -460,6 +508,9 @@ export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryIte
       const displayName = amazonData?.humanizedName || amazonData?.itemName || lineItem.name;
       const originalName = amazonData?.itemName || lineItem.name;
       
+      const packSize = getPackSizeForItem(lineItem);
+      const effectiveQuantity = lineItem.quantity * packSize;
+
       if (!itemMap.has(key)) {
         itemMap.set(key, {
           id: key,
@@ -477,6 +528,7 @@ export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryIte
           lastPrice: lineItem.unitPrice || 0,
           history: [],
           orderIds: new Set<string>(), // Track unique order IDs
+          packSize,
           // Amazon enrichment fields
           imageUrl: amazonData?.imageUrl,
           productUrl: amazonData?.amazonUrl,
@@ -484,9 +536,12 @@ export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryIte
       }
 
       const entry = itemMap.get(key)!;
+      if (!entry.packSize || (packSize > 1 && entry.packSize === 1)) {
+        entry.packSize = packSize;
+      }
       
       // Update basic stats
-      entry.totalQuantityOrdered += lineItem.quantity;
+      entry.totalQuantityOrdered += effectiveQuantity;
       
       // Track unique orders - an item may appear multiple times in one order
       entry.orderIds.add(order.id);
@@ -514,7 +569,7 @@ export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryIte
       }
 
       // Add to history (one entry per line item occurrence)
-      entry.history.push({ date: order.orderDate, quantity: lineItem.quantity });
+      entry.history.push({ date: order.orderDate, quantity: effectiveQuantity });
     });
   });
 
@@ -543,20 +598,15 @@ export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryIte
     const effectiveSpan = daySpan === 0 ? 30 : daySpan;
     item.dailyBurnRate = item.totalQuantityOrdered / effectiveSpan;
 
-    // Calc Recommendations
-    // Min (Reorder Point) = Lead Time Demand + Safety Stock
-    // Assume 7 day lead time, 50% safety stock factor
-    const LEAD_TIME = 7;
-    const SAFETY_FACTOR = 1.5;
-    item.recommendedMin = Math.ceil(item.dailyBurnRate * LEAD_TIME * SAFETY_FACTOR);
-
-    // Order Qty (EOQ-lite)
-    // Just a heuristic: Order enough for the cadence duration or 1 month, whichever is larger
-    const targetDays = Math.max(item.averageCadenceDays, 30);
-    item.recommendedOrderQty = Math.ceil(item.dailyBurnRate * targetDays);
+    // Calc Recommendations (two-bin system with pack-size rounding)
+    const coverageDays = Math.max(item.averageCadenceDays, 1);
+    const packSize = item.packSize || 1;
+    const binQty = roundUpToMultiple(item.dailyBurnRate * coverageDays, packSize);
+    item.recommendedMin = binQty;
+    item.recommendedOrderQty = binQty;
 
     // Clean up temp field before returning
-    const { orderIds, ...cleanItem } = item;
+    const { orderIds, packSize, ...cleanItem } = item;
     return cleanItem as InventoryItem;
   });
 };

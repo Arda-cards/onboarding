@@ -54,6 +54,7 @@ export interface ProcessedOrder {
 export interface Job {
   id: string;
   userId: string;
+  jobType?: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   progress: JobProgress;
   currentEmail: EmailPreview | null;
@@ -66,7 +67,8 @@ export interface Job {
 
 // In-memory job storage (would be Redis/DB in production)
 const jobs = new Map<string, Job>();
-const userJobs = new Map<string, string>(); // userId -> jobId (latest)
+const userJobs = new Map<string, string>(); // userId -> latest jobId
+const userJobsByType = new Map<string, Map<string, string>>(); // userId -> (jobType -> jobId)
 const jobPersistenceCache = new Map<string, string>();
 
 const JOB_KEY_PREFIX = 'orderpulse:job:';
@@ -124,10 +126,17 @@ function cleanupRedisMapping(userId: string, jobId: string) {
   });
 }
 
-export function createJob(userId: string): Job {
-  // Cancel any existing running job for this user
-  const existingJobId = userJobs.get(userId);
-  if (existingJobId) {
+export function createJob(
+  userId: string,
+  options?: { jobType?: string; allowConcurrent?: boolean }
+): Job {
+  const jobType = options?.jobType || 'general';
+  const allowConcurrent = options?.allowConcurrent || false;
+  const jobsForUser = userJobsByType.get(userId) || new Map<string, string>();
+
+  // Cancel any existing running job for this user + type (unless concurrent allowed)
+  const existingJobId = jobsForUser.get(jobType);
+  if (existingJobId && !allowConcurrent) {
     const existingJob = jobs.get(existingJobId);
     if (existingJob && existingJob.status === 'running') {
       existingJob.status = 'failed';
@@ -139,6 +148,7 @@ export function createJob(userId: string): Job {
   const job: Job = {
     id: uuidv4(),
     userId,
+    jobType,
     status: 'pending',
     progress: {
       total: 0,
@@ -155,6 +165,8 @@ export function createJob(userId: string): Job {
   };
 
   jobs.set(job.id, job);
+  jobsForUser.set(jobType, job.id);
+  userJobsByType.set(userId, jobsForUser);
   userJobs.set(userId, job.id);
   persistJob(job);
   persistUserJob(userId, job.id);
@@ -235,6 +247,14 @@ export function cleanupOldJobs(): void {
         userJobs.delete(job.userId);
         cleanupRedisMapping(job.userId, jobId);
       }
+      const jobType = job.jobType || 'general';
+      const jobsForUser = userJobsByType.get(job.userId);
+      if (jobsForUser && jobsForUser.get(jobType) === jobId) {
+        jobsForUser.delete(jobType);
+        if (jobsForUser.size === 0) {
+          userJobsByType.delete(job.userId);
+        }
+      }
       if (redisClient) {
         redisClient.del(jobKey(jobId)).catch((err: Error) => {
           console.error('Failed to remove job from Redis:', err);
@@ -281,6 +301,22 @@ export async function initializeJobManager(): Promise<void> {
         continue;
       }
       userJobs.set(userId, jobId);
+    }
+
+    // Rehydrate per-type mappings from jobs (best effort)
+    for (const job of jobs.values()) {
+      const jobType = job.jobType || 'general';
+      const jobsForUser = userJobsByType.get(job.userId) || new Map<string, string>();
+      const existingId = jobsForUser.get(jobType);
+      if (!existingId) {
+        jobsForUser.set(jobType, job.id);
+      } else {
+        const existingJob = jobs.get(existingId);
+        if (!existingJob || existingJob.updatedAt < job.updatedAt) {
+          jobsForUser.set(jobType, job.id);
+        }
+      }
+      userJobsByType.set(job.userId, jobsForUser);
     }
 
     console.log(`✅ Job manager hydrated ${jobs.size} jobs from Redis`);

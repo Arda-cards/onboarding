@@ -1045,7 +1045,7 @@ router.post('/start', jobsLimiter, requireAuth, async (req: Request, res: Respon
     }
 
     // Create job
-    const job = jobManager.createJob(userId);
+    const job = jobManager.createJob(userId, { jobType: 'suppliers' });
     
     if (validDomains.length > 0) {
       jobManager.addJobLog(job.id, `🚀 Job created for ${validDomains.length} selected suppliers: ${validDomains.join(', ')}`);
@@ -1082,7 +1082,7 @@ router.post('/start-amazon', amazonLimiter, requireAuth, async (req: Request, re
     }
 
     // Create job specifically for Amazon
-    const job = jobManager.createJob(userId);
+    const job = jobManager.createJob(userId, { jobType: 'amazon' });
     jobManager.addJobLog(job.id, '🛒 Starting Amazon-first processing...');
 
     // Start Amazon processing in background
