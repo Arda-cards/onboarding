@@ -191,6 +191,29 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Simple fallback name shortening without AI
+function shortenNameFallback(name: string): string {
+  if (!name || name.length <= 40) return name;
+  
+  // Try to get meaningful first part
+  let shortened = name.split(',')[0].trim();
+  
+  // If still too long, try splitting by common separators
+  if (shortened.length > 40) {
+    shortened = name.split(' - ')[0].trim();
+  }
+  if (shortened.length > 40) {
+    shortened = name.split('|')[0].trim();
+  }
+  
+  // Final truncation if needed
+  if (shortened.length > 40) {
+    shortened = shortened.substring(0, 37) + '...';
+  }
+  
+  return shortened;
+}
+
 // Humanize a batch of product names using Gemini
 async function humanizeProductNames(
   names: string[]
@@ -203,8 +226,12 @@ async function humanizeProductNames(
   
   const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
   
-  // Process in batches of 10 to avoid rate limits
-  const batchSize = 10;
+  // Track if we hit rate limit - stop trying if so
+  let rateLimitHit = false;
+  let successCount = 0;
+  
+  // Process in batches of 5 to be more conservative with rate limits
+  const batchSize = 5;
   
   for (let i = 0; i < names.length; i += batchSize) {
     const batch = names.slice(i, i + batchSize);
@@ -217,6 +244,12 @@ async function humanizeProductNames(
         continue;
       }
       
+      // If we hit rate limit, use fallback for all remaining
+      if (rateLimitHit) {
+        results.set(name, shortenNameFallback(name));
+        continue;
+      }
+      
       try {
         const result = await model.generateContent(NAME_HUMANIZATION_PROMPT + name);
         const response = result.response;
@@ -225,28 +258,35 @@ async function humanizeProductNames(
         // Validate the response - should be short and not contain weird characters
         if (humanized && humanized.length <= 50 && !humanized.includes('\n')) {
           results.set(name, humanized);
+          successCount++;
           console.log(`  📝 "${name.substring(0, 40)}..." → "${humanized}"`);
         } else {
           // Fallback: truncate and clean up
-          const fallback = name.split(',')[0].substring(0, 40).trim();
-          results.set(name, fallback);
+          results.set(name, shortenNameFallback(name));
         }
-      } catch (error) {
-        console.error(`Failed to humanize "${name.substring(0, 30)}...":`, error);
-        // Fallback: use first part before comma
-        const fallback = name.split(',')[0].substring(0, 40).trim();
-        results.set(name, fallback);
+      } catch (error: any) {
+        // Check if it's a rate limit error
+        if (error?.status === 429 || error?.message?.includes('429') || error?.message?.includes('quota')) {
+          console.warn(`⚠️ Gemini rate limit hit after ${successCount} names - using fallback for remaining ${names.length - i} items`);
+          rateLimitHit = true;
+          results.set(name, shortenNameFallback(name));
+        } else {
+          console.error(`Failed to humanize "${name.substring(0, 30)}...":`, error?.message || error);
+          results.set(name, shortenNameFallback(name));
+        }
       }
       
-      // Small delay between requests
-      await delay(100);
+      // Delay between requests to avoid rate limits
+      await delay(200);
     }
     
     // Longer delay between batches
-    if (i + batchSize < names.length) {
-      await delay(500);
+    if (i + batchSize < names.length && !rateLimitHit) {
+      await delay(1000);
     }
   }
+  
+  console.log(`📝 Humanized ${successCount}/${names.length} names with AI, ${names.length - successCount} used fallback`);
   
   return results;
 }
