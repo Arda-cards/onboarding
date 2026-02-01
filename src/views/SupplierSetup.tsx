@@ -318,6 +318,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     
     try {
       const status = await jobsApi.getStatus(amazonJobId);
+      console.log(`🛒 Amazon poll: ${status.progress?.processed}/${status.progress?.total}, status=${status.status}`);
       setAmazonStatus(status);
       
       if (status.orders && status.orders.length > 0) {
@@ -347,9 +348,11 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
   useEffect(() => {
     if (amazonJobId && !isAmazonComplete) {
+      console.log('🛒 Starting Amazon polling interval');
       pollAmazonStatus();
       amazonPollingRef.current = setInterval(pollAmazonStatus, 1000);
       return () => {
+        console.log('🛒 Clearing Amazon polling interval');
         if (amazonPollingRef.current) {
           clearInterval(amazonPollingRef.current);
           amazonPollingRef.current = null;
@@ -598,7 +601,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
 
       {/* Lean Wisdom - Always visible */}
-      <div className="sticky top-4 z-10">
+      <div>
         <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-5">
           <div className="flex items-start gap-4">
             <div className="flex-shrink-0 w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
