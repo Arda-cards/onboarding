@@ -93,6 +93,7 @@ export interface ExtractedOrder {
   id: string;
   originalEmailId: string;
   supplier: string;
+  orderNumber?: string;  // Order/confirmation number from the email
   orderDate: string; // ISO String
   totalAmount?: number;
   items: LineItem[];

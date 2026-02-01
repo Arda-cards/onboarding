@@ -17,7 +17,7 @@ function requireAuth(req: Request, res: Response, next: Function) {
 const EXTRACTION_PROMPT = `You are an AI assistant that extracts structured order/purchase data from emails.
 
 IMPORTANT: The following types of emails ALL contain order information that should be extracted:
-- Order confirmations
+- Order confirmations (e.g., "Order Confirmation", "Thank you for your order")
 - Purchase receipts
 - Payment confirmations
 - Invoices
@@ -31,49 +31,99 @@ Analyze the email and extract purchase/order information. Even if it says "recei
 Return a JSON object with this structure:
 {
   "isOrder": boolean (TRUE for ANY email showing a purchase, receipt, payment, or transaction),
-  "supplier": string (company name, retailer, or sender name),
+  "supplier": string (company name - e.g., "Costco", "Amazon", "McMaster-Carr", NOT the full domain),
+  "orderNumber": string or null (order/confirmation number if visible),
   "orderDate": "YYYY-MM-DD" (date of purchase/transaction),
-  "totalAmount": number (total amount paid),
+  "totalAmount": number (the TOTAL/final amount paid, including tax and shipping),
   "items": [
     {
       "name": string (full product/item name as shown),
-      "normalizedName": string (simplified lowercase name for matching, remove sizes/variants),
-      "sku": string or null (part number, catalog number, item number if visible),
-      "quantity": number (default to 1 if not specified),
-      "unit": string (default to "ea" if not specified),
-      "unitPrice": number or null,
-      "totalPrice": number or null
+      "normalizedName": string (simplified lowercase name for matching),
+      "sku": string or null (item number, part number, catalog number),
+      "quantity": number (look for "Quantity X" or "Qty: X" patterns),
+      "unit": string (default to "ea"),
+      "unitPrice": number or null (price per single item),
+      "totalPrice": number or null (quantity × unitPrice if calculable)
     }
   ],
   "confidence": number between 0 and 1
 }
 
-RULES:
-1. If you see a dollar amount and an item/product, it IS an order - set isOrder: true
-2. Receipts ARE orders - extract the data
-3. "Your order shipped" means there WAS an order - extract it
-4. Payment confirmations ARE orders - extract them
-5. Only set isOrder: false for newsletters, marketing emails, or emails with no purchase info
+RETAILER-SPECIFIC PATTERNS:
+
+**Costco emails:**
+- Subject often says "Order from Costco" 
+- Item format: Product name, then "Item # XXXXXXX", then "$XX.XX", then "Quantity X"
+- Look for "Total" at the bottom for totalAmount
+- Order number is in "Order Number XXXXXXXXXX"
+
+**Amazon emails:**
+- Item format: Product name with "Qty: X" and price
+- Order number starts with digits like "111-XXXXXXX-XXXXXXX"
+
+**McMaster-Carr emails:**
+- SKUs are alphanumeric like "91255A123"
+- Format: Part number, description, quantity, unit price
+
+**Industrial suppliers (Grainger, Uline, Fastenal, MSC, Digikey, Mouser):**
+- Usually have clear part numbers/SKUs
+- Often show unit price and extended price separately
 
 ITEM EXTRACTION RULES:
-- For "normalizedName": Create a simplified, lowercase version of the item name by:
-  * Removing size information (e.g., "Small", "Large", "XL", sizes like "8oz", "16oz")
-  * Removing color/variant information (e.g., "Red", "Blue", "Black")
-  * Removing quantity mentions from the name itself
-  * Converting to lowercase and removing extra spaces
-  * Example: "Nike Air Max 90 - Size 10 - Black" → "nike air max 90"
-  
-- For "sku": Extract the SKU/part number/catalog number if visible:
-  * Look for patterns like "Item #", "Part #", "SKU:", "Catalog #", "Model #", "Product #"
-  * Look for alphanumeric codes near the item (e.g., "91255A123", "ABC-123-XYZ")
-  * SKU may appear in the same line as the item name or in a separate column/field
-  * If no SKU is visible or identifiable, set to null
-  * SKU should be extracted exactly as shown (preserve case and formatting)
+
+1. For "name": Extract the FULL product name as shown (e.g., "Mr. Clean Magic Eraser, Extra Durable, 15-count")
+
+2. For "normalizedName": Create a simplified version for matching:
+   - Convert to lowercase
+   - Remove pack sizes like "15-count", "4-pack", "32 fl oz"
+   - Remove color/variant info
+   - Example: "Mr. Clean Magic Eraser, Extra Durable, 15-count" → "mr clean magic eraser extra durable"
+   - Example: "Lysol Advanced Toilet Bowl Cleaner, 32 fl oz, 4-count" → "lysol advanced toilet bowl cleaner"
+
+3. For "sku": Extract the item/part number:
+   - Look for "Item #", "Item#", "Part #", "SKU:", "Catalog #"
+   - Costco uses "Item # 1732381" format
+   - McMaster uses "91255A123" format
+   - Extract JUST the number/code, not the label
+   - Example: "Item # 1732381" → "1732381"
+
+4. For "quantity": 
+   - Look for "Quantity X", "Qty: X", "Qty X", or "× X"
+   - Default to 1 if not specified
+
+5. For "unitPrice":
+   - This is the price for ONE item
+   - Usually shown as "$XX.XX" near the item
+   - If only total shown with quantity, divide to get unit price
+
+6. For "totalPrice":
+   - This is quantity × unitPrice for this line item
+   - May be labeled "Extended", "Subtotal", or just shown after quantity
+
+EXAMPLE - Costco email with items:
+"Mr. Clean Magic Eraser, Extra Durable, 15-count
+Item # 1732381
+$19.99
+Quantity 2"
+
+Should extract as:
+{
+  "name": "Mr. Clean Magic Eraser, Extra Durable, 15-count",
+  "normalizedName": "mr clean magic eraser extra durable",
+  "sku": "1732381",
+  "quantity": 2,
+  "unit": "ea",
+  "unitPrice": 19.99,
+  "totalPrice": 39.98
+}
+
+CRITICAL: Extract ALL items in the order. Do not stop at the first item. Scan the entire email for all products.
 
 If this email has NO purchase/transaction information at all, return:
 {
   "isOrder": false,
   "supplier": null,
+  "orderNumber": null,
   "orderDate": null,
   "totalAmount": null,
   "items": [],
