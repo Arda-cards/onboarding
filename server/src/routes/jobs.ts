@@ -11,50 +11,93 @@ import {
 
 const router = Router();
 
+// Extract text from PDF attachments
+async function extractPdfText(gmail: any, messageId: string, attachmentId: string): Promise<string> {
+  try {
+    const attachment = await gmail.users.messages.attachments.get({
+      userId: 'me',
+      messageId: messageId,
+      id: attachmentId,
+    });
+    
+    if (!attachment.data.data) {
+      return '';
+    }
+    
+    const buffer = Buffer.from(attachment.data.data, 'base64');
+    
+    // Dynamic import to handle ESM/CJS compatibility
+    const pdfParseModule = await import('pdf-parse') as any;
+    const pdfParse = pdfParseModule.default || pdfParseModule;
+    const pdfData = await pdfParse(buffer);
+    return pdfData.text;
+  } catch (error) {
+    console.error(`Failed to extract PDF text from attachment ${attachmentId}:`, error);
+    return '';
+  }
+}
+
+// Extract attachment info from email parts recursively
+function findAttachments(parts: any[], attachments: Array<{ filename: string; attachmentId: string; mimeType: string }> = []): Array<{ filename: string; attachmentId: string; mimeType: string }> {
+  for (const part of parts) {
+    if (part.filename && part.body?.attachmentId) {
+      attachments.push({
+        filename: part.filename,
+        attachmentId: part.body.attachmentId,
+        mimeType: part.mimeType || '',
+      });
+    }
+    if (part.parts) {
+      findAttachments(part.parts, attachments);
+    }
+  }
+  return attachments;
+}
+
 // Initialize Gemini AI client
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
-const EXTRACTION_PROMPT = `You are an order extraction AI. Your job is to extract purchase data from emails.
+const EXTRACTION_PROMPT = `You are an order extraction AI. Extract purchase data from emails.
 
-CRITICAL RULE: DEFAULT TO isOrder: true
-If the email contains ANY of these, it IS an order - set isOrder: true:
-- Dollar amounts ($XX.XX)
-- Product names or SKUs
-- Order numbers or confirmation numbers
-- Invoice numbers
-- Tracking numbers
-- "Order", "purchase", "receipt", "invoice", "shipment", "shipped", "delivered"
-- Any company that sells products (Amazon, Costco, ULine, Grainger, etc.)
+CRITICAL: EXTRACT ACTUAL ITEM NAMES FROM THE EMAIL BODY
+DO NOT use placeholders, generic descriptions, or the email subject as item names.
+Look for REAL product names, SKUs, and part numbers in the email content.
 
-SUPPLIER RECOGNITION - These are ALWAYS orders:
-- Amazon, Costco, Walmart, Target, Home Depot, Lowes
-- ULine, Grainger, Fastenal, McMaster-Carr, MSC Industrial
-- Sysco, US Foods, Zoro, Global Industrial
-- FedEx/UPS shipping confirmations (they reference orders)
+ITEM EXTRACTION RULES:
+1. Find the EXACT product name/description as written in the email
+2. Include part numbers/SKUs when present (e.g., "S-1234 Industrial Tape" or "McMaster #91251A540")
+3. Extract ALL items - emails often contain multiple line items
+4. Look for item tables, order summaries, and line-by-line breakdowns
+5. If you cannot find specific item names, set items to an EMPTY array []
 
-EXTRACT ITEMS AGGRESSIVELY:
-- Look for product descriptions ANYWHERE in the email
-- Part numbers like "S-1234", "100-4456", "GRN-78900"
-- Any text that looks like: Qty x Product Name @ $XX.XX
-- Table rows with product info
+WHERE TO FIND ITEMS:
+- Order confirmation tables
+- Invoice line items
+- "Items in your order" sections
+- Shipping manifests
+- Product name + quantity + price patterns
 
-Return JSON with this structure:
+SUPPLIER RECOGNITION (these are ALWAYS orders):
+- Industrial: McMaster-Carr, Grainger, Fastenal, ULine, MSC, Global Industrial, Zoro, Motion
+- Electronics: DigiKey, Mouser, Newark, Allied, AutomationDirect, Misumi, RS Components
+- General: Amazon, Costco, Home Depot, Lowes
+- Shipping: FedEx, UPS, DHL invoices
+
+Return JSON:
 {
   "isOrder": true,
-  "supplier": "Company Name",
+  "supplier": "Exact Company Name",
   "orderDate": "${new Date().toISOString().split('T')[0]}",
-  "totalAmount": 0,
-  "items": [{"name": "Item", "quantity": 1, "unit": "ea", "unitPrice": null, "totalPrice": null}],
-  "confidence": 0.8
+  "totalAmount": 123.45,
+  "items": [
+    {"name": "ACTUAL product name from email", "quantity": 2, "unit": "ea", "unitPrice": 10.50, "partNumber": "ABC-123"},
+    {"name": "Second item name", "quantity": 5, "unit": "pk", "unitPrice": 25.00, "partNumber": null}
+  ],
+  "confidence": 0.9
 }
 
-ONLY set isOrder: false for:
-- Pure marketing with no product mentions
-- Password reset emails
-- Account notifications with no purchases
-- Newsletter content only
-
-REMEMBER: When in doubt, isOrder: true. Extract any products you can find.
+ONLY set isOrder: false for pure marketing, password resets, or newsletters.
+If it's an order but you can't find specific items, still mark isOrder: true with items: []
 
 EMAIL:
 `;
@@ -375,7 +418,7 @@ async function processEmailsInBackground(
         currentTask: `Batch ${batchNum}/${totalBatches}: Fetching...` 
       });
 
-      // STEP 1: Fetch this small batch of emails
+      // STEP 1: Fetch this small batch of emails (including PDF attachments)
       const batchEmails: Array<{ id: string; subject: string; sender: string; body: string }> = [];
       
       for (const msg of batchMessageIds) {
@@ -402,6 +445,23 @@ async function processEmailsInBackground(
           if (!body || body.length < 20) {
             const snippet = fullMsg.data.snippet || '';
             body = snippet;
+          }
+
+          // Extract text from PDF attachments (invoices, order confirmations)
+          const attachments = findAttachments(parts);
+          const pdfAttachments = attachments.filter(a => 
+            a.mimeType === 'application/pdf' || a.filename.toLowerCase().endsWith('.pdf')
+          );
+          
+          if (pdfAttachments.length > 0) {
+            console.log(`   📎 Found ${pdfAttachments.length} PDF attachment(s) for email ${msg.id}`);
+            for (const pdfAttachment of pdfAttachments) {
+              const pdfText = await extractPdfText(gmail, msg.id!, pdfAttachment.attachmentId);
+              if (pdfText) {
+                body += `\n\n--- PDF ATTACHMENT: ${pdfAttachment.filename} ---\n${pdfText.substring(0, 15000)}\n--- END PDF ---`;
+                console.log(`   ✅ Extracted ${pdfText.length} chars from ${pdfAttachment.filename}`);
+              }
+            }
           }
 
           batchEmails.push({
@@ -494,18 +554,12 @@ function processAnalysisResult(
   if (!job) return;
 
   if (result.isOrder) {
-    // Always create an order if isOrder is true
-    let items = result.items || [];
+    // Use only the items that were actually extracted - NO placeholders
+    const items = result.items || [];
     
-    // If no items extracted, create a placeholder from the email subject
-    if (items.length === 0 && result.supplier) {
-      items = [{
-        name: email.subject.replace(/^(re:|fwd:|fw:)\s*/gi, '').substring(0, 100),
-        quantity: 1,
-        unit: 'ea',
-        unitPrice: result.totalAmount || 0,
-        totalPrice: result.totalAmount || 0,
-      }];
+    // Log if no items were found (for debugging)
+    if (items.length === 0) {
+      console.log(`   ⚠️ No items extracted for order from ${result.supplier}`);
     }
     
     const order: ProcessedOrder = {

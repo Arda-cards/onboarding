@@ -10,6 +10,19 @@ interface DashboardProps {
 export const Dashboard: React.FC<DashboardProps> = ({ orders, inventory, onReorder }) => {
   const totalSpend = orders.reduce((acc, curr) => acc + (curr.totalAmount || 0), 0);
   const activeSuppliers = new Set(inventory.map(i => i.supplier)).size;
+  
+  // Analytics calculations
+  const avgCadence = inventory.length > 0
+    ? Math.round(inventory.reduce((sum, i) => sum + i.averageCadenceDays, 0) / inventory.length)
+    : 0;
+  
+  const fastestMover = inventory.length > 0
+    ? inventory.reduce((fastest, item) => 
+        item.dailyBurnRate > fastest.dailyBurnRate ? item : fastest
+      , inventory[0])
+    : null;
+
+  const totalLineItems = orders.reduce((sum, o) => sum + o.items.length, 0);
 
   return (
     <div className="space-y-6">
@@ -20,7 +33,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ orders, inventory, onReord
           title="Total Orders" 
           value={orders.length.toString()} 
           icon="Inbox"
-          trend="+12%"
+          subtitle={totalLineItems > 0 ? `${totalLineItems} line items` : undefined}
         />
         <StatsCard 
           title="Unique Items" 
@@ -28,9 +41,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ orders, inventory, onReord
           icon="Package"
         />
         <StatsCard 
-          title="Active Suppliers" 
-          value={activeSuppliers.toString()} 
-          icon="CheckCircle2"
+          title="Avg Cadence" 
+          value={avgCadence > 0 ? `${avgCadence} days` : '—'} 
+          icon="Calendar"
+          subtitle="Between orders"
         />
         <StatsCard 
           title="Est. Spend" 
@@ -39,6 +53,22 @@ export const Dashboard: React.FC<DashboardProps> = ({ orders, inventory, onReord
           highlight
         />
       </div>
+
+      {/* Fastest Mover Highlight */}
+      {fastestMover && fastestMover.dailyBurnRate > 0 && (
+        <div className="bg-gradient-to-r from-orange-50 to-amber-50 border border-orange-200 rounded-xl p-4 flex items-center gap-4">
+          <div className="bg-orange-100 p-3 rounded-lg">
+            <Icons.TrendingUp className="w-6 h-6 text-arda-accent" />
+          </div>
+          <div className="flex-1">
+            <div className="text-sm text-arda-text-secondary">Fastest Moving Item</div>
+            <div className="text-lg font-semibold text-arda-text-primary">{fastestMover.name}</div>
+            <div className="text-xs text-arda-text-muted">
+              {fastestMover.dailyBurnRate.toFixed(1)} units/day • From {fastestMover.supplier}
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white border border-arda-border rounded-xl shadow-arda p-6">
@@ -105,10 +135,11 @@ interface StatsCardProps {
   value: string;
   icon: keyof typeof Icons;
   trend?: string;
+  subtitle?: string;
   highlight?: boolean;
 }
 
-const StatsCard: React.FC<StatsCardProps> = ({ title, value, icon, trend, highlight }) => {
+const StatsCard: React.FC<StatsCardProps> = ({ title, value, icon, trend, subtitle, highlight }) => {
   const Icon = Icons[icon];
   return (
     <div className={`p-6 rounded-xl border shadow-arda ${highlight ? 'bg-orange-50 border-orange-200' : 'bg-white border-arda-border'}`}>
@@ -117,6 +148,7 @@ const StatsCard: React.FC<StatsCardProps> = ({ title, value, icon, trend, highli
         <Icon className={`w-5 h-5 ${highlight ? 'text-arda-accent' : 'text-arda-text-muted'}`} />
       </div>
       <div className="text-2xl font-bold text-arda-text-primary tracking-tight">{value}</div>
+      {subtitle && <div className="text-xs text-arda-text-muted mt-1">{subtitle}</div>}
       {trend && <div className="text-xs text-arda-success mt-1">{trend} from last month</div>}
     </div>
   );

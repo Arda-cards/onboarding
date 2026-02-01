@@ -26,14 +26,20 @@ router.get('/messages', requireAuth, async (req: Request, res: Response) => {
 
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-    // Calculate 6 months ago for date filter
-    const sixMonthsAgo = new Date();
-    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-    const afterDate = sixMonthsAgo.toISOString().split('T')[0].replace(/-/g, '/');
 
-    // Search parameters - expanded query to catch more order-related emails
-    const baseQuery = req.query.q as string || 'subject:(order OR invoice OR receipt OR confirmation OR shipment OR shipping OR purchase OR payment OR transaction)';
-    const query = `${baseQuery} after:${afterDate}`;
+
+    // Search parameters - comprehensive query for industrial suppliers and carriers
+    const defaultQuery = `(
+      from:(@mcmaster.com OR @uline.com OR @grainger.com OR @fastenal.com OR @delcity.net OR @delcity.com OR
+            @mscdirect.com OR @globalindustrial.com OR @zoro.com OR @applied.com OR @motion.com OR
+            @digikey.com OR @mouser.com OR @newark.com OR @element14.com OR @alliedelec.com OR @amazon.com OR
+            @automationdirect.com OR @misumiusa.com OR @misumi.com OR @rs-online.com OR @rsonline.com OR @rsdelivers.com)
+      subject:(invoice OR receipt OR "order confirmation" OR "order acknowledgment" OR "thank you for your order" OR "order number")
+    ) OR (
+      from:(@ups.com OR @fedex.com OR @dhl.com) (invoice OR charges OR receipt)
+    )`;
+    const baseQuery = req.query.q as string || defaultQuery;
+    const query = `${baseQuery} newer_than:6m`;
     const maxResults = parseInt(req.query.maxResults as string) || 500; // Increased default
 
     console.log(`📧 Searching Gmail with query: "${query}" (max: ${maxResults})`);

@@ -27,6 +27,38 @@ export default function App() {
   // Email Draft State for integrated reordering
   const [emailDraft, setEmailDraft] = useState<{ to: string, subject: string, body: string } | null>(null);
 
+  // Keyboard shortcuts for power users
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip if user is typing in an input field
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
+      
+      switch (e.key) {
+        case '1':
+          setActiveView('dashboard');
+          break;
+        case '2':
+          setActiveView('ingest');
+          break;
+        case '3':
+          setActiveView('inventory');
+          break;
+        case '4':
+          setActiveView('analysis');
+          break;
+        case '5':
+          setActiveView('compose');
+          break;
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // Persistence Effects
   useEffect(() => {
     localStorage.setItem('arda_gemini_key', apiKey);
