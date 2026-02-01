@@ -70,14 +70,14 @@ export const AlertCard: React.FC<AlertCardProps> = ({ alert, onReorder, inventor
             <div className="text-sm font-medium text-arda-text-primary truncate">
               {profile.displayName}
             </div>
-            <div className="text-xs text-arda-text-muted mt-0.5">
+            <div className="text-xs text-arda-text-secondary mt-0.5">
               {profile.supplier}
             </div>
             <div className="flex items-center gap-2 mt-2">
               <span className={`text-xs px-2 py-0.5 rounded ${config.bgColor} ${config.iconColor} font-medium`}>
                 {config.label}
               </span>
-              <span className="text-xs text-arda-text-muted">
+              <span className="text-xs text-arda-text-secondary">
                 {config.timeText}
               </span>
             </div>

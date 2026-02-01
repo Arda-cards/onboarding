@@ -14,8 +14,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth }) => {
     <div className="min-h-screen bg-gradient-to-br from-white via-arda-bg-secondary to-white flex items-center justify-center p-4">
       {/* Background decoration */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-orange-500/10 rounded-full blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-500/10 rounded-full blur-3xl" />
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-orange-200/40 rounded-full blur-3xl" />
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-arda-bg-tertiary rounded-full blur-3xl" />
       </div>
 
       <div className="relative z-10 w-full max-w-md">
@@ -71,15 +71,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth }) => {
         {/* Features */}
         <div className="mt-8 grid grid-cols-3 gap-4 text-center">
           <div className="text-arda-text-muted">
-            <Icons.Mail className="w-5 h-5 mx-auto mb-2 text-orange-400" />
+            <Icons.Mail className="w-5 h-5 mx-auto mb-2 text-arda-accent" />
             <span className="text-xs">Email Analysis</span>
           </div>
           <div className="text-arda-text-muted">
-            <Icons.TrendingUp className="w-5 h-5 mx-auto mb-2 text-blue-400" />
+            <Icons.TrendingUp className="w-5 h-5 mx-auto mb-2 text-arda-accent" />
             <span className="text-xs">Order Tracking</span>
           </div>
           <div className="text-arda-text-muted">
-            <Icons.Calendar className="w-5 h-5 mx-auto mb-2 text-green-400" />
+            <Icons.Calendar className="w-5 h-5 mx-auto mb-2 text-arda-accent" />
             <span className="text-xs">Cadence Insights</span>
           </div>
         </div>

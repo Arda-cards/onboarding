@@ -88,7 +88,7 @@ export const CadenceView: React.FC<CadenceViewProps> = ({ inventory, orders = []
         <div className="bg-white p-4 rounded-lg border border-arda-border">
           <div className="flex items-center gap-3">
             <div className="bg-arda-bg-tertiary p-2 rounded">
-              <Icons.Calendar className="text-blue-400 w-5 h-5" />
+              <Icons.Calendar className="text-arda-accent w-5 h-5" />
             </div>
             <div>
               <div className="text-2xl font-bold text-arda-text-primary">{avgCadence} days</div>
@@ -99,7 +99,7 @@ export const CadenceView: React.FC<CadenceViewProps> = ({ inventory, orders = []
         <div className="bg-white p-4 rounded-lg border border-arda-border">
           <div className="flex items-center gap-3">
             <div className="bg-arda-bg-tertiary p-2 rounded">
-              <Icons.Inbox className="text-green-400 w-5 h-5" />
+              <Icons.Inbox className="text-arda-accent w-5 h-5" />
             </div>
             <div>
               <div className="text-2xl font-bold text-arda-text-primary">{totalLineItems}</div>
@@ -110,7 +110,7 @@ export const CadenceView: React.FC<CadenceViewProps> = ({ inventory, orders = []
         <div className="bg-white p-4 rounded-lg border border-arda-border">
           <div className="flex items-center gap-3">
             <div className="bg-arda-bg-tertiary p-2 rounded">
-              <Icons.TrendingUp className="text-orange-400 w-5 h-5" />
+              <Icons.TrendingUp className="text-arda-accent w-5 h-5" />
             </div>
             <div>
               <div className="text-lg font-bold text-arda-text-primary truncate max-w-[150px]" title={fastestMover?.fullName}>

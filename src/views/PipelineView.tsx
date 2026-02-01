@@ -69,14 +69,14 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
         {/* Pipeline Stages */}
         <div className="grid grid-cols-4 gap-4 mb-8">
           {/* Stage 1: Emails */}
-          <div className={`bg-white rounded-xl p-4 border-2 ${isIngesting ? 'border-blue-500' : 'border-arda-border'}`}>
+          <div className={`bg-white rounded-xl p-4 border-2 ${isIngesting ? 'border-orange-200' : 'border-arda-border'}`}>
             <div className="flex items-center gap-3 mb-3">
-              <div className={`p-2 rounded-lg ${isIngesting ? 'bg-blue-500/20' : 'bg-arda-bg-tertiary'}`}>
-                <Icons.Mail className={`w-5 h-5 ${isIngesting ? 'text-blue-400' : 'text-arda-text-muted'}`} />
+              <div className={`p-2 rounded-lg ${isIngesting ? 'bg-orange-100' : 'bg-arda-bg-tertiary'}`}>
+                <Icons.Mail className={`w-5 h-5 ${isIngesting ? 'text-arda-accent' : 'text-arda-text-muted'}`} />
               </div>
               <div>
                 <div className="font-semibold">Emails</div>
-                <div className="text-2xl font-bold text-blue-400">{progress.total}</div>
+                <div className="text-2xl font-bold text-arda-text-primary">{progress.total}</div>
               </div>
             </div>
             <div className="text-xs text-arda-text-muted">
@@ -85,42 +85,42 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
           </div>
 
           {/* Stage 2: Orders */}
-          <div className={`bg-white rounded-xl p-4 border-2 ${orders.length > 0 ? 'border-green-500' : 'border-arda-border'}`}>
+          <div className={`bg-white rounded-xl p-4 border-2 ${orders.length > 0 ? 'border-orange-200' : 'border-arda-border'}`}>
             <div className="flex items-center gap-3 mb-3">
-              <div className={`p-2 rounded-lg ${orders.length > 0 ? 'bg-green-500/20' : 'bg-arda-bg-tertiary'}`}>
-                <Icons.Package className={`w-5 h-5 ${orders.length > 0 ? 'text-green-400' : 'text-arda-text-muted'}`} />
+              <div className={`p-2 rounded-lg ${orders.length > 0 ? 'bg-orange-100' : 'bg-arda-bg-tertiary'}`}>
+                <Icons.Package className={`w-5 h-5 ${orders.length > 0 ? 'text-arda-accent' : 'text-arda-text-muted'}`} />
               </div>
               <div>
                 <div className="font-semibold">Orders</div>
-                <div className="text-2xl font-bold text-green-400">{orders.length}</div>
+                <div className="text-2xl font-bold text-arda-text-primary">{orders.length}</div>
               </div>
             </div>
             <div className="text-xs text-arda-text-muted">Extracted from emails</div>
           </div>
 
           {/* Stage 3: Line Items */}
-          <div className={`bg-white rounded-xl p-4 border-2 ${totalLineItems > 0 ? 'border-orange-500' : 'border-arda-border'}`}>
+          <div className={`bg-white rounded-xl p-4 border-2 ${totalLineItems > 0 ? 'border-orange-200' : 'border-arda-border'}`}>
             <div className="flex items-center gap-3 mb-3">
-              <div className={`p-2 rounded-lg ${totalLineItems > 0 ? 'bg-orange-500/20' : 'bg-arda-bg-tertiary'}`}>
-                <Icons.BarChart3 className={`w-5 h-5 ${totalLineItems > 0 ? 'text-orange-400' : 'text-arda-text-muted'}`} />
+              <div className={`p-2 rounded-lg ${totalLineItems > 0 ? 'bg-orange-100' : 'bg-arda-bg-tertiary'}`}>
+                <Icons.BarChart3 className={`w-5 h-5 ${totalLineItems > 0 ? 'text-arda-accent' : 'text-arda-text-muted'}`} />
               </div>
               <div>
                 <div className="font-semibold">Line Items</div>
-                <div className="text-2xl font-bold text-orange-400">{totalLineItems}</div>
+                <div className="text-2xl font-bold text-arda-text-primary">{totalLineItems}</div>
               </div>
             </div>
             <div className="text-xs text-arda-text-muted">Products in orders</div>
           </div>
 
           {/* Stage 4: Unique Items */}
-          <div className={`bg-white rounded-xl p-4 border-2 ${inventory.length > 0 ? 'border-purple-500' : 'border-arda-border'}`}>
+          <div className={`bg-white rounded-xl p-4 border-2 ${inventory.length > 0 ? 'border-orange-200' : 'border-arda-border'}`}>
             <div className="flex items-center gap-3 mb-3">
-              <div className={`p-2 rounded-lg ${inventory.length > 0 ? 'bg-purple-500/20' : 'bg-arda-bg-tertiary'}`}>
-                <Icons.CheckCircle2 className={`w-5 h-5 ${inventory.length > 0 ? 'text-purple-400' : 'text-arda-text-muted'}`} />
+              <div className={`p-2 rounded-lg ${inventory.length > 0 ? 'bg-orange-100' : 'bg-arda-bg-tertiary'}`}>
+                <Icons.CheckCircle2 className={`w-5 h-5 ${inventory.length > 0 ? 'text-arda-accent' : 'text-arda-text-muted'}`} />
               </div>
               <div>
                 <div className="font-semibold">Unique Items</div>
-                <div className="text-2xl font-bold text-purple-400">{inventory.length}</div>
+                <div className="text-2xl font-bold text-arda-text-primary">{inventory.length}</div>
               </div>
             </div>
             <div className="text-xs text-arda-text-muted">Aggregated products</div>
@@ -150,7 +150,7 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
           <div className="bg-arda-bg-secondary border border-arda-border rounded-xl p-4 mb-6">
             <div className="flex items-center gap-3">
               <div className="animate-spin">
-                <Icons.Loader2 className="w-5 h-5 text-blue-400" />
+                <Icons.Loader2 className="w-5 h-5 text-arda-accent" />
               </div>
               <div>
                 <div className="text-sm text-arda-text-muted">Processing email:</div>
@@ -174,8 +174,8 @@ export const PipelineView: React.FC<PipelineViewProps> = ({
                     className="w-full p-4 flex items-center justify-between hover:bg-arda-bg-tertiary transition-colors"
                   >
                     <div className="flex items-center gap-4">
-                      <div className="bg-green-500/20 p-2 rounded-lg">
-                        <Icons.Package className="w-5 h-5 text-green-400" />
+                      <div className="bg-orange-100 p-2 rounded-lg">
+                        <Icons.Package className="w-5 h-5 text-arda-accent" />
                       </div>
                       <div className="text-left">
                         <div className="font-medium">{order.supplier}</div>
