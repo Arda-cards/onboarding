@@ -526,8 +526,11 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     });
   }, []);
 
-  const handleComplete = useCallback(() => {
-    onScanComplete(combinedOrders);
+  // Keep parent updated with collected orders as they come in
+  useEffect(() => {
+    if (combinedOrders.length > 0) {
+      onScanComplete(combinedOrders);
+    }
   }, [combinedOrders, onScanComplete]);
 
   const supplierCount = allSuppliers.length;
