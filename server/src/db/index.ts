@@ -24,8 +24,3 @@ export async function query<T extends QueryResultRow = QueryResultRow>(text: str
   }
   return result;
 }
-
-export async function getClient() {
-  const client = await pool.connect();
-  return client;
-}

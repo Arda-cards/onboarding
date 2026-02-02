@@ -18,5 +18,4 @@ export const requestLogger = pinoHttp({
   },
 });
 
-export type RequestLogger = typeof requestLogger;
 export const appLogger = logger;
