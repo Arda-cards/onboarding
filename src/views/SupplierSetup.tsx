@@ -93,12 +93,14 @@ interface SupplierSetupProps {
   onScanComplete: (orders: ExtractedOrder[]) => void;
   onSkip: () => void;
   onProgressUpdate?: (progress: BackgroundEmailProgress | null) => void;
+  onCanProceed?: (canProceed: boolean) => void;
 }
 
 export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   onScanComplete,
   onSkip,
   onProgressUpdate,
+  onCanProceed,
 }) => {
   // Onboarding phase states
   const [showWelcome, setShowWelcome] = useState(true);
@@ -415,6 +417,12 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     }
   }, [priorityJobId, isPriorityComplete, pollPriorityStatus]);
 
+  // Notify parent when Amazon + Priority suppliers are done (user can proceed)
+  useEffect(() => {
+    const keySuppliersDone = isAmazonComplete && isPriorityComplete;
+    onCanProceed?.(keySuppliersDone);
+  }, [isAmazonComplete, isPriorityComplete, onCanProceed]);
+
   // Discover suppliers
   const handleDiscoverSuppliers = async () => {
     setIsDiscovering(true);
@@ -721,15 +729,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
                 : 'Ready to set up your inventory'}
             </p>
           </div>
-          {!isAnyProcessing && allItems.length > 0 && (
-            <button
-              onClick={handleComplete}
-              className="bg-arda-accent hover:bg-blue-600 text-white px-6 py-3 rounded-xl font-semibold transition-all shadow-lg hover:shadow-xl flex items-center gap-2"
-            >
-              Continue to Dashboard
-              <Icons.ArrowRight className="w-5 h-5" />
-            </button>
-          )}
+          {/* Navigation handled by footer */}
         </div>
       )}
 
@@ -1078,48 +1078,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         </div>
       )}
 
-      {/* Floating Action Bar */}
-      {(allItems.length > 0 || totalOrders > 0) && !isAnyProcessing && (
-        <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-sm border-t border-gray-200 shadow-2xl p-4 z-40">
-          <div className="max-w-5xl mx-auto flex items-center justify-between">
-            <div className="flex items-center gap-6">
-              <div>
-                <div className="text-2xl font-bold text-arda-text-primary">{allItems.length} items</div>
-                <div className="text-sm text-arda-text-muted">
-                  from {totalOrders} orders across {uniqueSuppliers} suppliers
-                </div>
-              </div>
-              {totalSpend > 0 && (
-                <div className="hidden sm:block pl-6 border-l border-gray-200">
-                  <div className="text-2xl font-bold text-green-600">
-                    ${totalSpend.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </div>
-                  <div className="text-sm text-arda-text-muted">total tracked</div>
-                </div>
-              )}
-            </div>
-            <button
-              onClick={handleComplete}
-              className="bg-gradient-to-r from-arda-accent to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white px-8 py-4 rounded-xl font-bold text-lg transition-all shadow-lg hover:shadow-xl flex items-center gap-3"
-            >
-              Set Up My Inventory
-              <Icons.ArrowRight className="w-6 h-6" />
-            </button>
-          </div>
-        </div>
-      )}
-      
-      {/* Skip option for users who want to explore first */}
-      {showWelcome && !isAnyProcessing && allItems.length === 0 && (
-        <div className="text-center">
-          <button
-            onClick={onSkip}
-            className="text-arda-text-muted hover:text-arda-text-secondary transition-colors text-sm"
-          >
-            Skip for now and explore the app →
-          </button>
-        </div>
-      )}
+      {/* Note: Navigation handled by OnboardingFlow footer */}
     </div>
   );
 };
