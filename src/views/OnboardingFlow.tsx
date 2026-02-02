@@ -16,6 +16,7 @@ interface EmailItem {
   name: string;
   supplier: string;
   asin?: string;
+  sku?: string;
   imageUrl?: string;
   productUrl?: string;
   lastPrice?: number;
@@ -228,6 +229,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
         name: profile.displayName || profile.normalizedName,
         supplier: profile.supplier,
         asin: profile.asin,
+        sku: profile.sku,
         imageUrl: profile.imageUrl,
         productUrl: profile.amazonUrl,
         lastPrice: lastOrder?.unitPrice,

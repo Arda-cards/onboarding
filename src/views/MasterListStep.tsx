@@ -16,12 +16,18 @@ function parseOptionalNumber(value: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+function _formatPrice(value: number | undefined): string {
+  if (typeof value !== 'number') return '';
+  return `$${value.toFixed(2)}`;
+}
+
 // Simple email item from onboarding
 interface EmailItem {
   id: string;
   name: string;
   supplier: string;
   asin?: string;
+  sku?: string;
   imageUrl?: string;
   productUrl?: string;
   lastPrice?: number;
@@ -89,6 +95,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
         supplier: item.supplier,
         location: item.location,
         asin: item.asin,
+        sku: item.sku,
         minQty: item.recommendedMin,
         orderQty: item.recommendedOrderQty,
         unitPrice: item.lastPrice,
@@ -210,6 +217,10 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
         if (data.productUrl) next.productUrl = data.productUrl;
         if (data.imageUrl) next.imageUrl = data.imageUrl;
         if (typeof data.unitPrice === 'number') next.unitPrice = data.unitPrice;
+        
+        // Pull ASIN and SKU from Amazon API response
+        if (data.asin) next.asin = data.asin;
+        if (data.sku) next.sku = data.sku;
 
         // If we learned a pack size / unit count, use it as a reasonable default orderQty
         if (typeof data.unitCount === 'number' && data.unitCount > 0) {
@@ -252,6 +263,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
           item.name.toLowerCase().includes(query) ||
           item.sku?.toLowerCase().includes(query) ||
           item.barcode?.toLowerCase().includes(query) ||
+          item.asin?.toLowerCase().includes(query) ||
           item.supplier?.toLowerCase().includes(query)
         );
       }
@@ -275,10 +287,10 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
   // Source icon
   const getSourceIcon = useCallback((source: MasterListItem['source']) => {
     switch (source) {
-      case 'email': return <Icons.Mail className="w-4 h-4" />;
-      case 'barcode': return <Icons.Barcode className="w-4 h-4" />;
-      case 'photo': return <Icons.Camera className="w-4 h-4" />;
-      case 'csv': return <Icons.FileSpreadsheet className="w-4 h-4" />;
+      case 'email': return <Icons.Mail className="w-3.5 h-3.5" />;
+      case 'barcode': return <Icons.Barcode className="w-3.5 h-3.5" />;
+      case 'photo': return <Icons.Camera className="w-3.5 h-3.5" />;
+      case 'csv': return <Icons.FileSpreadsheet className="w-3.5 h-3.5" />;
     }
   }, []);
 
@@ -288,375 +300,342 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
   }, [items, onComplete]);
 
   return (
-    <div className="space-y-6">
-      {/* Actions */}
+    <div className="space-y-4">
+      {/* Header Actions */}
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm text-arda-text-secondary">
-          Edit any field inline — changes are saved automatically.
+          {stats.total} items • {stats.verified} verified
         </div>
         <button
           type="button"
           onClick={verifyAll}
-          className="btn-arda-outline"
+          className="btn-arda-outline text-sm"
         >
+          <Icons.CheckCircle2 className="w-4 h-4 mr-1.5" />
           Verify all
         </button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        <div className="card-arda p-4">
-          <div className="text-2xl font-bold text-arda-text-primary">{stats.total}</div>
-          <div className="text-sm text-arda-text-secondary">Total Items</div>
+      {/* Compact Filters */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1 bg-white/70 rounded-lg border border-arda-border p-1">
+          {(['all', 'needs_attention', 'verified'] as const).map(f => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={[
+                'px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
+                filter === f
+                  ? 'bg-arda-accent text-white'
+                  : 'text-arda-text-secondary hover:bg-arda-bg-tertiary',
+              ].join(' ')}
+            >
+              {f === 'needs_attention' ? `Attention (${stats.needsAttention})` : f === 'verified' ? `Verified (${stats.verified})` : 'All'}
+            </button>
+          ))}
         </div>
-        <div className="card-arda p-4">
-          <div className="text-2xl font-bold text-green-600">{stats.verified}</div>
-          <div className="text-sm text-arda-text-secondary">Verified</div>
+        
+        <div className="flex items-center gap-1 bg-white/70 rounded-lg border border-arda-border p-1">
+          {(['all', 'email', 'barcode', 'photo', 'csv'] as const).map(s => (
+            <button
+              key={s}
+              onClick={() => setSourceFilter(s)}
+              className={[
+                'px-2 py-1 rounded-md text-xs transition-colors flex items-center gap-1',
+                sourceFilter === s
+                  ? 'bg-orange-50 text-arda-accent'
+                  : 'text-arda-text-muted hover:bg-arda-bg-tertiary',
+              ].join(' ')}
+              title={s === 'all' ? 'All Sources' : s}
+            >
+              {s === 'all' ? 'All' : (
+                <>
+                  {s === 'email' && <Icons.Mail className="w-3 h-3" />}
+                  {s === 'barcode' && <Icons.Barcode className="w-3 h-3" />}
+                  {s === 'photo' && <Icons.Camera className="w-3 h-3" />}
+                  {s === 'csv' && <Icons.FileSpreadsheet className="w-3 h-3" />}
+                  <span className="text-xs">{stats.bySource[s]}</span>
+                </>
+              )}
+            </button>
+          ))}
         </div>
-        <div className="card-arda p-4">
-          <div className="text-2xl font-bold text-arda-accent">{stats.needsAttention}</div>
-          <div className="text-sm text-arda-text-secondary">Needs Attention</div>
-        </div>
-        <div className="card-arda p-4 col-span-2">
-          <div className="flex items-center gap-4 text-sm">
-            <span className="flex items-center gap-1">
-              <Icons.Mail className="w-4 h-4 text-arda-accent" />
-              {stats.bySource.email}
-            </span>
-            <span className="flex items-center gap-1">
-              <Icons.Barcode className="w-4 h-4 text-arda-accent" />
-              {stats.bySource.barcode}
-            </span>
-            <span className="flex items-center gap-1">
-              <Icons.Camera className="w-4 h-4 text-arda-accent" />
-              {stats.bySource.photo}
-            </span>
-            <span className="flex items-center gap-1">
-              <Icons.FileSpreadsheet className="w-4 h-4 text-arda-accent" />
-              {stats.bySource.csv}
-            </span>
-          </div>
-          <div className="text-sm text-arda-text-secondary mt-1">By Source</div>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            {(['all', 'needs_attention', 'verified'] as const).map(f => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={[
-                  'px-3 py-1.5 rounded-arda text-sm font-medium transition-colors border',
-                  filter === f
-                    ? 'bg-arda-accent text-white border-orange-600'
-                    : 'bg-white/70 text-arda-text-secondary border-arda-border hover:bg-arda-bg-tertiary',
-                ].join(' ')}
-              >
-                {f === 'needs_attention' ? 'Needs Attention' : f.charAt(0).toUpperCase() + f.slice(1)}
-              </button>
-            ))}
-          </div>
-          <div className="h-6 w-px bg-arda-border" />
-          <div className="flex items-center gap-1">
-            {(['all', 'email', 'barcode', 'photo', 'csv'] as const).map(s => (
-              <button
-                key={s}
-                onClick={() => setSourceFilter(s)}
-                className={[
-                  'px-2 py-1.5 rounded-arda text-sm transition-colors border',
-                  sourceFilter === s
-                    ? 'bg-orange-50 text-arda-accent border-orange-200'
-                    : 'bg-transparent text-arda-text-secondary border-transparent hover:bg-arda-bg-tertiary hover:border-arda-border',
-                ].join(' ')}
-              >
-                {s === 'all' ? 'All Sources' : s.charAt(0).toUpperCase() + s.slice(1)}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <Icons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-arda-text-muted" />
-            <input
-              type="text"
-              placeholder="Search items..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="input-arda pl-9 pr-4 py-2 text-sm bg-white"
-            />
-          </div>
+        
+        <div className="flex-1" />
+        
+        <div className="relative">
+          <Icons.Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-arda-text-muted" />
+          <input
+            type="text"
+            placeholder="Search..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="input-arda pl-8 pr-3 py-1.5 text-sm bg-white w-48"
+          />
         </div>
       </div>
 
-      {/* Items table (inline editable) */}
-      <div className="card-arda overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="table-arda">
-            <thead className="bg-arda-bg-secondary border-b border-arda-border">
-              <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
-                  Item
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
-                  Supplier
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
-                  Location
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
-                  SKU
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
-                  Barcode
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
-                  Min / Order / Price
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
-                  Product URL
-                </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
-                  Verified
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-arda-border">
-              {filteredItems.map(item => (
-                <tr
-                  key={item.id}
-                  className={[
-                    'transition-colors',
-                    item.needsAttention ? 'bg-orange-50' : '',
-                    item.isVerified ? 'bg-green-50' : '',
-                  ].join(' ')}
-                >
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <span className="p-1.5 rounded-lg bg-arda-bg-tertiary border border-arda-border text-arda-accent flex-shrink-0">
-                        {getSourceIcon(item.source)}
-                      </span>
-                      {item.imageUrl && (
-                        <img
-                          src={item.imageUrl}
-                          alt=""
-                          className="w-10 h-10 rounded-xl object-cover border border-arda-border bg-arda-bg-tertiary flex-shrink-0"
-                        />
+      {/* Items Grid */}
+      <div className="space-y-2">
+        {filteredItems.map(item => (
+          <div
+            key={item.id}
+            className={[
+              'card-arda p-3 transition-all',
+              item.needsAttention ? 'ring-1 ring-orange-300 bg-orange-50/50' : '',
+              item.isVerified ? 'ring-1 ring-green-300 bg-green-50/30' : '',
+            ].join(' ')}
+          >
+            <div className="flex gap-3">
+              {/* Left: Image + Actions Stack */}
+              <div className="flex flex-col items-center gap-2 flex-shrink-0">
+                {/* Product Image */}
+                <div className="w-16 h-16 rounded-xl bg-arda-bg-tertiary border border-arda-border overflow-hidden flex items-center justify-center">
+                  {item.imageUrl ? (
+                    <img
+                      src={item.imageUrl}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <Icons.Package className="w-6 h-6 text-arda-text-muted" />
+                  )}
+                </div>
+                
+                {/* Action Icons */}
+                <div className="flex items-center gap-0.5">
+                  {(item.productUrl || item.asin) && (
+                    <button
+                      type="button"
+                      onClick={() => enrichFromProductUrl(item)}
+                      className="p-1.5 text-arda-text-muted hover:text-arda-accent hover:bg-orange-50 rounded-lg transition-colors disabled:opacity-50"
+                      title={enrichingIds.has(item.id) ? 'Enriching…' : 'Auto-fill from Amazon'}
+                      disabled={enrichingIds.has(item.id)}
+                    >
+                      {enrichingIds.has(item.id) ? (
+                        <Icons.Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Icons.Sparkles className="w-4 h-4" />
                       )}
-                      <div className="min-w-0 flex-1">
-                        <input
-                          type="text"
-                          value={item.name}
-                          onChange={(e) => updateItemFields(item.id, { name: e.target.value })}
-                          className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm font-semibold text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent"
-                          aria-label={`Item name (${item.id})`}
-                          title="Item name"
-                        />
-                        <div className="mt-1 flex items-center gap-2 flex-wrap text-xs text-arda-text-muted">
-                          {item.color && (
-                            <span className="inline-flex items-center gap-1 bg-white/70 border border-arda-border rounded-lg px-2 py-0.5">
-                              <span className="w-2 h-2 rounded-full bg-arda-accent" aria-hidden="true" />
-                              {item.color}
-                            </span>
-                          )}
-                          {item.needsAttention && (
-                            <span className="inline-flex items-center gap-1 bg-orange-100/60 border border-orange-200 text-orange-800 rounded-lg px-2 py-0.5">
-                              Needs review
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
+                    </button>
+                  )}
+                  {item.productUrl && (
+                    <a
+                      href={item.productUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1.5 text-arda-text-muted hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      title="Open product page"
+                    >
+                      <Icons.ExternalLink className="w-4 h-4" />
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => removeItem(item.id)}
+                    className="p-1.5 text-arda-text-muted hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    title="Remove"
+                  >
+                    <Icons.Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+              
+              {/* Middle: Main Content */}
+              <div className="flex-1 min-w-0 space-y-2">
+                {/* Name Row */}
+                <div className="flex items-start gap-2">
+                  <span className="p-1 rounded bg-arda-bg-tertiary text-arda-accent flex-shrink-0" title={item.source}>
+                    {getSourceIcon(item.source)}
+                  </span>
+                  <input
+                    type="text"
+                    value={item.name}
+                    onChange={(e) => updateItemFields(item.id, { name: e.target.value })}
+                    className="flex-1 bg-transparent border-0 border-b border-transparent hover:border-arda-border focus:border-arda-accent px-1 py-0.5 text-sm font-semibold text-arda-text-primary focus:outline-none focus:ring-0"
+                    placeholder="Item name"
+                  />
+                  {item.needsAttention && (
+                    <span className="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full flex-shrink-0">
+                      Review
+                    </span>
+                  )}
+                </div>
+                
+                {/* Fields Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                  {/* Supplier */}
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wide text-arda-text-muted block mb-0.5">Supplier</label>
                     <input
                       type="text"
                       value={item.supplier ?? ''}
                       onChange={(e) => updateItemFields(item.id, { supplier: trimOrUndefined(e.target.value) })}
-                      className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent"
-                      placeholder="Supplier"
-                      aria-label="Supplier"
-                      title="Supplier"
+                      className="w-full bg-white/70 border border-arda-border rounded-md px-2 py-1 text-xs text-arda-text-primary focus:ring-1 focus:ring-arda-accent"
+                      placeholder="—"
                     />
-                  </td>
-                  <td className="px-4 py-3">
+                  </div>
+                  
+                  {/* Location */}
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wide text-arda-text-muted block mb-0.5">Location</label>
                     <input
                       type="text"
                       value={item.location ?? ''}
                       onChange={(e) => updateItemFields(item.id, { location: trimOrUndefined(e.target.value) })}
-                      className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent"
-                      placeholder="Location"
-                      aria-label="Location"
-                      title="Location"
+                      className="w-full bg-white/70 border border-arda-border rounded-md px-2 py-1 text-xs text-arda-text-primary focus:ring-1 focus:ring-arda-accent"
+                      placeholder="—"
                     />
-                  </td>
-                  <td className="px-4 py-3">
+                  </div>
+                  
+                  {/* SKU */}
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wide text-arda-text-muted block mb-0.5">SKU</label>
                     <input
                       type="text"
                       value={item.sku ?? ''}
                       onChange={(e) => updateItemFields(item.id, { sku: trimOrUndefined(e.target.value) })}
-                      className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent"
-                      placeholder="SKU"
-                      aria-label="SKU"
-                      title="SKU"
+                      className="w-full bg-white/70 border border-arda-border rounded-md px-2 py-1 text-xs text-arda-text-primary font-mono focus:ring-1 focus:ring-arda-accent"
+                      placeholder="—"
                     />
-                  </td>
-                  <td className="px-4 py-3">
+                  </div>
+                  
+                  {/* ASIN */}
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wide text-arda-text-muted block mb-0.5">ASIN</label>
+                    <input
+                      type="text"
+                      value={item.asin ?? ''}
+                      onChange={(e) => updateItemFields(item.id, { asin: trimOrUndefined(e.target.value) })}
+                      className="w-full bg-white/70 border border-arda-border rounded-md px-2 py-1 text-xs text-arda-text-primary font-mono focus:ring-1 focus:ring-arda-accent"
+                      placeholder="—"
+                    />
+                  </div>
+                  
+                  {/* Barcode */}
+                  <div>
+                    <label className="text-[10px] uppercase tracking-wide text-arda-text-muted block mb-0.5">Barcode</label>
                     <input
                       type="text"
                       value={item.barcode ?? ''}
                       onChange={(e) => updateItemFields(item.id, { barcode: trimOrUndefined(e.target.value) })}
-                      className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent font-mono"
-                      placeholder="Barcode"
-                      aria-label="Barcode"
-                      title="Barcode"
+                      className="w-full bg-white/70 border border-arda-border rounded-md px-2 py-1 text-xs text-arda-text-primary font-mono focus:ring-1 focus:ring-arda-accent"
+                      placeholder="—"
                     />
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="grid grid-cols-1 gap-1 min-w-[9rem]">
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        value={item.minQty ?? ''}
-                        onChange={(e) => updateItemFields(item.id, { minQty: parseOptionalNumber(e.target.value) })}
-                        className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent"
-                        placeholder="Min"
-                        aria-label="Min qty"
-                        title="Min qty"
-                      />
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        value={item.orderQty ?? ''}
-                        onChange={(e) => updateItemFields(item.id, { orderQty: parseOptionalNumber(e.target.value) })}
-                        className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent"
-                        placeholder="Order"
-                        aria-label="Order qty"
-                        title="Order qty"
-                      />
+                  </div>
+                  
+                  {/* Color */}
+                  {item.color && (
+                    <div>
+                      <label className="text-[10px] uppercase tracking-wide text-arda-text-muted block mb-0.5">Color</label>
+                      <div className="flex items-center gap-1.5 bg-white/70 border border-arda-border rounded-md px-2 py-1">
+                        <span className="w-2.5 h-2.5 rounded-full bg-arda-accent" />
+                        <span className="text-xs text-arda-text-primary">{item.color}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Quantities Row - Separate columns */}
+                <div className="flex items-center gap-3 pt-1">
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-[10px] uppercase tracking-wide text-arda-text-muted">Min</label>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      value={item.minQty ?? ''}
+                      onChange={(e) => updateItemFields(item.id, { minQty: parseOptionalNumber(e.target.value) })}
+                      className="w-14 bg-white/70 border border-arda-border rounded-md px-2 py-1 text-xs text-center text-arda-text-primary focus:ring-1 focus:ring-arda-accent"
+                      placeholder="—"
+                    />
+                  </div>
+                  
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-[10px] uppercase tracking-wide text-arda-text-muted">Order</label>
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      value={item.orderQty ?? ''}
+                      onChange={(e) => updateItemFields(item.id, { orderQty: parseOptionalNumber(e.target.value) })}
+                      className="w-14 bg-white/70 border border-arda-border rounded-md px-2 py-1 text-xs text-center text-arda-text-primary focus:ring-1 focus:ring-arda-accent"
+                      placeholder="—"
+                    />
+                  </div>
+                  
+                  <div className="flex items-center gap-1.5">
+                    <label className="text-[10px] uppercase tracking-wide text-arda-text-muted">Price</label>
+                    <div className="relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-arda-text-muted">$</span>
                       <input
                         type="number"
                         inputMode="decimal"
                         step="0.01"
                         value={item.unitPrice ?? ''}
                         onChange={(e) => updateItemFields(item.id, { unitPrice: parseOptionalNumber(e.target.value) })}
-                        className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent"
-                        placeholder="Price"
-                        aria-label="Unit price"
-                        title="Unit price"
+                        className="w-20 bg-white/70 border border-arda-border rounded-md pl-5 pr-2 py-1 text-xs text-arda-text-primary focus:ring-1 focus:ring-arda-accent"
+                        placeholder="0.00"
                       />
                     </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="space-y-1 min-w-[14rem]">
-                      <input
-                        type="url"
-                        value={item.productUrl ?? ''}
-                        onChange={(e) => updateItemFields(item.id, { productUrl: trimOrUndefined(e.target.value) })}
-                        className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent"
-                        placeholder="https://…"
-                        aria-label="Product URL"
-                        title="Product URL"
-                      />
-                      {enrichErrorById[item.id] && (
-                        <div className="text-xs text-red-600">
-                          {enrichErrorById[item.id]}
-                        </div>
-                      )}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-center">
+                  </div>
+                  
+                  <div className="flex-1" />
+                  
+                  {/* Verified checkbox */}
+                  <label className="flex items-center gap-1.5 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={item.isVerified}
                       onChange={(e) => updateItemFields(item.id, { isVerified: e.target.checked })}
-                      className="rounded border-gray-300"
-                      aria-label={`Verified: ${item.name}`}
-                      title={`Verified: ${item.name}`}
+                      className="rounded border-gray-300 text-green-600 focus:ring-green-500"
                     />
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center justify-end gap-1">
-                      {(item.productUrl || item.asin) && (
-                        <button
-                          type="button"
-                          onClick={() => enrichFromProductUrl(item)}
-                          className="p-1.5 text-arda-text-muted hover:text-arda-accent hover:bg-orange-50 rounded-xl transition-colors disabled:opacity-50"
-                          title={enrichingIds.has(item.id) ? 'Enriching…' : 'Enrich from product URL'}
-                          disabled={enrichingIds.has(item.id)}
-                        >
-                          {enrichingIds.has(item.id) ? (
-                            <Icons.Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Icons.Sparkles className="w-4 h-4" />
-                          )}
-                        </button>
-                      )}
-                      {item.productUrl && (
-                        <a
-                          href={item.productUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="p-1.5 text-arda-text-muted hover:text-arda-accent hover:bg-orange-50 rounded-xl transition-colors inline-flex"
-                          title="Open product page"
-                        >
-                          <Icons.ExternalLink className="w-4 h-4" />
-                        </a>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => removeItem(item.id)}
-                        className="p-1.5 text-arda-text-muted hover:text-red-700 hover:bg-red-50 rounded-xl transition-colors"
-                        title="Remove"
-                        aria-label={`Remove ${item.name}`}
-                      >
-                        <Icons.Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {filteredItems.length === 0 && (
-          <div className="p-12 text-center">
-            <Icons.Package className="w-12 h-12 mx-auto text-arda-text-muted mb-4 opacity-60" />
-            <h3 className="text-lg font-medium text-arda-text-primary mb-2">No Items</h3>
-            <p className="text-arda-text-secondary">
-              {items.length === 0
-                ? 'Complete the previous steps to add items to your master list.'
-                : 'No items match your current filters.'}
-            </p>
+                    <span className="text-xs text-arda-text-secondary">Verified</span>
+                  </label>
+                </div>
+                
+                {/* Error message */}
+                {enrichErrorById[item.id] && (
+                  <div className="text-xs text-red-600 flex items-center gap-1">
+                    <Icons.AlertCircle className="w-3 h-3" />
+                    {enrichErrorById[item.id]}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
-        )}
+        ))}
       </div>
+
+      {filteredItems.length === 0 && (
+        <div className="card-arda p-12 text-center">
+          <Icons.Package className="w-12 h-12 mx-auto text-arda-text-muted mb-4 opacity-60" />
+          <h3 className="text-lg font-medium text-arda-text-primary mb-2">No Items</h3>
+          <p className="text-arda-text-secondary">
+            {items.length === 0
+              ? 'Complete the previous steps to add items to your master list.'
+              : 'No items match your current filters.'}
+          </p>
+        </div>
+      )}
 
       {/* Bottom CTA */}
       <div className="sticky bottom-24 z-20">
-        <div className="bg-white/80 backdrop-blur border border-arda-border rounded-arda-lg shadow-arda p-4 flex items-center justify-between gap-4">
+        <div className="bg-white/90 backdrop-blur border border-arda-border rounded-xl shadow-lg p-3 flex items-center justify-between gap-4">
           <div className="text-sm text-arda-text-secondary">
-            {items.length} item{items.length === 1 ? '' : 's'} ready
+            {items.length} item{items.length === 1 ? '' : 's'} ready to import
           </div>
           <button
             type="button"
             onClick={handleComplete}
             disabled={items.length === 0}
             className={[
-              'flex items-center gap-2 px-4 py-2 rounded-arda font-semibold text-sm transition-colors',
+              'flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm transition-all',
               items.length > 0
-                ? 'bg-green-600 text-white hover:bg-green-700'
+                ? 'bg-green-600 text-white hover:bg-green-700 shadow-md'
                 : 'bg-arda-border text-arda-text-muted cursor-not-allowed',
             ].join(' ')}
           >
             <Icons.ArrowRight className="w-4 h-4" />
-            Add {items.length} Item{items.length === 1 ? '' : 's'} to Arda
+            Add to Arda
           </button>
         </div>
       </div>

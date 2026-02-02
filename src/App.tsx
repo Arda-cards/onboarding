@@ -89,7 +89,7 @@ export default function App() {
   };
 
   const handleOpenArda = () => {
-    window.open('https://app.arda.cards', '_blank');
+    window.open('https://www.live.app.cards', '_blank');
   };
 
   // Check for mobile scanner routes (no auth required for scanning)

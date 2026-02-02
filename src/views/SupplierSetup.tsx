@@ -10,6 +10,38 @@ import {
   PRIORITY_SUPPLIER_DOMAINS,
 } from './supplierSetupUtils';
 
+// Snarky lean manufacturing quotes for loading states
+const LEAN_QUOTES = [
+  { quote: "Inventory is the root of all evil.", author: "Taiichi Ohno" },
+  { quote: "The most dangerous kind of waste is the waste we do not recognize.", author: "Shigeo Shingo" },
+  { quote: "Where there is no standard, there can be no kaizen.", author: "Taiichi Ohno" },
+  { quote: "All we are doing is looking at the timeline from order to cash and reducing it.", author: "Taiichi Ohno" },
+  { quote: "Having no problems is the biggest problem of all.", author: "Taiichi Ohno" },
+  { quote: "Costs do not exist to be calculated. Costs exist to be reduced.", author: "Taiichi Ohno" },
+  { quote: "Progress cannot be generated when we are satisfied with existing situations.", author: "Taiichi Ohno" },
+  { quote: "Without standards, there can be no improvement.", author: "Taiichi Ohno" },
+  { quote: "Make your workplace into a showcase that can be understood by everyone at a glance.", author: "Taiichi Ohno" },
+  { quote: "If you're going to do kaizen continuously, you've got to assume that things are a mess.", author: "Masaaki Imai" },
+  { quote: "Build a culture of stopping to fix problems, to get quality right the first time.", author: "Toyota Principle" },
+  { quote: "Waste is any human activity which absorbs resources but creates no value.", author: "James Womack" },
+  { quote: "Your customers do not care about your systems, they care about their problems.", author: "Lean Wisdom" },
+  { quote: "A relentless barrage of 'why's' is the best way to prepare your mind to pierce the clouded veil of thinking.", author: "Taiichi Ohno" },
+  { quote: "People don't go to Toyota to 'work', they go there to 'think'.", author: "Toyota Wisdom" },
+];
+
+function useRotatingQuote(intervalMs = 5000) {
+  const [index, setIndex] = useState(() => Math.floor(Math.random() * LEAN_QUOTES.length));
+  
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setIndex(prev => (prev + 1) % LEAN_QUOTES.length);
+    }, intervalMs);
+    return () => clearInterval(timer);
+  }, [intervalMs]);
+  
+  return LEAN_QUOTES[index];
+}
+
 // Background progress type for parent components
 interface BackgroundEmailProgress {
   isActive: boolean;
@@ -47,6 +79,9 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   onStateChange,
   initialState,
 }) => {
+  // Rotating lean quote for loading states
+  const leanQuote = useRotatingQuote();
+  
   // Track if we already have restored state (don't restart scans)
   const hasRestoredState = Boolean(initialState && (initialState.amazonOrders.length > 0 || initialState.priorityOrders.length > 0 || initialState.otherOrders.length > 0));
 
@@ -925,7 +960,13 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
               />
             </div>
             
-            {/* Live “what we’re scanning / finding” feed */}
+            {/* Lean quote while scanning */}
+            <blockquote className="mt-3 text-center px-4 py-2 bg-white/50 rounded-lg border border-blue-100 transition-opacity duration-500">
+              <p className="text-xs italic text-blue-700">"{leanQuote.quote}"</p>
+              <footer className="text-xs text-blue-500 mt-1">— {leanQuote.author}</footer>
+            </blockquote>
+            
+            {/* Live updates feed */}
             {jobStatus?.logs && jobStatus.logs.length > 0 && (
               <div className="mt-3 bg-white/70 border border-blue-200 rounded-xl p-3 max-h-28 overflow-y-auto">
                 <div className="text-xs font-semibold text-blue-800 mb-2">Live updates</div>

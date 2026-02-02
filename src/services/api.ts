@@ -245,6 +245,8 @@ export interface ProductEnrichmentData {
   unitCount?: number;
   currency?: string;
   upc?: string;
+  asin?: string;
+  sku?: string;
 }
 
 export const productApi = {

@@ -253,8 +253,8 @@ router.get('/lookup-tenant', async (req: Request, res: Response) => {
   }
 });
 
-// Create item in Arda
-router.post('/items', requireAuth, async (req: Request, res: Response) => {
+// Create item in Arda (no auth required - uses fallback user for demo mode)
+router.post('/items', async (req: Request, res: Response) => {
   try {
     const credentials = await getUserCredentials(req);
     if (!credentials.author) {
