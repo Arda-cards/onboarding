@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { BrowserMultiFormatReader, BarcodeFormat, DecodeHintType } from '@zxing/library';
 import { Icons } from '../components/Icons';
 import { API_BASE_URL } from '../services/api';
 
@@ -30,6 +31,7 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
   const streamRef = useRef<MediaStream | null>(null);
   const scanIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const idCounterRef = useRef(0);
+  const readerRef = useRef<BrowserMultiFormatReader | null>(null);
 
   const nextId = useCallback((prefix: 'scan' | 'photo') => {
     idCounterRef.current += 1;
@@ -94,7 +96,7 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
     await syncToDesktop(item);
   }, [scannedItems, nextId, syncToDesktop]);
 
-  // Start continuous barcode scanning
+  // Start continuous barcode scanning using ZXing
   const scanForBarcode = useCallback(async () => {
     if (!videoRef.current || !canvasRef.current) return;
     
@@ -102,7 +104,7 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
     
-    if (!ctx || video.videoWidth === 0) return;
+    if (!ctx || video.videoWidth === 0 || video.readyState !== video.HAVE_ENOUGH_DATA) return;
     
     // Set canvas size to video size
     canvas.width = video.videoWidth;
@@ -111,31 +113,32 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
     // Draw current frame
     ctx.drawImage(video, 0, 0);
     
-    // Get image data
-    const imageData = canvas.toDataURL('image/jpeg', 0.8);
+    // Initialize ZXing reader if needed
+    if (!readerRef.current) {
+      const hints = new Map();
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+        BarcodeFormat.EAN_13,
+        BarcodeFormat.EAN_8,
+        BarcodeFormat.UPC_A,
+        BarcodeFormat.UPC_E,
+        BarcodeFormat.CODE_128,
+        BarcodeFormat.CODE_39,
+        BarcodeFormat.ITF,
+        BarcodeFormat.QR_CODE,
+      ]);
+      hints.set(DecodeHintType.TRY_HARDER, true);
+      readerRef.current = new BrowserMultiFormatReader(hints);
+    }
     
-    // Try to detect barcode using BarcodeDetector API (if available)
-    if ('BarcodeDetector' in window) {
-      try {
-        // @ts-ignore - BarcodeDetector is not in TypeScript types yet
-        const detector = new BarcodeDetector({
-          formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39'],
-        });
-        
-        const imageBitmap = await createImageBitmap(video);
-        const barcodes = await detector.detect(imageBitmap);
-        
-        if (barcodes.length > 0) {
-          const barcode = barcodes[0];
-          handleBarcodeDetected(barcode.rawValue);
-        }
-      } catch (err) {
-        // Ignore detection errors
+    try {
+      // Convert canvas to image and decode
+      const dataUrl = canvas.toDataURL('image/png');
+      const result = await readerRef.current.decodeFromImage(undefined, dataUrl);
+      if (result) {
+        handleBarcodeDetected(result.getText());
       }
-    } else {
-      // Fallback: Send to server for processing
-      // This is just a placeholder - would need server-side barcode detection
-      void imageData;
+    } catch {
+      // No barcode found in this frame - this is normal, just continue scanning
     }
   }, [handleBarcodeDetected]);
 
@@ -194,6 +197,10 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
     if (scanIntervalRef.current) {
       clearInterval(scanIntervalRef.current);
       scanIntervalRef.current = null;
+    }
+    if (readerRef.current) {
+      readerRef.current.reset();
+      readerRef.current = null;
     }
     setIsScanning(false);
   }, []);

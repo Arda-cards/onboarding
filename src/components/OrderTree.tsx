@@ -31,8 +31,8 @@ export const OrderTree: React.FC<OrderTreeProps> = ({
     [orders]
   );
 
-  const journeyTree = useMemo(() => 
-    buildJourneyTree(orders, emails), 
+  const journeyTree = useMemo(
+    () => buildJourneyTree(orders, emails),
     [orders, emails]
   );
 
@@ -298,9 +298,8 @@ export const OrderTree: React.FC<OrderTreeProps> = ({
 
   // Set initial focus on first node if none focused
   useEffect(() => {
-    if (!focusedNodeId && visibleNodes.length > 0) {
-      setFocusedNodeId(visibleNodes[0].id);
-    }
+    if (focusedNodeId || visibleNodes.length === 0) return;
+    setFocusedNodeId(visibleNodes[0].id);
   }, [visibleNodes, focusedNodeId]);
 
   // Reset expanded nodes when view mode changes

@@ -266,7 +266,7 @@ export interface InventoryItem {
 export const ordersApi = {
   getOrders: () => fetchApi<{ orders: Order[] }>('/api/orders'),
   
-  saveOrders: (orders: any[]) =>
+  saveOrders: (orders: Order[]) =>
     fetchApi<{ success: boolean; orders: Order[] }>('/api/orders', {
       method: 'POST',
       body: JSON.stringify({ orders }),

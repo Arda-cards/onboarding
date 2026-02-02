@@ -82,7 +82,7 @@ export function useAutoIngestion(
       }
       
       if (status.orders) {
-        const convertedOrders: ExtractedOrder[] = status.orders.map((o: any) => ({
+        const convertedOrders: ExtractedOrder[] = status.orders.map((o) => ({
           id: o.id,
           originalEmailId: o.id,
           supplier: o.supplier,
@@ -123,7 +123,7 @@ export function useAutoIngestion(
   useEffect(() => {
     if (isIngesting && currentJobId) {
       pollingRef.current = setInterval(pollJobStatus, 1000);
-      pollJobStatus(); // Immediate first poll
+      void pollJobStatus(); // Immediate first poll
     }
     
     return () => {
@@ -149,8 +149,9 @@ export function useAutoIngestion(
         setCurrentJobId(result.jobId);
         setJobStatus('running');
       }
-    } catch (err: any) {
-      setError(err.message || 'Failed to start ingestion');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to start ingestion';
+      setError(message);
       setIsIngesting(false);
     }
   }, [isIngesting, userProfile]);
