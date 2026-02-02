@@ -154,7 +154,7 @@ export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
 
   // Open Arda in new tab
   const openArda = () => {
-    window.open('https://app.arda.cards', '_blank');
+    window.open('https://live.app.arda.cards', '_blank');
   };
 
   // Stats
