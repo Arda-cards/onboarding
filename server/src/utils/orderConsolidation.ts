@@ -252,7 +252,7 @@ export function consolidateOrders(orders: RawOrderData[]): ConsolidatedOrder[] {
   
   const consolidatedOrders: ConsolidatedOrder[] = [];
   
-  for (const [supplier, supplierOrders] of ordersBySupplier) {
+  for (const [_supplier, supplierOrders] of ordersBySupplier) {
     // Sort by date (oldest first)
     supplierOrders.sort((a, b) => new Date(a.orderDate).getTime() - new Date(b.orderDate).getTime());
     

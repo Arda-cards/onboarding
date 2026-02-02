@@ -1,11 +1,13 @@
 import Redis from 'ioredis';
+import type { Redis as RedisClient } from 'ioredis';
 
 const redisUrl = process.env.REDIS_URL;
-let redisClient: Redis | null = null;
+let redisClient: RedisClient | null = null;
 
 if (redisUrl) {
   try {
-    redisClient = new Redis(redisUrl);
+    const RedisCtor = Redis as unknown as new (url: string) => RedisClient;
+    redisClient = new RedisCtor(redisUrl);
     redisClient.on('error', (error: Error) => {
       console.error('Redis connection error:', error);
     });

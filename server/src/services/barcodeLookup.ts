@@ -205,7 +205,7 @@ async function setCached(code: string, payload: CachePayload, ttlSeconds: number
   if (!redisClient) return;
   if (Number.isFinite(maxWaitMs) && Number(maxWaitMs) <= 0) return;
   try {
-    const setPromise = redisClient.setEx(
+    const setPromise = redisClient.setex(
       `barcode:lookup:${code}`,
       ttlSeconds,
       JSON.stringify(payload)
@@ -452,4 +452,3 @@ export async function lookupProductByBarcode(rawBarcode: string, options: Barcod
 
   return null;
 }
-

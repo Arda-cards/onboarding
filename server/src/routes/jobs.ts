@@ -779,7 +779,6 @@ async function processEmailsInBackground(
 
     // STEP 3: Process vendor by vendor and collect raw orders for consolidation
     let totalProcessed = 0;
-    const totalEmails = emailInfos.length;
     const rawOrders: RawOrderData[] = []; // Collect for consolidation
     
     for (const [vendorDomain, vendorEmails] of sortedVendors) {
@@ -958,7 +957,6 @@ async function processEmailsInBackground(
     }
 
     // Complete
-    const finalJob = jobManager.getJob(jobId);
     jobManager.updateJob(jobId, { status: 'completed' });
     jobManager.setJobCurrentEmail(jobId, null);
     jobManager.updateJobProgress(jobId, { 
@@ -975,47 +973,6 @@ async function processEmailsInBackground(
       error: error.message || 'Unknown error' 
     });
     jobManager.addJobLog(jobId, `❌ Error: ${error.message}`);
-  }
-}
-
-// Helper to process analysis result
-function processAnalysisResult(
-  jobId: string, 
-  email: { id: string; subject: string; sender: string; body: string; date?: string },
-  result: any
-) {
-  const job = jobManager.getJob(jobId);
-  if (!job) return;
-
-  if (result.isOrder) {
-    // Use only the items that were actually extracted - NO placeholders
-    const items = result.items || [];
-    
-    // Log if no items were found (for debugging)
-    if (items.length === 0) {
-      console.log(`   ⚠️ No items extracted for order from ${result.supplier}`);
-    }
-    
-    const order: ProcessedOrder = {
-      id: result.emailId,
-      supplier: result.supplier || extractSupplierFromSender(email.sender),
-      orderDate: normalizeOrderDate(result.orderDate, email.date),
-      totalAmount: result.totalAmount || 0,
-      items: items.map((item: any, idx: number) => ({
-        id: `${result.emailId}-${idx}`,
-        name: item.name || 'Unknown Item',
-        quantity: item.quantity || 1,
-        unit: item.unit || 'ea',
-        unitPrice: item.unitPrice || 0,
-      })),
-      confidence: result.confidence || 0.5,
-    };
-    
-    jobManager.addJobOrder(jobId, order);
-    jobManager.updateJobProgress(jobId, { success: job.progress.success + 1 });
-    jobManager.addJobLog(jobId, `✅ Order: ${order.supplier} - $${order.totalAmount.toFixed(2)} (${order.items.length} items)`);
-  } else {
-    jobManager.updateJobProgress(jobId, { failed: job.progress.failed + 1 });
   }
 }
 

@@ -29,7 +29,7 @@ function getNextRunDelay(hour: number): number {
 
 async function runCognitoSync() {
   if (!redisClient) return;
-  const lock = await redisClient.set(LOCK_KEY, 'locked', 'NX', 'PX', LOCK_TTL);
+  const lock = await redisClient.set(LOCK_KEY, 'locked', 'PX', LOCK_TTL, 'NX');
   if (!lock) {
     console.log('⏳ Cognito sync already running on another instance');
     return;

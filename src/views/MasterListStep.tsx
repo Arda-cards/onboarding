@@ -256,71 +256,65 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Master Item List</h1>
-          <p className="text-gray-500 mt-1">
-            Review, enrich, and verify items before syncing to Arda
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onBack}
-            className="px-4 py-2 text-gray-600 hover:text-gray-900 transition-colors"
-          >
-            Back
-          </button>
-          <button
-            onClick={handleComplete}
-            disabled={items.length === 0}
-            className={`
-              px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2
-              ${items.length > 0 
-                ? 'bg-green-600 text-white hover:bg-green-700' 
-                : 'bg-gray-200 text-gray-500 cursor-not-allowed'}
-            `}
-          >
-            <Icons.ArrowRight className="w-4 h-4" />
-            Continue to Arda Sync ({items.length} items)
-          </button>
-        </div>
+      {/* Actions (footer Continue is hidden on this step) */}
+      <div className="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={verifyAll}
+          className="btn-arda-outline"
+        >
+          Verify all
+        </button>
+        <button
+          type="button"
+          onClick={handleComplete}
+          disabled={items.length === 0}
+          className={[
+            'flex items-center gap-2 px-4 py-2 rounded-arda font-semibold text-sm transition-colors',
+            items.length > 0
+              ? 'bg-arda-accent text-white hover:bg-arda-accent-hover'
+              : 'bg-arda-border text-arda-text-muted cursor-not-allowed',
+          ].join(' ')}
+        >
+          <Icons.ArrowRight className="w-4 h-4" />
+          Continue to Arda Sync ({items.length})
+        </button>
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-5 gap-4">
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
-          <div className="text-sm text-gray-500">Total Items</div>
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="card-arda p-4">
+          <div className="text-2xl font-bold text-arda-text-primary">{stats.total}</div>
+          <div className="text-sm text-arda-text-secondary">Total Items</div>
         </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="card-arda p-4">
           <div className="text-2xl font-bold text-green-600">{stats.verified}</div>
-          <div className="text-sm text-gray-500">Verified</div>
+          <div className="text-sm text-arda-text-secondary">Verified</div>
         </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4">
-          <div className="text-2xl font-bold text-yellow-600">{stats.needsAttention}</div>
-          <div className="text-sm text-gray-500">Needs Attention</div>
+        <div className="card-arda p-4">
+          <div className="text-2xl font-bold text-arda-accent">{stats.needsAttention}</div>
+          <div className="text-sm text-arda-text-secondary">Needs Attention</div>
         </div>
-        <div className="bg-white rounded-lg border border-gray-200 p-4 col-span-2">
+        <div className="card-arda p-4 col-span-2">
           <div className="flex items-center gap-4 text-sm">
             <span className="flex items-center gap-1">
-              <Icons.Mail className="w-4 h-4 text-blue-500" />
+              <Icons.Mail className="w-4 h-4 text-arda-accent" />
               {stats.bySource.email}
             </span>
             <span className="flex items-center gap-1">
-              <Icons.Barcode className="w-4 h-4 text-purple-500" />
+              <Icons.Barcode className="w-4 h-4 text-arda-accent" />
               {stats.bySource.barcode}
             </span>
             <span className="flex items-center gap-1">
-              <Icons.Camera className="w-4 h-4 text-orange-500" />
+              <Icons.Camera className="w-4 h-4 text-arda-accent" />
               {stats.bySource.photo}
             </span>
             <span className="flex items-center gap-1">
-              <Icons.FileSpreadsheet className="w-4 h-4 text-green-500" />
+              <Icons.FileSpreadsheet className="w-4 h-4 text-arda-accent" />
               {stats.bySource.csv}
             </span>
           </div>
-          <div className="text-sm text-gray-500 mt-1">By Source</div>
+          <div className="text-sm text-arda-text-secondary mt-1">By Source</div>
         </div>
       </div>
 
@@ -332,29 +326,29 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
               <button
                 key={f}
                 onClick={() => setFilter(f)}
-                className={`
-                  px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
-                  ${filter === f 
-                    ? 'bg-gray-900 text-white' 
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}
-                `}
+                className={[
+                  'px-3 py-1.5 rounded-arda text-sm font-medium transition-colors border',
+                  filter === f
+                    ? 'bg-arda-accent text-white border-orange-600'
+                    : 'bg-white/70 text-arda-text-secondary border-arda-border hover:bg-arda-bg-tertiary',
+                ].join(' ')}
               >
                 {f === 'needs_attention' ? 'Needs Attention' : f.charAt(0).toUpperCase() + f.slice(1)}
               </button>
             ))}
           </div>
-          <div className="h-6 w-px bg-gray-200" />
+          <div className="h-6 w-px bg-arda-border" />
           <div className="flex items-center gap-1">
             {(['all', 'email', 'barcode', 'photo', 'csv'] as const).map(s => (
               <button
                 key={s}
                 onClick={() => setSourceFilter(s)}
-                className={`
-                  px-2 py-1.5 rounded text-sm transition-colors
-                  ${sourceFilter === s 
-                    ? 'bg-blue-100 text-blue-700' 
-                    : 'text-gray-500 hover:bg-gray-100'}
-                `}
+                className={[
+                  'px-2 py-1.5 rounded-arda text-sm transition-colors border',
+                  sourceFilter === s
+                    ? 'bg-orange-50 text-arda-accent border-orange-200'
+                    : 'bg-transparent text-arda-text-secondary border-transparent hover:bg-arda-bg-tertiary hover:border-arda-border',
+                ].join(' ')}
               >
                 {s === 'all' ? 'All Sources' : s.charAt(0).toUpperCase() + s.slice(1)}
               </button>
@@ -362,20 +356,14 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button
-            onClick={verifyAll}
-            className="px-3 py-1.5 text-sm text-green-600 hover:bg-green-50 rounded-lg transition-colors"
-          >
-            Verify All
-          </button>
           <div className="relative">
-            <Icons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+            <Icons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-arda-text-muted" />
             <input
               type="text"
               placeholder="Search items..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="input-arda pl-9 pr-4 py-2 text-sm bg-white"
             />
           </div>
         </div>
@@ -387,8 +375,8 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
           <div
             key={item.id}
             className={`
-              bg-white rounded-lg border p-4 transition-all
-              ${item.needsAttention ? 'border-yellow-300 bg-yellow-50' : 'border-gray-200'}
+              bg-white rounded-arda-lg border border-arda-border shadow-arda p-4 transition-all
+              ${item.needsAttention ? 'border-orange-300 bg-orange-50' : ''}
               ${item.isVerified ? 'border-green-300 bg-green-50' : ''}
             `}
           >
@@ -397,88 +385,88 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
               <div className="space-y-4">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Name *</label>
+                    <label className="block text-sm font-medium text-arda-text-secondary mb-1">Name *</label>
                     <input
                       type="text"
                       value={editForm.name || ''}
                       onChange={(e) => setEditForm(prev => ({ ...prev, name: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="input-arda bg-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+                    <label className="block text-sm font-medium text-arda-text-secondary mb-1">Description</label>
                     <input
                       type="text"
                       value={editForm.description || ''}
                       onChange={(e) => setEditForm(prev => ({ ...prev, description: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="input-arda bg-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Supplier</label>
+                    <label className="block text-sm font-medium text-arda-text-secondary mb-1">Supplier</label>
                     <input
                       type="text"
                       value={editForm.supplier || ''}
                       onChange={(e) => setEditForm(prev => ({ ...prev, supplier: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="input-arda bg-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Location / Bin</label>
+                    <label className="block text-sm font-medium text-arda-text-secondary mb-1">Location / Bin</label>
                     <input
                       type="text"
                       value={editForm.location || ''}
                       onChange={(e) => setEditForm(prev => ({ ...prev, location: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="input-arda bg-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">SKU</label>
+                    <label className="block text-sm font-medium text-arda-text-secondary mb-1">SKU</label>
                     <input
                       type="text"
                       value={editForm.sku || ''}
                       onChange={(e) => setEditForm(prev => ({ ...prev, sku: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="input-arda bg-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Barcode</label>
+                    <label className="block text-sm font-medium text-arda-text-secondary mb-1">Barcode</label>
                     <input
                       type="text"
                       value={editForm.barcode || ''}
                       onChange={(e) => setEditForm(prev => ({ ...prev, barcode: e.target.value }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="input-arda bg-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Min Quantity</label>
+                    <label className="block text-sm font-medium text-arda-text-secondary mb-1">Min Quantity</label>
                     <input
                       type="number"
                       value={editForm.minQty || ''}
                       onChange={(e) => setEditForm(prev => ({ ...prev, minQty: parseFloat(e.target.value) || undefined }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="input-arda bg-white"
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Order Quantity</label>
+                    <label className="block text-sm font-medium text-arda-text-secondary mb-1">Order Quantity</label>
                     <input
                       type="number"
                       value={editForm.orderQty || ''}
                       onChange={(e) => setEditForm(prev => ({ ...prev, orderQty: parseFloat(e.target.value) || undefined }))}
-                      className="w-full px-3 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      className="input-arda bg-white"
                     />
                   </div>
                 </div>
                 <div className="flex items-center justify-end gap-2">
                   <button
                     onClick={cancelEdit}
-                    className="px-4 py-2 text-gray-600 hover:text-gray-900 transition-colors"
+                    className="btn-arda-outline"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={saveEdit}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+                    className="btn-arda-primary"
                   >
                     Save Changes
                   </button>
@@ -489,7 +477,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
               <div className="flex items-start gap-4">
                 {/* Image */}
                 {item.imageUrl && (
-                  <div className="w-16 h-16 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
+                  <div className="w-16 h-16 rounded-2xl overflow-hidden bg-arda-bg-tertiary border border-arda-border flex-shrink-0">
                     <img 
                       src={item.imageUrl} 
                       alt={item.name}
@@ -503,29 +491,23 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className={`
-                          p-1 rounded
-                          ${item.source === 'email' ? 'bg-blue-100 text-blue-600' : ''}
-                          ${item.source === 'barcode' ? 'bg-purple-100 text-purple-600' : ''}
-                          ${item.source === 'photo' ? 'bg-orange-100 text-orange-600' : ''}
-                          ${item.source === 'csv' ? 'bg-green-100 text-green-600' : ''}
-                        `}>
+                        <span className="p-1.5 rounded-lg bg-arda-bg-tertiary border border-arda-border text-arda-accent">
                           {getSourceIcon(item.source)}
                         </span>
-                        <h3 className="font-medium text-gray-900">{item.name}</h3>
+                        <h3 className="font-medium text-arda-text-primary">{item.name}</h3>
                         {item.isVerified && (
                           <Icons.CheckCircle2 className="w-4 h-4 text-green-500" />
                         )}
                         {item.needsAttention && (
-                          <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs font-medium">
+                          <span className="px-2 py-0.5 bg-orange-50 text-orange-800 border border-orange-200 rounded-lg text-xs font-medium">
                             Needs Review
                           </span>
                         )}
                       </div>
                       {item.description && (
-                        <p className="text-sm text-gray-500 mt-0.5">{item.description}</p>
+                        <p className="text-sm text-arda-text-secondary mt-0.5">{item.description}</p>
                       )}
-                      <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
+                      <div className="flex items-center gap-4 mt-2 text-sm text-arda-text-secondary flex-wrap">
                         {item.supplier && (
                           <span className="flex items-center gap-1">
                             <Icons.Building2 className="w-3 h-3" />
@@ -550,13 +532,13 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
                     {/* Quantities */}
                     <div className="text-right text-sm">
                       {item.minQty !== undefined && (
-                        <div className="text-gray-500">Min: {item.minQty}</div>
+                        <div className="text-arda-text-secondary">Min: {item.minQty}</div>
                       )}
                       {item.orderQty !== undefined && (
-                        <div className="text-gray-500">Order: {item.orderQty}</div>
+                        <div className="text-arda-text-secondary">Order: {item.orderQty}</div>
                       )}
                       {item.unitPrice !== undefined && (
-                        <div className="font-medium text-gray-900">
+                        <div className="font-medium text-arda-text-primary">
                           ${item.unitPrice.toFixed(2)}
                         </div>
                       )}
@@ -568,7 +550,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
                 <div className="flex items-center gap-1 flex-shrink-0">
                   <button
                     onClick={() => startEditing(item)}
-                    className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                    className="p-2 text-arda-text-muted hover:text-arda-accent hover:bg-orange-50 rounded-xl transition-colors"
                     title="Edit"
                   >
                     <Icons.Pencil className="w-4 h-4" />
@@ -576,7 +558,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
                   {!item.isVerified && (
                     <button
                       onClick={() => verifyItem(item.id)}
-                      className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded-lg transition-colors"
+                      className="p-2 text-arda-text-muted hover:text-green-700 hover:bg-green-50 rounded-xl transition-colors"
                       title="Verify"
                     >
                       <Icons.Check className="w-4 h-4" />
@@ -584,7 +566,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
                   )}
                   <button
                     onClick={() => removeItem(item.id)}
-                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    className="p-2 text-arda-text-muted hover:text-red-700 hover:bg-red-50 rounded-xl transition-colors"
                     title="Remove"
                   >
                     <Icons.Trash2 className="w-4 h-4" />
@@ -596,10 +578,10 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
         ))}
         
         {filteredItems.length === 0 && (
-          <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-            <Icons.Package className="w-12 h-12 mx-auto text-gray-300 mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No Items</h3>
-            <p className="text-gray-500">
+          <div className="card-arda p-12 text-center">
+            <Icons.Package className="w-12 h-12 mx-auto text-arda-text-muted mb-4 opacity-60" />
+            <h3 className="text-lg font-medium text-arda-text-primary mb-2">No Items</h3>
+            <p className="text-arda-text-secondary">
               {items.length === 0 
                 ? 'Complete the previous steps to add items to your master list.'
                 : 'No items match your current filters.'}

@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { Icons } from '../components/Icons';
 import { ExtractedOrder } from '../types';
 import { SupplierSetup, EmailScanState } from './SupplierSetup';
@@ -150,6 +150,7 @@ interface BackgroundEmailProgress {
 
 export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   onComplete,
+  onSkip,
   userProfile,
 }) => {
   const [currentStep, setCurrentStep] = useState<OnboardingStep>('email');
@@ -182,14 +183,23 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
 
   // Get current step index
   const currentStepIndex = ONBOARDING_STEPS.findIndex(s => s.id === currentStep);
+  const currentStepConfig = useMemo(
+    () => ONBOARDING_STEPS.find(s => s.id === currentStep) || ONBOARDING_STEPS[0],
+    [currentStep],
+  );
   
   // Check if can go back
   const canGoBack = currentStepIndex > 0;
   
   // Check if can go forward
-  const canGoForward = currentStep === 'email' 
-    ? canProceedFromEmail 
-    : currentStep !== 'sync'; // Can always continue except on last step
+  // Some steps have their own primary action (e.g. CSV approve, master list review, sync).
+  // For those, we hide the global footer "Continue" to avoid accidental skipping.
+  const showFooterContinue = currentStep !== 'sync' && currentStep !== 'csv' && currentStep !== 'masterlist';
+  const canGoForward = showFooterContinue && (
+    currentStep === 'email'
+      ? canProceedFromEmail
+      : true
+  );
 
   // Handle step completion
   const handleStepComplete = useCallback((step: OnboardingStep) => {
@@ -302,73 +312,123 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
 
   // Render step indicator
   const renderStepIndicator = () => (
-    <div className="bg-white border-b border-gray-200 px-6 py-4">
-      <div className="max-w-6xl mx-auto">
-        <div className="flex items-center justify-between overflow-x-auto">
-          {ONBOARDING_STEPS.map((step, index) => {
-            const status = getStepStatus(step.id);
-            const Icon = Icons[step.icon] || Icons.Circle;
-            
-            return (
-              <div key={step.id} className="flex items-center">
-                {/* Step circle */}
-                <button
-                  onClick={() => {
-                    if (status === 'completed' || status === 'current') {
-                      setCurrentStep(step.id);
-                    }
-                  }}
-                  disabled={status === 'upcoming'}
-                  className={`
-                    flex items-center gap-2 p-2 rounded-lg transition-all whitespace-nowrap
-                    ${status === 'current' ? 'bg-blue-50' : ''}
-                    ${status === 'completed' ? 'cursor-pointer hover:bg-gray-50' : ''}
-                    ${status === 'upcoming' ? 'opacity-50 cursor-not-allowed' : ''}
-                  `}
-                >
-                  <div className={`
-                    w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm
-                    ${status === 'completed' ? 'bg-green-500 text-white' : ''}
-                    ${status === 'current' ? 'bg-blue-500 text-white' : ''}
-                    ${status === 'upcoming' ? 'bg-gray-200 text-gray-400' : ''}
-                  `}>
-                    {status === 'completed' ? (
-                      <Icons.Check className="w-4 h-4" />
-                    ) : (
-                      <Icon className="w-4 h-4" />
-                    )}
-                  </div>
-                  <div className="text-left hidden md:block">
-                    <div className={`text-sm font-medium ${
-                      status === 'upcoming' ? 'text-gray-400' : 'text-gray-900'
-                    }`}>
-                      {step.title}
-                    </div>
-                  </div>
-                </button>
-                
-                {/* Connector line */}
-                {index < ONBOARDING_STEPS.length - 1 && (
-                  <div className={`
-                    w-8 h-0.5 mx-1
-                    ${completedSteps.has(step.id) ? 'bg-green-500' : 'bg-gray-200'}
-                  `} />
-                )}
-              </div>
-            );
-          })}
-        </div>
-        
-        {/* Background email progress indicator */}
-        {emailProgress && emailProgress.isActive && currentStep !== 'email' && (
-          <div className="mt-3 flex items-center gap-2 text-sm text-blue-600 bg-blue-50 rounded-lg px-3 py-2">
-            <Icons.Loader2 className="w-4 h-4 animate-spin" />
-            <span>
-              Scanning emails in background: {emailProgress.supplier} 
-              ({emailProgress.processed}/{emailProgress.total})
-            </span>
+    <div className="sticky top-0 z-40 border-b border-arda-border/70 bg-white/70 backdrop-blur">
+      <div className="max-w-6xl mx-auto px-6 py-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-orange-500 to-orange-600 shadow-arda flex items-center justify-center">
+              <Icons.Package className="w-5 h-5 text-white" />
+            </div>
+            <div className="leading-tight">
+              <div className="text-sm font-semibold text-arda-text-primary">Arda</div>
+              <div className="text-xs text-arda-text-muted">Order Pulse onboarding</div>
+            </div>
           </div>
-        )}
+
+          <div className="flex items-center gap-2">
+            {userProfile?.email && (
+              <div className="hidden sm:flex items-center gap-2 text-sm text-arda-text-secondary bg-white/70 border border-arda-border rounded-xl px-3 py-2">
+                <Icons.Mail className="w-4 h-4 text-arda-text-muted" />
+                <span className="max-w-[18rem] truncate">{userProfile.email}</span>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={onSkip}
+              className="text-sm font-medium text-arda-text-muted hover:text-arda-text-primary hover:bg-white/70 border border-transparent hover:border-arda-border rounded-xl px-3 py-2 transition-colors"
+            >
+              Exit
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+          <div>
+            <div className="text-xs text-arda-text-muted">
+              Step {currentStepIndex + 1} of {ONBOARDING_STEPS.length}
+            </div>
+            <h1 className="text-2xl font-bold text-arda-text-primary tracking-tight">
+              {currentStepConfig.title}
+            </h1>
+            <p className="text-sm text-arda-text-secondary mt-1">{currentStepConfig.description}</p>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap justify-start lg:justify-end">
+            {totalItems > 0 && (
+              <span className="arda-pill">
+                <Icons.Sparkles className="w-4 h-4" />
+                {totalItems} item{totalItems === 1 ? '' : 's'} captured
+              </span>
+            )}
+
+            {emailProgress && emailProgress.isActive && currentStep === 'email' && (
+              <span className="inline-flex items-center gap-2 text-xs font-medium text-arda-text-secondary bg-white/70 border border-arda-border rounded-full px-3 py-1.5">
+                <Icons.Loader2 className="w-3.5 h-3.5 animate-spin text-arda-accent" />
+                Scanning {emailProgress.supplier} ({emailProgress.processed}/{emailProgress.total})
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-4 overflow-x-auto pb-2">
+          <div className="flex items-center min-w-max">
+            {ONBOARDING_STEPS.map((step, index) => {
+              const status = getStepStatus(step.id);
+              const Icon = Icons[step.icon] || Icons.Circle;
+
+              const isInteractive = status === 'completed' || status === 'current';
+              const isCompleted = status === 'completed';
+              const isCurrent = status === 'current';
+
+              return (
+                <div key={step.id} className="flex items-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isInteractive) setCurrentStep(step.id);
+                    }}
+                    disabled={!isInteractive}
+                    className={[
+                      'group flex items-center gap-2 rounded-xl px-3 py-2 transition-all whitespace-nowrap border',
+                      isCurrent ? 'bg-orange-50 border-orange-200' : 'bg-white/70 border-arda-border hover:bg-white',
+                      !isInteractive ? 'opacity-50 cursor-not-allowed' : '',
+                    ].join(' ')}
+                    aria-current={isCurrent ? 'step' : undefined}
+                  >
+                    <span
+                      className={[
+                        'w-8 h-8 rounded-xl flex items-center justify-center',
+                        'border transition-colors',
+                        isCompleted ? 'bg-arda-accent border-orange-600 text-white' : '',
+                        isCurrent ? 'bg-orange-500 border-orange-600 text-white' : '',
+                        status === 'upcoming' ? 'bg-arda-bg-tertiary border-arda-border text-arda-text-muted' : '',
+                      ].join(' ')}
+                    >
+                      {isCompleted ? <Icons.Check className="w-4 h-4" /> : <Icon className="w-4 h-4" />}
+                    </span>
+                    <span
+                      className={[
+                        'text-sm font-medium',
+                        isCurrent ? 'text-arda-text-primary' : 'text-arda-text-secondary group-hover:text-arda-text-primary',
+                      ].join(' ')}
+                    >
+                      {step.title}
+                    </span>
+                  </button>
+
+                  {index < ONBOARDING_STEPS.length - 1 && (
+                    <div
+                      className={[
+                        'w-8 h-[2px] mx-2 rounded-full',
+                        completedSteps.has(step.id) ? 'bg-orange-400' : 'bg-arda-border',
+                      ].join(' ')}
+                    />
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -447,88 +507,87 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
 
   // Render persistent footer
   const renderFooter = () => (
-    <div className="sticky bottom-0 bg-white border-t border-gray-200 shadow-lg">
+    <div className="sticky bottom-0 z-40 bg-white/80 backdrop-blur border-t border-arda-border shadow-arda-lg">
       <div className="max-w-6xl mx-auto px-6 py-4">
-        <div className="flex items-center justify-between">
-          {/* Left: Back button */}
-          <div className="w-32">
+        <div className="flex items-center justify-between gap-4">
+          {/* Left: Back */}
+          <div className="min-w-[7.5rem]">
             {canGoBack && (
               <button
+                type="button"
                 onClick={goBack}
-                className="flex items-center gap-2 px-4 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                className="btn-arda-outline flex items-center gap-2"
               >
-                <Icons.ChevronLeft className="w-5 h-5" />
+                <Icons.ChevronLeft className="w-4 h-4" />
                 Back
               </button>
             )}
           </div>
 
-          {/* Center: Progress info */}
-          <div className="flex-1 flex flex-col items-center">
-            {/* Step progress */}
-            <div className="text-sm font-medium text-gray-700">
+          {/* Center: Progress + counts */}
+          <div className="flex-1 flex flex-col items-center text-center">
+            <div className="text-sm font-medium text-arda-text-secondary">
               Step {currentStepIndex + 1} of {ONBOARDING_STEPS.length}
             </div>
-            
-            {/* Item counts */}
-            <div className="flex items-center gap-4 mt-1 text-xs text-gray-500">
+
+            <div className="flex items-center gap-4 mt-1 text-xs text-arda-text-muted flex-wrap justify-center">
               {emailItems.length > 0 && (
-                <span className="flex items-center gap-1">
+                <span className="inline-flex items-center gap-1">
                   <Icons.Mail className="w-3 h-3" />
-                  {emailItems.length} from email
+                  {emailItems.length} email
                 </span>
               )}
               {scannedBarcodes.length > 0 && (
-                <span className="flex items-center gap-1">
+                <span className="inline-flex items-center gap-1">
                   <Icons.Barcode className="w-3 h-3" />
                   {scannedBarcodes.length} scanned
                 </span>
               )}
               {capturedPhotos.filter(p => p.suggestedName).length > 0 && (
-                <span className="flex items-center gap-1">
+                <span className="inline-flex items-center gap-1">
                   <Icons.Camera className="w-3 h-3" />
-                  {capturedPhotos.filter(p => p.suggestedName).length} captured
+                  {capturedPhotos.filter(p => p.suggestedName).length} photos
                 </span>
               )}
               {csvItems.length > 0 && (
-                <span className="flex items-center gap-1">
+                <span className="inline-flex items-center gap-1">
                   <Icons.FileSpreadsheet className="w-3 h-3" />
-                  {csvItems.length} from CSV
+                  {csvItems.length} CSV
                 </span>
               )}
               {totalItems > 0 && (
-                <span className="font-medium text-gray-700">
-                  ({totalItems} total items)
+                <span className="text-arda-text-secondary font-medium">
+                  ({totalItems} total)
                 </span>
               )}
             </div>
 
-            {/* Email processing progress */}
-            {emailProgress && emailProgress.isActive && (
-              <div className="flex items-center gap-2 mt-2 text-xs text-blue-600 bg-blue-50 rounded-full px-3 py-1">
-                <Icons.Loader2 className="w-3 h-3 animate-spin" />
+            {emailProgress && emailProgress.isActive && currentStep === 'email' && (
+              <div className="mt-2 inline-flex items-center gap-2 text-xs text-arda-text-secondary bg-white/70 border border-arda-border rounded-full px-3 py-1">
+                <Icons.Loader2 className="w-3 h-3 animate-spin text-arda-accent" />
                 <span>
-                  {emailProgress.supplier}: {emailProgress.processed}/{emailProgress.total}
+                  Scanning {emailProgress.supplier}: {emailProgress.processed}/{emailProgress.total}
                 </span>
               </div>
             )}
           </div>
 
-          {/* Right: Forward button */}
-          <div className="w-32 flex justify-end">
-            {currentStep !== 'sync' && (
+          {/* Right: Primary CTA */}
+          <div className="min-w-[7.5rem] flex justify-end">
+            {showFooterContinue && (
               <button
+                type="button"
                 onClick={goForward}
                 disabled={!canGoForward}
-                className={`
-                  flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors
-                  ${canGoForward 
-                    ? 'bg-blue-600 text-white hover:bg-blue-700' 
-                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'}
-                `}
+                className={[
+                  'flex items-center gap-2 px-4 py-2 rounded-arda font-semibold text-sm transition-colors',
+                  canGoForward
+                    ? 'bg-arda-accent text-white hover:bg-arda-accent-hover'
+                    : 'bg-arda-border text-arda-text-muted cursor-not-allowed',
+                ].join(' ')}
               >
                 Continue
-                <Icons.ChevronRight className="w-5 h-5" />
+                <Icons.ChevronRight className="w-4 h-4" />
               </button>
             )}
           </div>
@@ -538,12 +597,16 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   );
 
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col">
+    <div className="relative min-h-screen arda-mesh flex flex-col">
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-10 left-10 w-56 h-56 rounded-full bg-orange-400/15 blur-3xl animate-float" />
+        <div className="absolute top-32 right-12 w-72 h-72 rounded-full bg-blue-500/10 blur-3xl animate-float" />
+      </div>
       {/* Step indicator */}
       {renderStepIndicator()}
       
       {/* Main content */}
-      <div className="flex-1 p-6 pb-24">
+      <div className="relative z-10 flex-1 px-6 py-6 pb-28">
         <div className="max-w-6xl mx-auto">
           {renderStepContent()}
         </div>

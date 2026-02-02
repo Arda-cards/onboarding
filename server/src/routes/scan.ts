@@ -80,7 +80,7 @@ const saveSession = async (sessionId: string, session: ScanSession): Promise<voi
   
   if (redisClient) {
     try {
-      await redisClient.setEx(
+      await redisClient.setex(
         `${REDIS_PREFIX}${sessionId}`,
         SESSION_TTL,
         JSON.stringify(session)

@@ -35,12 +35,10 @@ interface ColumnMapping {
 
 interface CSVUploadStepProps {
   onComplete: (approvedItems: CSVItem[]) => void;
-  onBack: () => void;
 }
 
 export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
   onComplete,
-  onBack,
 }) => {
   // CSV parsing state
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
@@ -241,46 +239,40 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Upload CSV</h1>
-          <p className="text-gray-500 mt-1">
-            Import items from a CSV file and review before adding to your master list
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onBack}
-            className="px-4 py-2 text-gray-600 hover:text-gray-900 transition-colors"
-          >
-            Back
-          </button>
-          <button
-            onClick={handleComplete}
-            disabled={stats.approved === 0}
-            className={`
-              px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2
-              ${stats.approved > 0 
-                ? 'bg-green-600 text-white hover:bg-green-700' 
-                : 'bg-gray-200 text-gray-500 cursor-not-allowed'}
-            `}
-          >
-            <Icons.Check className="w-4 h-4" />
-            Add {stats.approved} Items to Master List
-          </button>
-        </div>
+      {/* Actions (footer Continue is hidden on this step) */}
+      <div className="flex items-center justify-end gap-2">
+        <button
+          type="button"
+          onClick={() => onComplete([])}
+          className="btn-arda-outline"
+        >
+          Skip CSV
+        </button>
+        <button
+          type="button"
+          onClick={handleComplete}
+          disabled={stats.approved === 0}
+          className={[
+            'flex items-center gap-2 px-4 py-2 rounded-arda font-semibold text-sm transition-colors',
+            stats.approved > 0
+              ? 'bg-arda-accent text-white hover:bg-arda-accent-hover'
+              : 'bg-arda-border text-arda-text-muted cursor-not-allowed',
+          ].join(' ')}
+        >
+          <Icons.Check className="w-4 h-4" />
+          Add {stats.approved} item{stats.approved === 1 ? '' : 's'}
+        </button>
       </div>
 
       {/* Upload area or items list */}
       {items.length === 0 ? (
-        <div className="bg-white rounded-xl border-2 border-dashed border-gray-300 p-12">
+        <div className="bg-white rounded-arda-lg border-2 border-dashed border-arda-border p-12 shadow-arda">
           <div className="text-center">
-            <Icons.FileSpreadsheet className="w-16 h-16 mx-auto text-gray-400 mb-4" />
-            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+            <Icons.FileSpreadsheet className="w-16 h-16 mx-auto text-arda-text-muted mb-4 opacity-70" />
+            <h3 className="text-lg font-semibold text-arda-text-primary mb-2">
               Upload a CSV File
             </h3>
-            <p className="text-gray-500 mb-6 max-w-md mx-auto">
+            <p className="text-arda-text-secondary mb-6 max-w-md mx-auto">
               Import your inventory, supplier catalog, or item list. We'll help you map the columns.
             </p>
             <input
@@ -292,12 +284,12 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors inline-flex items-center gap-2"
+              className="btn-arda-primary inline-flex items-center gap-2 px-6 py-3 rounded-xl"
             >
               <Icons.Upload className="w-5 h-5" />
               Select CSV File
             </button>
-            <p className="text-sm text-gray-400 mt-4">
+            <p className="text-sm text-arda-text-muted mt-4">
               Supports: .csv files with headers
             </p>
           </div>
@@ -305,15 +297,15 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
       ) : (
         <>
           {/* Stats bar */}
-          <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <div className="card-arda p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-6">
                 <div className="flex items-center gap-2">
-                  <Icons.FileSpreadsheet className="w-5 h-5 text-gray-400" />
-                  <span className="font-medium">{fileName}</span>
+                  <Icons.FileSpreadsheet className="w-5 h-5 text-arda-text-muted" />
+                  <span className="font-medium text-arda-text-primary">{fileName}</span>
                 </div>
                 <div className="flex items-center gap-4 text-sm">
-                  <span className="text-gray-500">{stats.total} items</span>
+                  <span className="text-arda-text-secondary">{stats.total} items</span>
                   <span className="text-yellow-600">{stats.pending} pending</span>
                   <span className="text-green-600">{stats.approved} approved</span>
                   <span className="text-red-600">{stats.rejected} rejected</span>
@@ -322,7 +314,7 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => fileInputRef.current?.click()}
-                  className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+                  className="btn-arda-outline px-3 py-1.5 text-sm"
                 >
                   Upload Different File
                 </button>
@@ -344,12 +336,12 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                 <button
                   key={f}
                   onClick={() => setFilter(f)}
-                  className={`
-                    px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
-                    ${filter === f 
-                      ? 'bg-gray-900 text-white' 
-                      : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}
-                  `}
+                  className={[
+                    'px-3 py-1.5 rounded-arda text-sm font-medium transition-colors border',
+                    filter === f
+                      ? 'bg-arda-accent text-white border-orange-600'
+                      : 'bg-white/70 text-arda-text-secondary border-arda-border hover:bg-arda-bg-tertiary',
+                  ].join(' ')}
                 >
                   {f.charAt(0).toUpperCase() + f.slice(1)}
                 </button>
@@ -357,13 +349,13 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
             </div>
             <div className="flex items-center gap-3">
               <div className="relative">
-                <Icons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                <Icons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-arda-text-muted" />
                 <input
                   type="text"
                   placeholder="Search items..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="input-arda pl-9 pr-4 py-2 text-sm bg-white"
                 />
               </div>
             </div>
@@ -371,20 +363,20 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
 
           {/* Bulk actions */}
           {selectedItems.size > 0 && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-center justify-between">
-              <span className="text-blue-700 font-medium">
+            <div className="bg-orange-50 border border-orange-200 rounded-arda-lg p-4 flex items-center justify-between">
+              <span className="text-orange-800 font-medium">
                 {selectedItems.size} items selected
               </span>
               <div className="flex items-center gap-2">
                 <button
                   onClick={approveSelected}
-                  className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
+                  className="px-4 py-2 bg-green-600 text-white rounded-arda text-sm font-medium hover:bg-green-700 transition-colors"
                 >
                   Approve Selected
                 </button>
                 <button
                   onClick={rejectSelected}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium hover:bg-red-700 transition-colors"
+                  className="px-4 py-2 bg-red-600 text-white rounded-arda text-sm font-medium hover:bg-red-700 transition-colors"
                 >
                   Reject Selected
                 </button>
@@ -393,9 +385,9 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
           )}
 
           {/* Items table */}
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <table className="w-full">
-              <thead className="bg-gray-50 border-b border-gray-200">
+          <div className="card-arda overflow-hidden">
+            <table className="table-arda">
+              <thead className="bg-arda-bg-secondary border-b border-arda-border">
                 <tr>
                   <th className="px-4 py-3 text-left">
                     <input
@@ -405,35 +397,35 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                       className="rounded border-gray-300"
                     />
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
                     Item
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
                     SKU / Barcode
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
                     Supplier
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
                     Location
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
                     Min Qty
                   </th>
-                  <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
                     Status
                   </th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
                     Actions
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-arda-border">
                 {filteredItems.map(item => (
                   <tr 
                     key={item.id} 
                     className={`
-                      hover:bg-gray-50 transition-colors
+                      hover:bg-arda-bg-tertiary transition-colors
                       ${item.isApproved ? 'bg-green-50' : ''}
                       ${item.isRejected ? 'bg-red-50 opacity-60' : ''}
                     `}
@@ -447,22 +439,22 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                       />
                     </td>
                     <td className="px-4 py-3">
-                      <div className="font-medium text-gray-900">{item.name}</div>
-                      <div className="text-xs text-gray-400">Row {item.rowIndex}</div>
+                      <div className="font-medium text-arda-text-primary">{item.name}</div>
+                      <div className="text-xs text-arda-text-muted">Row {item.rowIndex}</div>
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
+                    <td className="px-4 py-3 text-sm text-arda-text-secondary">
                       {item.sku && <div>SKU: {item.sku}</div>}
                       {item.barcode && <div>Barcode: {item.barcode}</div>}
-                      {!item.sku && !item.barcode && <span className="text-gray-400">—</span>}
+                      {!item.sku && !item.barcode && <span className="text-arda-text-muted">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {item.supplier || <span className="text-gray-400">—</span>}
+                    <td className="px-4 py-3 text-sm text-arda-text-secondary">
+                      {item.supplier || <span className="text-arda-text-muted">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {item.location || <span className="text-gray-400">—</span>}
+                    <td className="px-4 py-3 text-sm text-arda-text-secondary">
+                      {item.location || <span className="text-arda-text-muted">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {item.minQty ?? <span className="text-gray-400">—</span>}
+                    <td className="px-4 py-3 text-sm text-arda-text-secondary">
+                      {item.minQty ?? <span className="text-arda-text-muted">—</span>}
                     </td>
                     <td className="px-4 py-3">
                       {item.isApproved && (
@@ -513,8 +505,8 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
             </table>
             
             {filteredItems.length === 0 && (
-              <div className="p-12 text-center text-gray-400">
-                <Icons.Search className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <div className="p-12 text-center text-arda-text-muted">
+                <Icons.Search className="w-12 h-12 mx-auto mb-3 opacity-40" />
                 <p>No items match your filter</p>
               </div>
             )}
@@ -524,11 +516,11 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
           <div className="flex items-center justify-between">
             <button
               onClick={approveAll}
-              className="px-4 py-2 bg-green-100 text-green-700 rounded-lg font-medium hover:bg-green-200 transition-colors"
+              className="px-4 py-2 bg-green-100 text-green-800 rounded-arda font-medium hover:bg-green-200 transition-colors"
             >
               Approve All Items
             </button>
-            <div className="text-sm text-gray-500">
+            <div className="text-sm text-arda-text-secondary">
               {stats.approved} of {stats.total} items will be added to your master list
             </div>
           </div>
@@ -538,10 +530,10 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
       {/* Column mapping modal */}
       {showMappingModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[80vh] overflow-auto">
-            <div className="p-6 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900">Map CSV Columns</h3>
-              <p className="text-sm text-gray-500 mt-1">
+          <div className="arda-glass rounded-2xl w-full max-w-2xl max-h-[80vh] overflow-auto">
+            <div className="p-6 border-b border-arda-border/70">
+              <h3 className="text-lg font-semibold text-arda-text-primary">Map CSV Columns</h3>
+              <p className="text-sm text-arda-text-secondary mt-1">
                 Tell us which columns contain which data. We've made some guesses.
               </p>
             </div>
@@ -558,7 +550,7 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                 { key: 'unitPrice', label: 'Unit Price' },
               ].map(({ key, label, required }) => (
                 <div key={key} className="flex items-center gap-4">
-                  <label className="w-40 text-sm font-medium text-gray-700">
+                  <label className="w-40 text-sm font-medium text-arda-text-secondary">
                     {label} {required && <span className="text-red-500">*</span>}
                   </label>
                   <select
@@ -567,7 +559,7 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                       ...prev, 
                       [key]: e.target.value || undefined 
                     }))}
-                    className="flex-1 px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="input-arda flex-1 text-sm bg-white"
                   >
                     <option value="">— Select column —</option>
                     {csvHeaders.map(header => (
@@ -578,11 +570,11 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
               ))}
               
               {/* Preview */}
-              <div className="mt-6 pt-6 border-t border-gray-200">
-                <h4 className="text-sm font-medium text-gray-700 mb-3">Preview (first 3 rows)</h4>
+              <div className="mt-6 pt-6 border-t border-arda-border/70">
+                <h4 className="text-sm font-medium text-arda-text-primary mb-3">Preview (first 3 rows)</h4>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs">
-                    <thead className="bg-gray-50">
+                    <thead className="bg-arda-bg-secondary">
                       <tr>
                         <th className="px-2 py-1 text-left">Name</th>
                         <th className="px-2 py-1 text-left">SKU</th>
@@ -603,26 +595,26 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
               </div>
             </div>
             
-            <div className="p-6 border-t border-gray-200 flex items-center justify-end gap-3">
+            <div className="p-6 border-t border-arda-border/70 flex items-center justify-end gap-3">
               <button
                 onClick={() => {
                   setShowMappingModal(false);
                   setCsvData([]);
                   setCsvHeaders([]);
                 }}
-                className="px-4 py-2 text-gray-600 hover:text-gray-900 transition-colors"
+                className="btn-arda-outline"
               >
                 Cancel
               </button>
               <button
                 onClick={applyMapping}
                 disabled={!columnMapping.name}
-                className={`
-                  px-6 py-2 rounded-lg font-medium transition-colors
-                  ${columnMapping.name 
-                    ? 'bg-blue-600 text-white hover:bg-blue-700' 
-                    : 'bg-gray-200 text-gray-500 cursor-not-allowed'}
-                `}
+                className={[
+                  'px-6 py-2 rounded-arda font-semibold text-sm transition-colors',
+                  columnMapping.name
+                    ? 'bg-arda-accent text-white hover:bg-arda-accent-hover'
+                    : 'bg-arda-border text-arda-text-muted cursor-not-allowed',
+                ].join(' ')}
               >
                 Apply Mapping
               </button>

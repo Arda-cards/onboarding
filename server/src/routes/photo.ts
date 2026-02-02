@@ -110,7 +110,7 @@ const saveSession = async (sessionId: string, session: PhotoSession): Promise<vo
   
   if (redisClient) {
     try {
-      await redisClient.setEx(
+      await redisClient.setex(
         `${REDIS_PREFIX}${sessionId}`,
         SESSION_TTL,
         JSON.stringify(session)
@@ -140,7 +140,7 @@ const getPhotoData = async (photoId: string): Promise<string | null> => {
 const savePhotoData = async (photoId: string, imageData: string): Promise<void> => {
   if (redisClient) {
     try {
-      await redisClient.setEx(
+      await redisClient.setex(
         `${PHOTO_DATA_PREFIX}${photoId}`,
         SESSION_TTL,
         imageData
@@ -457,7 +457,7 @@ Omit fields that cannot be determined.`;
             ? parsed.isInternalItem 
             : undefined,
         };
-      } catch (parseError) {
+      } catch {
         appLogger.warn({ responseText: text.substring(0, 200) }, 'Failed to parse Gemini response JSON');
         return {};
       }

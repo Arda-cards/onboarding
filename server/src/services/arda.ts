@@ -70,27 +70,6 @@ export interface EntityRecord {
   retired: boolean;
 }
 
-// UserAccount types for tenant lookup
-interface UserAccountEntity {
-  eId: string;
-  oidcSub: string;
-  identity: {
-    email?: string;
-    firstName?: string;
-    lastName: string;
-  };
-  activeAgency: {
-    local: string;
-    tenant: string;
-    homes: Array<{ fqn: string; networkLocator: string; authority: string }>;
-  };
-}
-
-interface UserAccountRecord {
-  rId: string;
-  payload: UserAccountEntity;
-}
-
 // PageResult interface available for paginated API calls
 // interface PageResult {
 //   thisPage: string;

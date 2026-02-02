@@ -163,63 +163,34 @@ export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Sync to Arda</h1>
-          <p className="text-gray-500 mt-1">
-            Push your items to Arda's inventory system
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          {!syncComplete && (
-            <button
-              onClick={onBack}
-              className="px-4 py-2 text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              Back
-            </button>
-          )}
-          {syncComplete && (
-            <button
-              onClick={onComplete}
-              className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors flex items-center gap-2"
-            >
-              <Icons.Check className="w-4 h-4" />
-              Complete Setup
-            </button>
-          )}
-        </div>
-      </div>
-
       {/* Pre-sync summary */}
       {!isSyncing && !syncComplete && (
-        <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
-          <div className="w-16 h-16 mx-auto bg-blue-100 rounded-full flex items-center justify-center mb-4">
-            <Icons.Upload className="w-8 h-8 text-blue-600" />
+        <div className="arda-glass rounded-2xl p-8 text-center">
+          <div className="w-16 h-16 mx-auto bg-orange-50 border border-orange-100 rounded-2xl flex items-center justify-center mb-4">
+            <Icons.Upload className="w-8 h-8 text-arda-accent" />
           </div>
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">
+          <h2 className="text-xl font-semibold text-arda-text-primary mb-2">
             Ready to Sync {items.length} Items
           </h2>
-          <p className="text-gray-500 mb-6 max-w-md mx-auto">
+          <p className="text-arda-text-secondary mb-6 max-w-md mx-auto">
             We'll create these items in Arda's inventory system. 
             {userEmail && ` Items will be attributed to ${userEmail}.`}
           </p>
 
           {/* Preview of items */}
-          <div className="bg-gray-50 rounded-lg p-4 mb-6 max-w-md mx-auto">
-            <div className="text-sm text-gray-600 mb-2">Items to sync:</div>
+          <div className="bg-arda-bg-secondary border border-arda-border rounded-arda-lg p-4 mb-6 max-w-md mx-auto">
+            <div className="text-sm text-arda-text-secondary mb-2">Items to sync:</div>
             <div className="flex flex-wrap gap-2 justify-center">
               {items.slice(0, 5).map(item => (
                 <span 
                   key={item.id}
-                  className="px-2 py-1 bg-white rounded border border-gray-200 text-sm"
+                  className="px-2 py-1 bg-white rounded-arda border border-arda-border text-sm text-arda-text-primary"
                 >
                   {item.name}
                 </span>
               ))}
               {items.length > 5 && (
-                <span className="px-2 py-1 text-gray-500 text-sm">
+                <span className="px-2 py-1 text-arda-text-muted text-sm">
                   +{items.length - 5} more
                 </span>
               )}
@@ -228,7 +199,7 @@ export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
 
           <button
             onClick={startSync}
-            className="px-8 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors inline-flex items-center gap-2"
+            className="btn-arda-primary inline-flex items-center gap-2 px-8 py-3 rounded-xl"
           >
             <Icons.Zap className="w-5 h-5" />
             Start Sync to Arda
@@ -238,21 +209,21 @@ export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
 
       {/* Sync in progress */}
       {isSyncing && (
-        <div className="bg-white rounded-xl border border-gray-200 p-8">
+        <div className="card-arda p-8">
           <div className="text-center mb-6">
-            <Icons.Loader2 className="w-12 h-12 mx-auto text-blue-600 animate-spin mb-4" />
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">
+            <Icons.Loader2 className="w-12 h-12 mx-auto text-arda-accent animate-spin mb-4" />
+            <h2 className="text-xl font-semibold text-arda-text-primary mb-2">
               Syncing Items to Arda...
             </h2>
-            <p className="text-gray-500">
+            <p className="text-arda-text-secondary">
               {syncProgress.current} of {syncProgress.total} items processed
             </p>
           </div>
 
           {/* Progress bar */}
-          <div className="w-full bg-gray-100 rounded-full h-3 mb-6">
+          <div className="w-full bg-arda-bg-tertiary rounded-full h-3 mb-6 border border-arda-border">
             <div 
-              className="bg-blue-600 h-3 rounded-full transition-all duration-300"
+              className="bg-arda-accent h-3 rounded-full transition-all duration-300"
               style={{ width: `${(syncProgress.current / syncProgress.total) * 100}%` }}
             />
           </div>
@@ -287,9 +258,9 @@ export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
         <>
           {/* Summary */}
           <div className="grid grid-cols-3 gap-4">
-            <div className="bg-white rounded-lg border border-gray-200 p-4 text-center">
-              <div className="text-3xl font-bold text-gray-900">{syncResults.length}</div>
-              <div className="text-sm text-gray-500">Total Items</div>
+            <div className="card-arda p-4 text-center">
+              <div className="text-3xl font-bold text-arda-text-primary">{syncResults.length}</div>
+              <div className="text-sm text-arda-text-secondary">Total Items</div>
             </div>
             <div className="bg-green-50 rounded-lg border border-green-200 p-4 text-center">
               <div className="text-3xl font-bold text-green-600">{successCount}</div>
@@ -308,15 +279,22 @@ export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
           </div>
 
           {/* Results list */}
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-              <h3 className="font-semibold text-gray-900">Import Results</h3>
+          <div className="card-arda overflow-hidden">
+            <div className="px-6 py-4 border-b border-arda-border bg-arda-bg-secondary flex items-center justify-between">
+              <h3 className="font-semibold text-arda-text-primary">Import Results</h3>
               <div className="flex items-center gap-2">
+                <button
+                  onClick={onComplete}
+                  className="btn-arda-primary flex items-center gap-2"
+                >
+                  <Icons.Check className="w-4 h-4" />
+                  Complete setup
+                </button>
                 {!verificationResults && successCount > 0 && (
                   <button
                     onClick={verifyItems}
                     disabled={isVerifying}
-                    className="px-4 py-2 bg-blue-100 text-blue-700 rounded-lg text-sm font-medium hover:bg-blue-200 transition-colors flex items-center gap-2"
+                    className="btn-arda-outline flex items-center gap-2 text-sm"
                   >
                     {isVerifying ? (
                       <>
@@ -333,7 +311,7 @@ export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
                 )}
                 <button
                   onClick={openArda}
-                  className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition-colors flex items-center gap-2"
+                  className="btn-arda-outline flex items-center gap-2 text-sm"
                 >
                   <Icons.ExternalLink className="w-4 h-4" />
                   Open Arda
@@ -364,7 +342,7 @@ export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
               </div>
             )}
 
-            <div className="max-h-96 overflow-y-auto divide-y divide-gray-100">
+            <div className="max-h-96 overflow-y-auto divide-y divide-arda-border">
               {syncResults.map(result => (
                 <div 
                   key={result.itemId}
@@ -379,9 +357,9 @@ export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
                       <Icons.XCircle className="w-5 h-5 text-red-500" />
                     )}
                     <div>
-                      <div className="font-medium text-gray-900">{result.itemName}</div>
+                      <div className="font-medium text-arda-text-primary">{result.itemName}</div>
                       {result.ardaEntityId && (
-                        <div className="text-xs text-gray-500 font-mono">
+                        <div className="text-xs text-arda-text-muted font-mono">
                           ID: {result.ardaEntityId}
                         </div>
                       )}
@@ -420,7 +398,7 @@ export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
               </p>
               <button
                 onClick={openArda}
-                className="px-6 py-2 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors inline-flex items-center gap-2"
+                className="btn-arda-primary inline-flex items-center gap-2"
               >
                 <Icons.ExternalLink className="w-4 h-4" />
                 View in Arda

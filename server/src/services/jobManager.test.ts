@@ -1,5 +1,5 @@
 // Unit tests for jobManager service
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { 
   createJob, 
   getJob, 
@@ -71,7 +71,7 @@ describe('jobManager', () => {
 
   describe('getJobForUser', () => {
     it('should return latest job for user', () => {
-      const job1 = createJob('user-multi');
+      const _job1 = createJob('user-multi');
       const job2 = createJob('user-multi');
       
       const result = getJobForUser('user-multi');

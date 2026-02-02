@@ -291,14 +291,19 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
   return (
     <div className="min-h-screen bg-black flex flex-col">
       {/* Header */}
-      <div className="bg-black/80 backdrop-blur-sm px-4 py-3 flex items-center justify-between z-10">
-        <div className="text-white">
-          <h1 className="font-semibold">
-            {mode === 'barcode' ? 'Barcode Scanner' : 'Photo Capture'}
-          </h1>
-          <p className="text-xs text-white/60">
-            Syncing to desktop session
-          </p>
+      <div className="bg-black/80 backdrop-blur-sm px-4 py-3 flex items-center justify-between z-10 border-b border-white/10">
+        <div className="flex items-center gap-3 text-white">
+          <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-arda">
+            <Icons.Package className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h1 className="font-semibold leading-tight">
+              {mode === 'barcode' ? 'Barcode Scanner' : 'Photo Capture'}
+            </h1>
+            <p className="text-xs text-white/60">
+              Syncing to your desktop
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-white/80 text-sm">
@@ -325,14 +330,14 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
         {/* Scanning overlay for barcode mode */}
         {mode === 'barcode' && isScanning && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="w-64 h-40 border-2 border-white/50 rounded-lg relative">
-              <div className="absolute top-0 left-0 w-6 h-6 border-l-4 border-t-4 border-white rounded-tl-lg" />
-              <div className="absolute top-0 right-0 w-6 h-6 border-r-4 border-t-4 border-white rounded-tr-lg" />
-              <div className="absolute bottom-0 left-0 w-6 h-6 border-l-4 border-b-4 border-white rounded-bl-lg" />
-              <div className="absolute bottom-0 right-0 w-6 h-6 border-r-4 border-b-4 border-white rounded-br-lg" />
+            <div className="w-64 h-40 border-2 border-orange-400/60 rounded-xl relative">
+              <div className="absolute top-0 left-0 w-6 h-6 border-l-4 border-t-4 border-orange-300 rounded-tl-xl" />
+              <div className="absolute top-0 right-0 w-6 h-6 border-r-4 border-t-4 border-orange-300 rounded-tr-xl" />
+              <div className="absolute bottom-0 left-0 w-6 h-6 border-l-4 border-b-4 border-orange-300 rounded-bl-xl" />
+              <div className="absolute bottom-0 right-0 w-6 h-6 border-r-4 border-b-4 border-orange-300 rounded-br-xl" />
               
               {/* Scanning line animation */}
-              <div className="absolute left-4 right-4 h-0.5 bg-green-500 animate-scan" />
+              <div className="absolute left-4 right-4 h-0.5 bg-arda-accent animate-scan" />
             </div>
             <p className="absolute bottom-8 text-white/80 text-sm">
               Position barcode within frame

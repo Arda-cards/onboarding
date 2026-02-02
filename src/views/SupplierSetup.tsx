@@ -262,7 +262,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     }, 10000);
     
     return () => clearInterval(interval);
-  }, []);
+  }, [hasRestoredState]);
 
   // 1. START PRIORITY SUPPLIERS - STAGGERED TO AVOID RATE LIMITS
   // Skip if we have restored state (user navigated back)
@@ -333,7 +333,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       if (amazonRetryTimeout) clearTimeout(amazonRetryTimeout);
       if (priorityDelayTimeout) clearTimeout(priorityDelayTimeout);
     };
-  }, []);
+  }, [hasRestoredState]);
 
   // 2. START SUPPLIER DISCOVERY (delayed to stagger API calls)
   useEffect(() => {
@@ -997,7 +997,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
           {hasDiscovered && !isScanning && enabledCount > 0 && (
             <button
               onClick={handleScanSuppliers}
-              className="bg-arda-accent hover:bg-blue-600 text-white px-5 py-2.5 rounded-xl font-medium transition-all flex items-center gap-2"
+              className="bg-arda-accent hover:bg-arda-accent-hover text-white px-5 py-2.5 rounded-xl font-medium transition-all flex items-center gap-2"
             >
               <Icons.Download className="w-4 h-4" />
               Import {enabledCount} Suppliers
