@@ -23,15 +23,25 @@ describe('supplierSetupUtils', () => {
         sampleSubjects: [],
         isRecommended: false,
       },
+      {
+        domain: 'unknown.com',
+        displayName: 'Unknown',
+        emailCount: 0,
+        score: 10,
+        category: 'mystery',
+        sampleSubjects: [],
+        isRecommended: false,
+      },
     ];
     const enabledSuppliers = new Set(['foo.com']);
 
     const grid = buildSupplierGridItems(suppliers, enabledSuppliers);
 
-    expect(grid).toHaveLength(2);
+    expect(grid).toHaveLength(3);
     expect(grid[0].isEnabled).toBe(true);
     expect(grid[1].isEnabled).toBe(false);
     expect(grid[0].colors).toHaveProperty('bg');
+    expect(grid[2].colors.icon).toBe('📦'); // falls back to unknown color set
   });
 
   it('calculates progress percentage within bounds', () => {
@@ -46,6 +56,12 @@ describe('supplierSetupUtils', () => {
   it('returns milestone metadata for known milestones and fallback for unknown', () => {
     const firstItem = getMilestoneMessage('firstItem');
     expect(firstItem.title).toMatch(/First Item/);
+    const tenItems = getMilestoneMessage('tenItems');
+    expect(tenItems.emoji).toBe('🚀');
+    const fiftyItems = getMilestoneMessage('fiftyItems');
+    expect(fiftyItems.title).toMatch(/50/);
+    const hundredItems = getMilestoneMessage('hundredItems');
+    expect(hundredItems.title).toMatch(/100/);
 
     const unknown = getMilestoneMessage('not-real');
     expect(unknown.title).toMatch(/Milestone/);

@@ -235,4 +235,190 @@ describe('TreeNode', () => {
       fireEvent.mouseEnter(row);
     }
   });
+
+  it('falls back to default styling for unknown node types', () => {
+    render(
+      <TreeNode
+        node={{
+          id: 'unknown-1',
+          // @ts-expect-error testing default branch
+          type: 'unknown',
+          label: 'Unknown Node',
+          children: [],
+        }}
+        level={0}
+      />,
+    );
+
+    expect(screen.getByText('Unknown Node')).toBeInTheDocument();
+  });
+
+  it('exposes memo comparator that reacts to expanded state and handlers', () => {
+    const comparator = (TreeNode as any).compare as (prev: any, next: any) => boolean;
+    const sharedNode = { ...baseNode };
+    const sharedVelocity = new Map([['test', velocityProfile]]);
+    const baseProps = {
+      node: sharedNode,
+      level: 0,
+      velocityProfiles: sharedVelocity,
+      expandedNodes: new Set<string>(),
+      focusedNodeId: null,
+      onNodeClick: vi.fn(),
+      onExpandToggle: vi.fn(),
+      onFocusChange: vi.fn(),
+    };
+
+    // identical props should be equal
+    expect(comparator(baseProps, { ...baseProps })).toBe(true);
+
+    // different expansion state should trigger a re-render decision
+    const expandedProps = { ...baseProps, expandedNodes: new Set(['line-1']) };
+    expect(comparator(baseProps, expandedProps)).toBe(false);
+
+    // different handler identity should trigger re-render
+    const handlerChanged = { ...baseProps, onNodeClick: vi.fn() };
+    expect(comparator(baseProps, handlerChanged)).toBe(false);
+  });
+
+  it('renders line item even when velocity data is missing', () => {
+    render(
+      <TreeNode
+        node={{
+          id: 'line-no-velocity',
+          type: 'lineItem',
+          label: 'No Velocity',
+          // omit children to exercise hasChildren optional path
+          data: { name: 'No Velocity Item', quantity: 1, unit: 'ea' },
+        } as any}
+        level={0}
+        velocityProfiles={new Map()}
+      />,
+    );
+
+    expect(screen.getByText('No Velocity')).toBeInTheDocument();
+  });
+
+  it('shows new-node styling when isNew is true', () => {
+    const { container } = render(
+      <TreeNode
+        node={{
+          ...baseNode,
+          id: 'line-new',
+          label: 'Brand New',
+          isNew: true,
+          children: [],
+        }}
+        level={0}
+        velocityProfiles={new Map([['test', velocityProfile]])}
+      />,
+    );
+
+    expect(screen.getByText('Brand New')).toBeInTheDocument();
+    expect(container.querySelector('[data-node-id="line-new"]')?.className).toMatch(/animate-pulse/);
+  });
+
+  it('renders collapsed child container when not expanded at deeper levels', () => {
+    render(
+      <TreeNode
+        node={{
+          ...baseNode,
+          id: 'parent-collapsed',
+          children: [
+            {
+              id: 'nested',
+              type: 'lineItem',
+              label: 'Nested Child',
+              children: [],
+              data: { name: 'n', quantity: 1, unit: 'ea', normalizedName: 'n' },
+            },
+          ],
+        }}
+        level={2}
+        expandedNodes={new Set<string>()}
+        velocityProfiles={new Map()}
+      />,
+    );
+
+    expect(screen.getByText('Nested Child')).toBeInTheDocument();
+  });
+
+  it('omits order amount badge when total is missing', () => {
+    render(
+      <TreeNode
+        node={{
+          id: 'order-no-amount',
+          type: 'order',
+          label: 'Order Missing Amount',
+          subtitle: 'no amount',
+          children: [],
+          data: {},
+        }}
+        level={0}
+        expandedNodes={new Set()}
+      />,
+    );
+
+    expect(screen.getByText('Order Missing Amount')).toBeInTheDocument();
+    expect(screen.queryByText(/\$/)).not.toBeInTheDocument();
+  });
+
+  it('handles order total of zero without rendering amount badge', () => {
+    render(
+      <TreeNode
+        node={{
+          id: 'order-zero',
+          type: 'order',
+          label: 'Zero Amount',
+          subtitle: 'zero total',
+          children: [],
+          data: { totalAmount: 0 },
+        }}
+        level={0}
+        expandedNodes={new Set()}
+      />,
+    );
+
+    expect(screen.getByText('Zero Amount')).toBeInTheDocument();
+    expect(screen.queryByText('$0.00')).not.toBeInTheDocument();
+  });
+
+  it('covers memo comparator branches for mismatched props', () => {
+    const comparator = (TreeNode as any).compare as (prev: any, next: any) => boolean;
+    const makeProps = (overrides: any = {}) => {
+      const nodeOverride = overrides.node ?? {};
+      return {
+        node: { ...baseNode, ...nodeOverride },
+        level: overrides.level ?? 0,
+        velocityProfiles: overrides.velocityProfiles ?? new Map([['test', velocityProfile]]),
+        expandedNodes: Object.prototype.hasOwnProperty.call(overrides, 'expandedNodes')
+          ? overrides.expandedNodes
+          : new Set<string>(),
+        focusedNodeId: overrides.focusedNodeId ?? null,
+        onNodeClick: overrides.onNodeClick ?? baseClick,
+        onExpandToggle: overrides.onExpandToggle ?? baseExpand,
+        onFocusChange: overrides.onFocusChange ?? baseFocus,
+      };
+    };
+
+    const baseClick = vi.fn();
+    const baseExpand = vi.fn();
+    const baseFocus = vi.fn();
+
+    const baseProps = makeProps();
+    expect(comparator(baseProps, baseProps)).toBe(true);
+    expect(comparator(baseProps, makeProps({ node: { ...baseProps.node, id: 'other' } }))).toBe(false);
+    expect(comparator(baseProps, makeProps({ level: 2 }))).toBe(false);
+    expect(comparator(baseProps, makeProps({ node: { ...baseProps.node, label: 'Changed' } }))).toBe(false);
+    expect(comparator(baseProps, makeProps({ node: { ...baseProps.node, subtitle: 'Changed subtitle' } }))).toBe(false);
+    expect(comparator(baseProps, makeProps({ node: { ...baseProps.node, type: 'order' as any } }))).toBe(false);
+    expect(comparator(baseProps, makeProps({ node: { ...baseProps.node, isNew: true } }))).toBe(false);
+    expect(comparator(baseProps, makeProps({ node: { ...baseProps.node, data: { ...baseProps.node.data } } }))).toBe(false);
+    expect(comparator(baseProps, makeProps({ expandedNodes: undefined }))).toBe(false);
+    expect(comparator(baseProps, makeProps({ expandedNodes: new Set(['line-1']) }))).toBe(false);
+    expect(comparator(baseProps, makeProps({ focusedNodeId: 'line-1' }))).toBe(false);
+    expect(comparator(baseProps, makeProps({ velocityProfiles: new Map() }))).toBe(false);
+    expect(comparator(baseProps, makeProps({ onNodeClick: vi.fn(), onExpandToggle: baseExpand, onFocusChange: baseFocus }))).toBe(false);
+    expect(comparator(baseProps, { ...baseProps, onExpandToggle: vi.fn() })).toBe(false);
+    expect(comparator(baseProps, { ...baseProps, onFocusChange: vi.fn() })).toBe(false);
+  });
 });

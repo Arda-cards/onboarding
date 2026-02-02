@@ -15,6 +15,8 @@ import { discoverRouter } from './routes/discover.js';
 import { amazonRouter } from './routes/amazon.js';
 import ardaRouter from './routes/arda.js';
 import cognitoRouter from './routes/cognito.js';
+import scanRouter from './routes/scan.js';
+import photoRouter from './routes/photo.js';
 import { cognitoService } from './services/cognito.js';
 import { initializeJobManager } from './services/jobManager.js';
 import { startCognitoSyncScheduler } from './services/cognitoScheduler.js';
@@ -112,6 +114,9 @@ app.use('/api/jobs', defaultLimiter, jobsRouter);
 app.use('/api/cognito', cognitoRouter);
 app.use('/api/discover', defaultLimiter, discoverRouter);
 app.use('/api/amazon', amazonRouter);
+app.use('/api/scan', scanRouter);
+app.use('/api/barcode', scanRouter); // Also mount at /api/barcode for lookup endpoint
+app.use('/api/photo', photoRouter);
 
 // Error handler
 app.use(errorHandler);
