@@ -344,7 +344,7 @@ export const IngestionEngine: React.FC<IngestionEngineProps> = ({
     } catch (error) {
       console.error('Polling error:', error);
     }
-  }, [currentJobId]);
+  }, [currentJobId, addLog]);
 
   // Check for existing job on mount
   useEffect(() => {
@@ -368,7 +368,7 @@ export const IngestionEngine: React.FC<IngestionEngineProps> = ({
     if (!isCheckingAuth && userProfile) {
       checkExistingJob();
     }
-  }, [isCheckingAuth, userProfile]);
+  }, [isCheckingAuth, userProfile, addLog]);
 
   // Start/stop polling based on processing state
   useEffect(() => {

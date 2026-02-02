@@ -27,82 +27,70 @@ export const PhotoCaptureStep: React.FC<PhotoCaptureStepProps> = ({
   const [isAnalyzing, setIsAnalyzing] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const photoIdCounterRef = useRef(0);
 
-  // Poll for mobile-captured photos
-  useEffect(() => {
-    const pollInterval = setInterval(async () => {
-      try {
-        const response = await fetch(`${API_BASE_URL}/api/photo/session/${sessionId}/photos`, {
-          credentials: 'include',
-        });
-        if (response.ok) {
-          const data = await response.json();
-          if (data.photos && Array.isArray(data.photos)) {
-            // Process each new photo
-            for (const photoMeta of data.photos) {
-              if (!capturedPhotos.some(existing => existing.id === photoMeta.id)) {
-                // Fetch full image data for this photo
-                try {
-                  const imageResponse = await fetch(
-                    `${API_BASE_URL}/api/photo/session/${sessionId}/photo/${photoMeta.id}`,
-                    { credentials: 'include' }
-                  );
-                  if (imageResponse.ok) {
-                    const { photo: fullPhoto } = await imageResponse.json();
-                    const photo: CapturedPhoto = {
-                      id: fullPhoto.id,
-                      imageData: fullPhoto.imageData,
-                      source: fullPhoto.source || 'mobile',
-                      capturedAt: fullPhoto.capturedAt,
-                      suggestedName: fullPhoto.suggestedName,
-                      suggestedSupplier: fullPhoto.suggestedSupplier,
-                      extractedText: fullPhoto.extractedText,
-                      detectedBarcodes: fullPhoto.detectedBarcodes,
-                      isInternalItem: fullPhoto.isInternalItem,
-                    };
-                    onPhotoCaptured(photo);
-                  }
-                } catch {
-                  // Ignore individual photo fetch errors
-                }
-              }
-            }
-          }
-        }
-      } catch {
-        // Silently ignore polling errors
-      }
-    }, 2000);
-
-    return () => clearInterval(pollInterval);
-  }, [sessionId, capturedPhotos, onPhotoCaptured]);
-
-  // Handle file drop
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    
-    const files = Array.from(e.dataTransfer.files).filter(f => 
-      f.type.startsWith('image/')
-    );
-    
-    files.forEach(file => processFile(file));
+  const nextPhotoId = useCallback(() => {
+    photoIdCounterRef.current += 1;
+    return `photo-${photoIdCounterRef.current}`;
   }, []);
 
-  // Handle file selection
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    files.forEach(file => processFile(file));
-    e.target.value = ''; // Reset for re-selection
-  };
+  // Analyze image using Gemini
+  const analyzeImage = useCallback(async (imageData: string): Promise<{
+    extractedText?: string[];
+    detectedBarcodes?: string[];
+    suggestedName?: string;
+    suggestedSupplier?: string;
+    isInternalItem?: boolean;
+  }> => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/photo/analyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ imageData }),
+      });
+      
+      if (response.ok) {
+        return await response.json();
+      }
+    } catch {
+      // Ignore analysis errors
+    }
+    return {};
+  }, []);
+
+  // Trigger analysis for a photo and update it
+  const analyzeAndUpdatePhoto = useCallback(async (photo: CapturedPhoto) => {
+    if (!photo.imageData || photo.suggestedName) return; // Already analyzed or no data
+    
+    setIsAnalyzing(photo.id);
+    try {
+      const analysis = await analyzeImage(photo.imageData);
+      if (analysis.suggestedName || analysis.extractedText?.length) {
+        const updatedPhoto: CapturedPhoto = {
+          ...photo,
+          extractedText: analysis.extractedText,
+          detectedBarcodes: analysis.detectedBarcodes,
+          suggestedName: analysis.suggestedName,
+          suggestedSupplier: analysis.suggestedSupplier,
+          isInternalItem: analysis.isInternalItem,
+        };
+        onPhotoCaptured(updatedPhoto);
+      }
+    } catch {
+      // Ignore analysis errors
+    } finally {
+      setIsAnalyzing(null);
+    }
+  }, [analyzeImage, onPhotoCaptured]);
 
   // Process uploaded file
-  const processFile = async (file: File) => {
+  const processFile = useCallback(async (file: File) => {
     const reader = new FileReader();
     
     reader.onload = async (e) => {
       const imageData = e.target?.result as string;
-      const photoId = `photo-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const photoId = nextPhotoId();
       
       // Create initial photo entry
       const photo: CapturedPhoto = {
@@ -138,30 +126,79 @@ export const PhotoCaptureStep: React.FC<PhotoCaptureStepProps> = ({
     };
     
     reader.readAsDataURL(file);
-  };
+  }, [analyzeImage, nextPhotoId, onPhotoCaptured]);
 
-  // Analyze image using backend API
-  const analyzeImage = async (imageData: string): Promise<{
-    extractedText?: string[];
-    detectedBarcodes?: string[];
-    suggestedName?: string;
-    suggestedSupplier?: string;
-    isInternalItem?: boolean;
-  }> => {
-    try {
-      const response = await fetch('/api/photo/analyze', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageData }),
-      });
-      
-      if (response.ok) {
-        return await response.json();
+  // Poll for mobile-captured photos
+  useEffect(() => {
+    const pollInterval = setInterval(async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/api/photo/session/${sessionId}/photos`, {
+          credentials: 'include',
+        });
+        if (response.ok) {
+          const data = await response.json();
+          if (data.photos && Array.isArray(data.photos)) {
+            // Process each new photo
+            for (const photoMeta of data.photos) {
+              if (!capturedPhotos.some(existing => existing.id === photoMeta.id)) {
+                // Fetch full image data for this photo
+                try {
+                  const imageResponse = await fetch(
+                    `${API_BASE_URL}/api/photo/session/${sessionId}/photo/${photoMeta.id}`,
+                    { credentials: 'include' }
+                  );
+                  if (imageResponse.ok) {
+                    const { photo: fullPhoto } = await imageResponse.json();
+                    const photo: CapturedPhoto = {
+                      id: fullPhoto.id,
+                      imageData: fullPhoto.imageData,
+                      source: fullPhoto.source || 'mobile',
+                      capturedAt: fullPhoto.capturedAt,
+                      suggestedName: fullPhoto.suggestedName,
+                      suggestedSupplier: fullPhoto.suggestedSupplier,
+                      extractedText: fullPhoto.extractedText,
+                      detectedBarcodes: fullPhoto.detectedBarcodes,
+                      isInternalItem: fullPhoto.isInternalItem,
+                    };
+                    onPhotoCaptured(photo);
+                    
+                    // If not analyzed yet, trigger Gemini analysis
+                    if (!photo.suggestedName && photo.imageData) {
+                      analyzeAndUpdatePhoto(photo);
+                    }
+                  }
+                } catch {
+                  // Ignore individual photo fetch errors
+                }
+              }
+            }
+          }
+        }
+      } catch {
+        // Silently ignore polling errors
       }
-    } catch {
-      // Ignore analysis errors
-    }
-    return {};
+    }, 2000);
+
+    return () => clearInterval(pollInterval);
+  }, [sessionId, capturedPhotos, onPhotoCaptured, analyzeAndUpdatePhoto]);
+
+  // Handle file drop
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    
+    const files = Array.from(e.dataTransfer.files).filter(f => 
+      f.type.startsWith('image/')
+    );
+    
+    files.forEach(file => processFile(file));
+  }, [processFile]);
+
+  // Handle file selection
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    files.forEach(file => processFile(file));
+    e.target.value = ''; // Reset for re-selection
   };
 
   // Get classification badge

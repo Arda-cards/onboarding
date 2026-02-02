@@ -157,6 +157,18 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
     try {
       setError(null);
       
+      // Check if we're in a secure context (HTTPS or localhost)
+      if (!window.isSecureContext) {
+        setError('Camera requires HTTPS. Please access this page via https://');
+        return;
+      }
+      
+      // Check if mediaDevices is available
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setError('Camera not supported in this browser. Try Chrome or Safari.');
+        return;
+      }
+      
       // Stop existing stream
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
@@ -184,7 +196,18 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
       }
     } catch (err) {
       console.error('Camera error:', err);
-      setError('Could not access camera. Please grant permission.');
+      const error = err as Error;
+      if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+        setError('Camera permission denied. Please allow camera access in your browser settings.');
+      } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+        setError('No camera found on this device.');
+      } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+        setError('Camera is in use by another app. Please close other apps using the camera.');
+      } else if (error.name === 'OverconstrainedError') {
+        setError('Camera does not support the requested settings. Try switching cameras.');
+      } else {
+        setError(`Camera error: ${error.message || 'Unknown error'}`);
+      }
     }
   }, [cameraFacing, mode, startBarcodeScanning]);
 

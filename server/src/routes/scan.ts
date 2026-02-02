@@ -1,6 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import redisClient from '../utils/redisClient.js';
 import { appLogger } from '../middleware/requestLogger.js';
+import { lookupProductByBarcode } from '../services/barcodeLookup.js';
 
 const router = Router();
 
@@ -178,17 +179,8 @@ router.post('/session/:sessionId/barcode', validateSessionId, async (req: Reques
       return res.json({ success: true, duplicate: true });
     }
     
-    // Look up product info (with timeout)
-    let productInfo: { name?: string; brand?: string; imageUrl?: string; category?: string } = {};
-    try {
-      const lookupPromise = lookupBarcode(cleanBarcode);
-      const timeoutPromise = new Promise<typeof productInfo>((_, reject) => 
-        setTimeout(() => reject(new Error('Lookup timeout')), 5000)
-      );
-      productInfo = await Promise.race([lookupPromise, timeoutPromise]);
-    } catch {
-      appLogger.warn({ barcode: cleanBarcode }, 'Barcode lookup failed or timed out');
-    }
+    // Look up product info (cached, with timeout)
+    const productInfo = await lookupProductByBarcode(cleanBarcode, { timeoutMs: 5000 });
     
     const barcode: ScannedBarcode = {
       id: id || `scan-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
@@ -196,10 +188,10 @@ router.post('/session/:sessionId/barcode', validateSessionId, async (req: Reques
       barcodeType: barcodeType || detectBarcodeType(cleanBarcode),
       scannedAt: timestamp || new Date().toISOString(),
       source: 'mobile',
-      productName: productInfo.name,
-      brand: productInfo.brand,
-      imageUrl: productInfo.imageUrl,
-      category: productInfo.category,
+      productName: productInfo?.name,
+      brand: productInfo?.brand,
+      imageUrl: productInfo?.imageUrl,
+      category: productInfo?.category,
     };
     
     session.barcodes.push(barcode);
@@ -231,37 +223,9 @@ router.get('/lookup', async (req: Request, res: Response) => {
   }
   
   try {
-    // Check Redis cache first
-    if (redisClient) {
-      const cached = await redisClient.get(`barcode:lookup:${cleanCode}`);
-      if (cached) {
-        return res.json(JSON.parse(cached));
-      }
-    }
-    
-    const productInfo = await lookupBarcode(cleanCode);
-    
-    if (productInfo.name) {
-      // Cache successful lookups for 7 days
-      if (redisClient) {
-        await redisClient.setEx(
-          `barcode:lookup:${cleanCode}`,
-          7 * 24 * 60 * 60,
-          JSON.stringify(productInfo)
-        );
-      }
-      res.json(productInfo);
-    } else {
-      // Cache not-found for 1 hour to avoid repeated lookups
-      if (redisClient) {
-        await redisClient.setEx(
-          `barcode:lookup:${cleanCode}`,
-          60 * 60,
-          JSON.stringify({ notFound: true })
-        );
-      }
-      res.status(404).json({ error: 'Product not found' });
-    }
+    const productInfo = await lookupProductByBarcode(cleanCode, { timeoutMs: 5000 });
+    if (productInfo?.name) return res.json(productInfo);
+    return res.status(404).json({ error: 'Product not found' });
   } catch (error) {
     appLogger.error({ err: error }, 'Barcode lookup error');
     res.status(500).json({ error: 'Lookup failed' });
@@ -278,84 +242,6 @@ function detectBarcodeType(barcode: string): string {
   if (digits.length === 8) return 'EAN-8';
   if (digits.length === 14) return 'GTIN-14';
   return 'unknown';
-}
-
-/**
- * Look up product info from barcode using Open Food Facts or UPC Database
- */
-async function lookupBarcode(barcode: string): Promise<{
-  name?: string;
-  brand?: string;
-  imageUrl?: string;
-  category?: string;
-}> {
-  const cleanCode = barcode.replace(/\D/g, '');
-  
-  // Try Open Food Facts first (free, no API key needed)
-  try {
-    const response = await fetch(
-      `https://world.openfoodfacts.org/api/v0/product/${cleanCode}.json`
-    );
-    
-    if (response.ok) {
-      const data = await response.json() as {
-        status?: number;
-        product?: {
-          product_name?: string;
-          product_name_en?: string;
-          brands?: string;
-          image_url?: string;
-          image_front_url?: string;
-          categories?: string;
-        };
-      };
-      
-      if (data.status === 1 && data.product) {
-        const product = data.product;
-        return {
-          name: product.product_name || product.product_name_en,
-          brand: product.brands,
-          imageUrl: product.image_url || product.image_front_url,
-          category: product.categories?.split(',')[0]?.trim(),
-        };
-      }
-    }
-  } catch (error) {
-    appLogger.error({ err: error }, 'Open Food Facts lookup error');
-  }
-  
-  // Try UPC Item DB as fallback (free tier)
-  try {
-    const response = await fetch(
-      `https://api.upcitemdb.com/prod/trial/lookup?upc=${cleanCode}`
-    );
-    
-    if (response.ok) {
-      const data = await response.json() as {
-        items?: Array<{
-          title?: string;
-          brand?: string;
-          images?: string[];
-          category?: string;
-        }>;
-      };
-      
-      if (data.items && data.items.length > 0) {
-        const item = data.items[0];
-        return {
-          name: item.title,
-          brand: item.brand,
-          imageUrl: item.images?.[0],
-          category: item.category,
-        };
-      }
-    }
-  } catch (error) {
-    appLogger.error({ err: error }, 'UPC Item DB lookup error');
-  }
-  
-  // Return empty if nothing found
-  return {};
 }
 
 export default router;
