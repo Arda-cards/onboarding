@@ -1,5 +1,5 @@
 // Arda API Routes - Proxy endpoints for frontend
-import { Router, Request, Response, NextFunction } from 'express';
+import { Router, Request, Response } from 'express';
 import { 
   ardaService, 
   ItemInput, 
@@ -51,14 +51,6 @@ async function getUserCredentials(req: Request): Promise<{ email: string; tenant
     author: cognitoUser?.sub || null,
   };
 }
-
-// Middleware to check if user is authenticated
-const requireAuth = (req: Request, res: Response, next: NextFunction) => {
-  if (!req.session?.userId) {
-    return res.status(401).json({ error: 'Authentication required' });
-  }
-  next();
-};
 
 // Check if Arda is configured
 router.get('/status', (req: Request, res: Response) => {
@@ -115,7 +107,7 @@ router.get('/lookup-tenant', async (req: Request, res: Response) => {
 });
 
 // Create item in Arda
-router.post('/items', requireAuth, async (req: Request, res: Response) => {
+router.post('/items', async (req: Request, res: Response) => {
   try {
     const credentials = await getUserCredentials(req);
     if (!credentials.author) {
@@ -155,7 +147,7 @@ router.post('/items', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Create Kanban card in Arda
-router.post('/kanban-cards', requireAuth, async (req: Request, res: Response) => {
+router.post('/kanban-cards', async (req: Request, res: Response) => {
   try {
     const credentials = await getUserCredentials(req);
     if (!credentials.author) {
@@ -181,7 +173,7 @@ router.post('/kanban-cards', requireAuth, async (req: Request, res: Response) =>
 });
 
 // Create order in Arda
-router.post('/orders', requireAuth, async (req: Request, res: Response) => {
+router.post('/orders', async (req: Request, res: Response) => {
   try {
     const credentials = await getUserCredentials(req);
     if (!credentials.author) {
@@ -287,7 +279,7 @@ router.post('/items/bulk', async (req: Request, res: Response) => {
 });
 
 // Sync velocity profiles to Arda
-router.post('/sync-velocity', requireAuth, async (req: Request, res: Response) => {
+router.post('/sync-velocity', async (req: Request, res: Response) => {
   try {
     const credentials = await getUserCredentials(req);
     if (!credentials.author) {
@@ -334,7 +326,7 @@ router.post('/sync-velocity', requireAuth, async (req: Request, res: Response) =
 });
 
 // Push velocity items to Arda
-router.post('/push-velocity', requireAuth, async (req: Request, res: Response) => {
+router.post('/push-velocity', async (req: Request, res: Response) => {
   try {
     const credentials = await getUserCredentials(req);
     if (!credentials.author) {
@@ -386,7 +378,7 @@ router.post('/push-velocity', requireAuth, async (req: Request, res: Response) =
 });
 
 // Sync a single item from velocity data
-router.post('/sync-item', requireAuth, async (req: Request, res: Response) => {
+router.post('/sync-item', async (req: Request, res: Response) => {
   try {
     const credentials = await getUserCredentials(req);
     if (!credentials.author) {
@@ -418,7 +410,7 @@ router.post('/sync-item', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Get sync status (returns basic status since tracking is not yet implemented)
-router.get('/sync-status', requireAuth, async (req: Request, res: Response) => {
+router.get('/sync-status', async (req: Request, res: Response) => {
   try {
     const credentials = await getUserCredentials(req);
     

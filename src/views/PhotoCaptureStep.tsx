@@ -7,6 +7,8 @@ interface PhotoCaptureStepProps {
   sessionId: string;
   capturedPhotos: CapturedPhoto[];
   onPhotoCaptured: (photo: CapturedPhoto) => void;
+  onComplete?: () => void;
+  onBack?: () => void;
 }
 
 // Generate QR code URL for mobile photo capture page

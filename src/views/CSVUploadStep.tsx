@@ -35,10 +35,12 @@ interface ColumnMapping {
 
 interface CSVUploadStepProps {
   onComplete: (approvedItems: CSVItem[]) => void;
+  onBack?: () => void;
 }
 
 export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
   onComplete,
+  onBack: _onBack,
 }) => {
   // CSV parsing state
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);

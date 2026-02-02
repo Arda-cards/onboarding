@@ -34,6 +34,8 @@ export interface RawOrderData {
     unitPrice?: number;
     asin?: string;
     sku?: string;
+    productUrl?: string;
+    imageUrl?: string;
     amazonEnriched?: any;
   }>;
   confidence: number;
@@ -58,6 +60,8 @@ export interface ConsolidatedOrder {
     unitPrice?: number;
     asin?: string;
     sku?: string;
+    productUrl?: string;
+    imageUrl?: string;
     amazonEnriched?: any;
   }>;
   confidence: number;
