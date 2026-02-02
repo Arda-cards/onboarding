@@ -1,5 +1,90 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useDeferredValue, useMemo, memo } from 'react';
+import Papa from 'papaparse';
+import type { ParseError } from 'papaparse';
 import { Icons } from '../components/Icons';
+
+// Allowed colors for CSV import (Coda-style color names)
+export type CSVItemColor = 'blue' | 'green' | 'orange' | 'yellow' | 'red' | 'link' | 'purple' | 'gray';
+
+const CSV_ITEM_COLORS: readonly CSVItemColor[] = [
+  'blue',
+  'green',
+  'orange',
+  'yellow',
+  'red',
+  'link',
+  'purple',
+  'gray',
+] as const;
+
+function trimOrUndefined(value: string | undefined): string | undefined {
+  const v = (value ?? '').trim();
+  return v ? v : undefined;
+}
+
+function normalizeCSVColor(value: string | undefined): CSVItemColor | undefined {
+  const v = (value ?? '').trim().toLowerCase();
+  if (!v) return undefined;
+  if (v === 'grey') return 'gray';
+  if ((CSV_ITEM_COLORS as readonly string[]).includes(v)) return v as CSVItemColor;
+  return undefined;
+}
+
+function parseOptionalNumber(value: string): number | undefined {
+  const v = (value ?? '').trim();
+  if (!v) return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+// Infer column mapping from headers for a better first-pass UX
+export function detectColumnMapping(headers: string[]): ColumnMapping {
+  const mapping: ColumnMapping = {};
+  headers.forEach(header => {
+    const h = header.toLowerCase();
+    if (h.includes('name') || h.includes('description') || h.includes('item')) {
+      mapping.name = mapping.name || header;
+    }
+    if (h.includes('sku') || h.includes('part') || h.includes('number')) {
+      mapping.sku = mapping.sku || header;
+    }
+    if (h.includes('barcode') || h.includes('upc') || h.includes('ean')) {
+      mapping.barcode = mapping.barcode || header;
+    }
+    if (h.includes('supplier') || h.includes('vendor')) {
+      mapping.supplier = mapping.supplier || header;
+    }
+    if (h.includes('location') || h.includes('bin') || h.includes('shelf')) {
+      mapping.location = mapping.location || header;
+    }
+    if (h.includes('min') && (h.includes('qty') || h.includes('quantity'))) {
+      mapping.minQty = mapping.minQty || header;
+    }
+    if (h.includes('order') && (h.includes('qty') || h.includes('quantity'))) {
+      mapping.orderQty = mapping.orderQty || header;
+    }
+    if (h.includes('price') || h.includes('cost')) {
+      mapping.unitPrice = mapping.unitPrice || header;
+    }
+    if (h.includes('image') || h.includes('img') || h.includes('photo') || h.includes('picture')) {
+      mapping.imageUrl = mapping.imageUrl || header;
+    }
+    // Product URL / link / website (avoid auto-mapping image URLs)
+    if (
+      !h.includes('image') &&
+      !h.includes('img') &&
+      !h.includes('photo') &&
+      !h.includes('picture') &&
+      (h.includes('url') || h.includes('link') || h.includes('website') || (h.includes('product') && h.includes('page')))
+    ) {
+      mapping.productUrl = mapping.productUrl || header;
+    }
+    if (h.includes('color') || h.includes('colour') || h.includes('label')) {
+      mapping.color = mapping.color || header;
+    }
+  });
+  return mapping;
+}
 
 // CSV item with approval status
 export interface CSVItem {
@@ -14,6 +99,10 @@ export interface CSVItem {
   minQty?: number;
   orderQty?: number;
   unitPrice?: number;
+  // Optional enrichment
+  imageUrl?: string;
+  productUrl?: string;
+  color?: CSVItemColor;
   // Approval status
   isApproved: boolean;
   isRejected: boolean;
@@ -31,10 +120,14 @@ interface ColumnMapping {
   minQty?: string;
   orderQty?: string;
   unitPrice?: string;
+  imageUrl?: string;
+  productUrl?: string;
+  color?: string;
 }
 
 interface CSVUploadStepProps {
   onComplete: (approvedItems: CSVItem[]) => void;
+  onBack?: () => void;
 }
 
 export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
@@ -46,6 +139,8 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({});
   const [showMappingModal, setShowMappingModal] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [isParsing, setIsParsing] = useState(false);
   
   // Items after mapping
   const [items, setItems] = useState<CSVItem[]>([]);
@@ -54,71 +149,80 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
   // Filter state
   const [filter, setFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const deferredSearch = useDeferredValue(searchQuery);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Parse CSV file
+  // Parse CSV file with robust handling (quoted fields, BOM, commas in text)
   const parseCSV = useCallback((text: string) => {
-    const lines = text.split('\n').filter(line => line.trim());
-    if (lines.length === 0) return;
-    
-    // Parse headers
-    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''));
-    setCsvHeaders(headers);
-    
-    // Parse data rows
-    const data: Record<string, string>[] = [];
-    for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(',').map(v => v.trim().replace(/^"|"$/g, ''));
-      const row: Record<string, string> = {};
-      headers.forEach((header, index) => {
-        row[header] = values[index] || '';
-      });
-      data.push(row);
-    }
-    
-    setCsvData(data);
-    
-    // Auto-detect column mappings
-    const mapping: ColumnMapping = {};
-    headers.forEach(header => {
-      const h = header.toLowerCase();
-      if (h.includes('name') || h.includes('description') || h.includes('item')) {
-        mapping.name = mapping.name || header;
-      }
-      if (h.includes('sku') || h.includes('part') || h.includes('number')) {
-        mapping.sku = mapping.sku || header;
-      }
-      if (h.includes('barcode') || h.includes('upc') || h.includes('ean')) {
-        mapping.barcode = mapping.barcode || header;
-      }
-      if (h.includes('supplier') || h.includes('vendor')) {
-        mapping.supplier = mapping.supplier || header;
-      }
-      if (h.includes('location') || h.includes('bin') || h.includes('shelf')) {
-        mapping.location = mapping.location || header;
-      }
-      if (h.includes('min') && (h.includes('qty') || h.includes('quantity'))) {
-        mapping.minQty = mapping.minQty || header;
-      }
-      if (h.includes('order') && (h.includes('qty') || h.includes('quantity'))) {
-        mapping.orderQty = mapping.orderQty || header;
-      }
-      if (h.includes('price') || h.includes('cost')) {
-        mapping.unitPrice = mapping.unitPrice || header;
-      }
+    setParseError(null);
+    setIsParsing(true);
+    setItems([]);
+    setSelectedItems(new Set());
+
+    const result = Papa.parse<Record<string, string>>(text, {
+      header: true,
+      skipEmptyLines: 'greedy',
+      transformHeader: (header: string) => header.trim(),
     });
-    
-    setColumnMapping(mapping);
+
+    const { data, errors, meta } = result;
+
+    const fatalError = errors.find((e: ParseError) => e.fatal);
+    if (fatalError) {
+      setIsParsing(false);
+      const rowNum = typeof fatalError.row === 'number' ? fatalError.row + 1 : '?';
+      setParseError(`Parse error on row ${rowNum}: ${fatalError.message}`);
+      setCsvData([]);
+      setCsvHeaders([]);
+      return;
+    }
+
+    if (!meta.fields || meta.fields.length === 0) {
+      setIsParsing(false);
+      setParseError('No headers detected. Please include a header row in your CSV.');
+      setCsvData([]);
+      setCsvHeaders([]);
+      return;
+    }
+
+    if (data.length === 0) {
+      setIsParsing(false);
+      setParseError('No data rows found. Please provide at least one row of items.');
+      setCsvData([]);
+      setCsvHeaders([]);
+      return;
+    }
+
+    if (data.length > 5000) {
+      setIsParsing(false);
+      setParseError('CSV is too large (over 5,000 rows). Please split the file and try again.');
+      setCsvData([]);
+      setCsvHeaders([]);
+      return;
+    }
+
+    setCsvHeaders(meta.fields);
+    setCsvData(data);
+    setColumnMapping(detectColumnMapping(meta.fields));
     setShowMappingModal(true);
+    setIsParsing(false);
   }, []);
 
   // Handle file upload
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    const maxSizeBytes = 5 * 1024 * 1024; // 5MB safeguard for frontend parsing
+    if (file.size > maxSizeBytes) {
+      setParseError('File is too large. Please upload a CSV smaller than 5MB.');
+      e.target.value = '';
+      return;
+    }
     
     setFileName(file.name);
+    setParseError(null);
     
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -142,6 +246,9 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
       minQty: columnMapping.minQty ? parseFloat(row[columnMapping.minQty]) || undefined : undefined,
       orderQty: columnMapping.orderQty ? parseFloat(row[columnMapping.orderQty]) || undefined : undefined,
       unitPrice: columnMapping.unitPrice ? parseFloat(row[columnMapping.unitPrice]) || undefined : undefined,
+      imageUrl: trimOrUndefined(row[columnMapping.imageUrl || '']),
+      productUrl: trimOrUndefined(row[columnMapping.productUrl || '']),
+      color: columnMapping.color ? normalizeCSVColor(row[columnMapping.color]) : undefined,
       isApproved: false,
       isRejected: false,
       rawData: row,
@@ -152,38 +259,42 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
   };
 
   // Approval actions
-  const approveItem = (id: string) => {
+  const approveItem = useCallback((id: string) => {
     setItems(prev => prev.map(item => 
       item.id === id ? { ...item, isApproved: true, isRejected: false } : item
     ));
-  };
+  }, []);
 
-  const rejectItem = (id: string) => {
+  const rejectItem = useCallback((id: string) => {
     setItems(prev => prev.map(item => 
       item.id === id ? { ...item, isApproved: false, isRejected: true } : item
     ));
-  };
+  }, []);
 
-  const approveSelected = () => {
+  const approveSelected = useCallback(() => {
     setItems(prev => prev.map(item => 
       selectedItems.has(item.id) ? { ...item, isApproved: true, isRejected: false } : item
     ));
     setSelectedItems(new Set());
-  };
+  }, [selectedItems]);
 
-  const approveAll = () => {
+  const approveAll = useCallback(() => {
     setItems(prev => prev.map(item => ({ ...item, isApproved: true, isRejected: false })));
-  };
+  }, []);
 
-  const rejectSelected = () => {
+  const rejectSelected = useCallback(() => {
     setItems(prev => prev.map(item => 
       selectedItems.has(item.id) ? { ...item, isApproved: false, isRejected: true } : item
     ));
     setSelectedItems(new Set());
-  };
+  }, [selectedItems]);
+
+  const updateItemFields = useCallback((id: string, updates: Partial<CSVItem>) => {
+    setItems(prev => prev.map(item => (item.id === id ? { ...item, ...updates } : item)));
+  }, []);
 
   // Toggle selection
-  const toggleSelection = (id: string) => {
+  const toggleSelection = useCallback((id: string) => {
     setSelectedItems(prev => {
       const next = new Set(prev);
       if (next.has(id)) {
@@ -193,26 +304,18 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
       }
       return next;
     });
-  };
+  }, []);
 
-  const toggleSelectAll = () => {
-    if (selectedItems.size === filteredItems.length) {
-      setSelectedItems(new Set());
-    } else {
-      setSelectedItems(new Set(filteredItems.map(item => item.id)));
-    }
-  };
-
-  // Filter items
-  const filteredItems = items.filter(item => {
+  // Filter items (must be defined before toggleSelectAll which uses it)
+  const filteredItems = useMemo(() => items.filter(item => {
     // Filter by status
     if (filter === 'pending' && (item.isApproved || item.isRejected)) return false;
     if (filter === 'approved' && !item.isApproved) return false;
     if (filter === 'rejected' && !item.isRejected) return false;
     
     // Filter by search
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
+    if (deferredSearch) {
+      const query = deferredSearch.toLowerCase();
       return (
         item.name.toLowerCase().includes(query) ||
         item.sku?.toLowerCase().includes(query) ||
@@ -221,21 +324,212 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
       );
     }
     return true;
-  });
+  }), [items, filter, deferredSearch]);
+
+  const toggleSelectAll = useCallback(() => {
+    if (selectedItems.size === filteredItems.length) {
+      setSelectedItems(new Set());
+    } else {
+      setSelectedItems(new Set(filteredItems.map(item => item.id)));
+    }
+  }, [filteredItems, selectedItems.size]);
 
   // Stats
-  const stats = {
+  const stats = useMemo(() => ({
     total: items.length,
     pending: items.filter(i => !i.isApproved && !i.isRejected).length,
     approved: items.filter(i => i.isApproved).length,
     rejected: items.filter(i => i.isRejected).length,
-  };
+  }), [items]);
 
   // Handle completion
   const handleComplete = () => {
     const approvedItems = items.filter(item => item.isApproved);
     onComplete(approvedItems);
   };
+
+  // Memoized row component to minimize rerenders on big CSVs
+  const CSVRow = memo(({ item, selected }: { item: CSVItem; selected: boolean }) => (
+    <tr 
+      key={item.id} 
+      className={`
+        hover:bg-arda-bg-tertiary transition-colors
+        ${item.isApproved ? 'bg-green-50' : ''}
+        ${item.isRejected ? 'bg-red-50 opacity-60' : ''}
+      `}
+    >
+      <td className="px-4 py-3">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={() => toggleSelection(item.id)}
+          className="rounded border-gray-300"
+          aria-label={`Select ${item.name}`}
+          title={`Select ${item.name}`}
+        />
+      </td>
+      <td className="px-4 py-3">
+        <input
+          type="text"
+          value={item.name}
+          onChange={(e) => updateItemFields(item.id, { name: e.target.value })}
+          className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm font-semibold text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent"
+          aria-label={`Item name (row ${item.rowIndex})`}
+          title={`Item name (row ${item.rowIndex})`}
+        />
+        {(item.imageUrl || item.productUrl || item.color) && (
+          <div className="mt-1 flex flex-wrap items-center gap-2">
+            {item.productUrl && (
+              <a
+                href={item.productUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-arda-accent hover:underline"
+              >
+                <Icons.ExternalLink className="w-3 h-3" />
+                Product link
+              </a>
+            )}
+            {item.imageUrl && (
+              <span className="inline-flex items-center gap-1 text-xs text-arda-text-secondary bg-arda-bg-tertiary border border-arda-border rounded-lg px-2 py-0.5">
+                <Icons.Camera className="w-3 h-3" />
+                Image
+              </span>
+            )}
+            {item.color && (
+              <span className="inline-flex items-center gap-1 text-xs text-arda-text-secondary bg-arda-bg-tertiary border border-arda-border rounded-lg px-2 py-0.5">
+                <span className="w-2 h-2 rounded-full bg-arda-accent" aria-hidden="true" />
+                {item.color}
+              </span>
+            )}
+          </div>
+        )}
+        <div className="text-xs text-arda-text-muted">Row {item.rowIndex}</div>
+      </td>
+      <td className="px-4 py-3">
+        <div className="space-y-1">
+          <input
+            type="text"
+            value={item.sku ?? ''}
+            onChange={(e) => updateItemFields(item.id, { sku: trimOrUndefined(e.target.value) })}
+            className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent"
+            placeholder="SKU"
+            aria-label={`SKU (row ${item.rowIndex})`}
+            title={`SKU (row ${item.rowIndex})`}
+          />
+          <input
+            type="text"
+            value={item.barcode ?? ''}
+            onChange={(e) => updateItemFields(item.id, { barcode: trimOrUndefined(e.target.value) })}
+            className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent font-mono"
+            placeholder="Barcode"
+            aria-label={`Barcode (row ${item.rowIndex})`}
+            title={`Barcode (row ${item.rowIndex})`}
+          />
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <input
+          type="text"
+          value={item.supplier ?? ''}
+          onChange={(e) => updateItemFields(item.id, { supplier: trimOrUndefined(e.target.value) })}
+          className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent"
+          placeholder="Supplier"
+          aria-label={`Supplier (row ${item.rowIndex})`}
+          title={`Supplier (row ${item.rowIndex})`}
+        />
+      </td>
+      <td className="px-4 py-3">
+        <input
+          type="text"
+          value={item.location ?? ''}
+          onChange={(e) => updateItemFields(item.id, { location: trimOrUndefined(e.target.value) })}
+          className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent"
+          placeholder="Location"
+          aria-label={`Location (row ${item.rowIndex})`}
+          title={`Location (row ${item.rowIndex})`}
+        />
+      </td>
+      <td className="px-4 py-3">
+        <div className="grid grid-cols-1 gap-1">
+          <input
+            type="number"
+            inputMode="numeric"
+            value={item.minQty ?? ''}
+            onChange={(e) => updateItemFields(item.id, { minQty: parseOptionalNumber(e.target.value) })}
+            className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent"
+            placeholder="Min"
+            aria-label={`Min qty (row ${item.rowIndex})`}
+            title={`Min qty (row ${item.rowIndex})`}
+          />
+          <input
+            type="number"
+            inputMode="numeric"
+            value={item.orderQty ?? ''}
+            onChange={(e) => updateItemFields(item.id, { orderQty: parseOptionalNumber(e.target.value) })}
+            className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent"
+            placeholder="Order"
+            aria-label={`Order qty (row ${item.rowIndex})`}
+            title={`Order qty (row ${item.rowIndex})`}
+          />
+          <input
+            type="number"
+            inputMode="decimal"
+            step="0.01"
+            value={item.unitPrice ?? ''}
+            onChange={(e) => updateItemFields(item.id, { unitPrice: parseOptionalNumber(e.target.value) })}
+            className="w-full bg-transparent border border-transparent rounded-md px-2 py-1 text-sm text-arda-text-primary focus:bg-white focus:border-arda-border focus:ring-2 focus:ring-arda-accent"
+            placeholder="Price"
+            aria-label={`Unit price (row ${item.rowIndex})`}
+            title={`Unit price (row ${item.rowIndex})`}
+          />
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        {item.isApproved && (
+          <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+            Approved
+          </span>
+        )}
+        {item.isRejected && (
+          <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium">
+            Rejected
+          </span>
+        )}
+        {!item.isApproved && !item.isRejected && (
+          <span className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-medium">
+            Pending
+          </span>
+        )}
+      </td>
+      <td className="px-4 py-3 text-right">
+        <div className="flex items-center justify-end gap-1">
+          <button
+            onClick={() => approveItem(item.id)}
+            className={`p-1.5 rounded transition-colors ${
+              item.isApproved 
+                ? 'bg-green-100 text-green-600' 
+                : 'hover:bg-green-100 text-gray-400 hover:text-green-600'
+            }`}
+            title="Approve"
+          >
+            <Icons.Check className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => rejectItem(item.id)}
+            className={`p-1.5 rounded transition-colors ${
+              item.isRejected 
+                ? 'bg-red-100 text-red-600' 
+                : 'hover:bg-red-100 text-gray-400 hover:text-red-600'
+            }`}
+            title="Reject"
+          >
+            <Icons.X className="w-4 h-4" />
+          </button>
+        </div>
+      </td>
+    </tr>
+  ), (prev, next) => prev.item === next.item && prev.selected === next.selected);
 
   return (
     <div className="space-y-6">
@@ -255,14 +549,21 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
           className={[
             'flex items-center gap-2 px-4 py-2 rounded-arda font-semibold text-sm transition-colors',
             stats.approved > 0
-              ? 'bg-arda-accent text-white hover:bg-arda-accent-hover'
+              ? 'bg-green-600 text-white hover:bg-green-700'
               : 'bg-arda-border text-arda-text-muted cursor-not-allowed',
           ].join(' ')}
         >
-          <Icons.Check className="w-4 h-4" />
-          Add {stats.approved} item{stats.approved === 1 ? '' : 's'}
+          <Icons.ArrowRight className="w-4 h-4" />
+          Add {stats.approved} Item{stats.approved === 1 ? '' : 's'} to Arda
         </button>
       </div>
+
+      {/* Parse errors */}
+      {parseError && (
+        <div className="bg-red-50 border border-red-200 text-red-800 rounded-arda-lg px-4 py-3 text-sm">
+          {parseError}
+        </div>
+      )}
 
       {/* Upload area or items list */}
       {items.length === 0 ? (
@@ -281,6 +582,8 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
               accept=".csv"
               onChange={handleFileUpload}
               className="hidden"
+              aria-label="Upload CSV file"
+              title="Upload CSV file"
             />
             <button
               onClick={() => fileInputRef.current?.click()}
@@ -290,7 +593,7 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
               Select CSV File
             </button>
             <p className="text-sm text-arda-text-muted mt-4">
-              Supports: .csv files with headers
+              Supports: .csv files with headers{isParsing ? ' — parsing…' : ''}
             </p>
           </div>
         </div>
@@ -324,6 +627,8 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                   accept=".csv"
                   onChange={handleFileUpload}
                   className="hidden"
+                  aria-label="Upload CSV file"
+                  title="Upload CSV file"
                 />
               </div>
             </div>
@@ -395,6 +700,8 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                       checked={selectedItems.size === filteredItems.length && filteredItems.length > 0}
                       onChange={toggleSelectAll}
                       className="rounded border-gray-300"
+                      aria-label="Select all items"
+                      title="Select all items"
                     />
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
@@ -410,7 +717,7 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                     Location
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
-                    Min Qty
+                    Min / Order / Price
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
                     Status
@@ -422,84 +729,7 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
               </thead>
               <tbody className="divide-y divide-arda-border">
                 {filteredItems.map(item => (
-                  <tr 
-                    key={item.id} 
-                    className={`
-                      hover:bg-arda-bg-tertiary transition-colors
-                      ${item.isApproved ? 'bg-green-50' : ''}
-                      ${item.isRejected ? 'bg-red-50 opacity-60' : ''}
-                    `}
-                  >
-                    <td className="px-4 py-3">
-                      <input
-                        type="checkbox"
-                        checked={selectedItems.has(item.id)}
-                        onChange={() => toggleSelection(item.id)}
-                        className="rounded border-gray-300"
-                      />
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-arda-text-primary">{item.name}</div>
-                      <div className="text-xs text-arda-text-muted">Row {item.rowIndex}</div>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-arda-text-secondary">
-                      {item.sku && <div>SKU: {item.sku}</div>}
-                      {item.barcode && <div>Barcode: {item.barcode}</div>}
-                      {!item.sku && !item.barcode && <span className="text-arda-text-muted">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-arda-text-secondary">
-                      {item.supplier || <span className="text-arda-text-muted">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-arda-text-secondary">
-                      {item.location || <span className="text-arda-text-muted">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-arda-text-secondary">
-                      {item.minQty ?? <span className="text-arda-text-muted">—</span>}
-                    </td>
-                    <td className="px-4 py-3">
-                      {item.isApproved && (
-                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
-                          Approved
-                        </span>
-                      )}
-                      {item.isRejected && (
-                        <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium">
-                          Rejected
-                        </span>
-                      )}
-                      {!item.isApproved && !item.isRejected && (
-                        <span className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-medium">
-                          Pending
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => approveItem(item.id)}
-                          className={`p-1.5 rounded transition-colors ${
-                            item.isApproved 
-                              ? 'bg-green-100 text-green-600' 
-                              : 'hover:bg-green-100 text-gray-400 hover:text-green-600'
-                          }`}
-                          title="Approve"
-                        >
-                          <Icons.Check className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => rejectItem(item.id)}
-                          className={`p-1.5 rounded transition-colors ${
-                            item.isRejected 
-                              ? 'bg-red-100 text-red-600' 
-                              : 'hover:bg-red-100 text-gray-400 hover:text-red-600'
-                          }`}
-                          title="Reject"
-                        >
-                          <Icons.X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
+                  <CSVRow key={item.id} item={item} selected={selectedItems.has(item.id)} />
                 ))}
               </tbody>
             </table>
@@ -539,35 +769,93 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
             </div>
             
             <div className="p-6 space-y-4">
-              {[
-                { key: 'name', label: 'Item Name', required: true },
-                { key: 'sku', label: 'SKU / Part Number' },
-                { key: 'barcode', label: 'Barcode (UPC/EAN)' },
-                { key: 'supplier', label: 'Supplier' },
-                { key: 'location', label: 'Location / Bin' },
-                { key: 'minQty', label: 'Minimum Quantity' },
-                { key: 'orderQty', label: 'Order Quantity' },
-                { key: 'unitPrice', label: 'Unit Price' },
-              ].map(({ key, label, required }) => (
-                <div key={key} className="flex items-center gap-4">
-                  <label className="w-40 text-sm font-medium text-arda-text-secondary">
-                    {label} {required && <span className="text-red-500">*</span>}
-                  </label>
-                  <select
-                    value={columnMapping[key as keyof ColumnMapping] || ''}
-                    onChange={(e) => setColumnMapping(prev => ({ 
-                      ...prev, 
-                      [key]: e.target.value || undefined 
-                    }))}
-                    className="input-arda flex-1 text-sm bg-white"
-                  >
-                    <option value="">— Select column —</option>
-                    {csvHeaders.map(header => (
-                      <option key={header} value={header}>{header}</option>
-                    ))}
-                  </select>
+              {/* Core fields */}
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-arda-text-muted">
+                  Core fields
                 </div>
-              ))}
+                <div className="mt-3 space-y-3">
+                  {[
+                    { key: 'name', label: 'Item Name', required: true },
+                    { key: 'sku', label: 'SKU / Part Number' },
+                    { key: 'barcode', label: 'Barcode (UPC/EAN)' },
+                    { key: 'supplier', label: 'Supplier' },
+                    { key: 'location', label: 'Location / Bin' },
+                    { key: 'minQty', label: 'Minimum Quantity' },
+                    { key: 'orderQty', label: 'Order Quantity' },
+                    { key: 'unitPrice', label: 'Unit Price' },
+                  ].map(({ key, label, required }) => {
+                    const selectId = `csv-map-${key}`;
+                    return (
+                      <div key={key} className="flex items-center gap-4">
+                        <label htmlFor={selectId} className="w-40 text-sm font-medium text-arda-text-secondary">
+                          {label} {required && <span className="text-red-500">*</span>}
+                        </label>
+                        <select
+                          id={selectId}
+                          value={columnMapping[key as keyof ColumnMapping] || ''}
+                          onChange={(e) => setColumnMapping(prev => ({ 
+                            ...prev, 
+                            [key]: e.target.value || undefined 
+                          }))}
+                          className="input-arda flex-1 text-sm bg-white"
+                          aria-label={label}
+                          title={label}
+                        >
+                          <option value="">— Select column —</option>
+                          {csvHeaders.map(header => (
+                            <option key={header} value={header}>{header}</option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Optional fields */}
+              <div className="pt-4 mt-4 border-t border-arda-border/70">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-arda-text-muted">
+                    Optional enrichment
+                  </div>
+                  <span className="text-xs text-arda-text-muted">
+                    (Image URL, Product URL, Color)
+                  </span>
+                </div>
+                <div className="mt-3 space-y-3">
+                  {[
+                    { key: 'imageUrl', label: 'Image URL' },
+                    { key: 'productUrl', label: 'Product URL (link / website / product page)' },
+                    { key: 'color', label: 'Color (blue, green, orange, yellow, red, link, purple, gray)' },
+                  ].map(({ key, label }) => {
+                    const selectId = `csv-map-${key}`;
+                    return (
+                      <div key={key} className="flex items-center gap-4">
+                        <label htmlFor={selectId} className="w-40 text-sm font-medium text-arda-text-secondary">
+                          {label}
+                        </label>
+                        <select
+                          id={selectId}
+                          value={columnMapping[key as keyof ColumnMapping] || ''}
+                          onChange={(e) => setColumnMapping(prev => ({ 
+                            ...prev, 
+                            [key]: e.target.value || undefined 
+                          }))}
+                          className="input-arda flex-1 text-sm bg-white"
+                          aria-label={label}
+                          title={label}
+                        >
+                          <option value="">— Select column —</option>
+                          {csvHeaders.map(header => (
+                            <option key={header} value={header}>{header}</option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
               
               {/* Preview */}
               <div className="mt-6 pt-6 border-t border-arda-border/70">
@@ -592,6 +880,29 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                     </tbody>
                   </table>
                 </div>
+
+                {(columnMapping.imageUrl || columnMapping.productUrl || columnMapping.color) && (
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div className="bg-white/70 border border-arda-border rounded-arda p-3">
+                      <div className="text-xs text-arda-text-muted">Image URL</div>
+                      <div className="text-xs text-arda-text-secondary mt-1">
+                        {columnMapping.imageUrl ? 'Mapped' : 'Not mapped'}
+                      </div>
+                    </div>
+                    <div className="bg-white/70 border border-arda-border rounded-arda p-3">
+                      <div className="text-xs text-arda-text-muted">Product URL</div>
+                      <div className="text-xs text-arda-text-secondary mt-1">
+                        {columnMapping.productUrl ? 'Mapped' : 'Not mapped'}
+                      </div>
+                    </div>
+                    <div className="bg-white/70 border border-arda-border rounded-arda p-3">
+                      <div className="text-xs text-arda-text-muted">Color</div>
+                      <div className="text-xs text-arda-text-secondary mt-1">
+                        {columnMapping.color ? 'Mapped' : 'Not mapped'}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             
@@ -608,10 +919,10 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
               </button>
               <button
                 onClick={applyMapping}
-                disabled={!columnMapping.name}
+                disabled={!columnMapping.name || isParsing}
                 className={[
                   'px-6 py-2 rounded-arda font-semibold text-sm transition-colors',
-                  columnMapping.name
+                  columnMapping.name && !isParsing
                     ? 'bg-arda-accent text-white hover:bg-arda-accent-hover'
                     : 'bg-arda-border text-arda-text-muted cursor-not-allowed',
                 ].join(' ')}

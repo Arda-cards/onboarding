@@ -34,6 +34,9 @@ export interface RawOrderData {
     unitPrice?: number;
     asin?: string;
     sku?: string;
+    // Optional enrichment scraped from email/product page
+    productUrl?: string;
+    imageUrl?: string;
     amazonEnriched?: any;
   }>;
   confidence: number;
@@ -58,6 +61,9 @@ export interface ConsolidatedOrder {
     unitPrice?: number;
     asin?: string;
     sku?: string;
+    // Optional enrichment scraped from email/product page
+    productUrl?: string;
+    imageUrl?: string;
     amazonEnriched?: any;
   }>;
   confidence: number;
@@ -348,6 +354,12 @@ export function consolidateOrders(orders: RawOrderData[]): ConsolidatedOrder[] {
               mergedItems.set(key, { ...item });
             } else if (item.unitPrice && !existing.unitPrice) {
               existing.unitPrice = item.unitPrice;
+            }
+            if (item.productUrl && !existing.productUrl) {
+              existing.productUrl = item.productUrl;
+            }
+            if (item.imageUrl && !existing.imageUrl) {
+              existing.imageUrl = item.imageUrl;
             }
           }
         }

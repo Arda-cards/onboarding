@@ -1,4 +1,6 @@
 // API client for backend communication
+import type { AmazonItemData as JobAmazonItemData } from '../types';
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 interface ApiError {
@@ -131,6 +133,9 @@ export interface JobOrder {
   id: string;
   supplier: string;
   orderDate: string;
+  shippedDate?: string;
+  deliveredDate?: string;
+  leadTimeDays?: number;
   totalAmount: number;
   items: Array<{
     id: string;
@@ -138,6 +143,11 @@ export interface JobOrder {
     quantity: number;
     unit: string;
     unitPrice: number;
+    sku?: string;
+    imageUrl?: string;
+    productUrl?: string;
+    asin?: string;
+    amazonEnriched?: JobAmazonItemData;
   }>;
   confidence: number;
 }
@@ -224,6 +234,28 @@ export const amazonApi = {
       method: 'POST',
       body: JSON.stringify({ text, subject }),
     }),
+};
+
+// Product URL enrichment (best-effort)
+export interface ProductEnrichmentData {
+  name?: string;
+  productUrl?: string;
+  imageUrl?: string;
+  unitPrice?: number;
+  unitCount?: number;
+  currency?: string;
+  upc?: string;
+}
+
+export const productApi = {
+  enrichUrl: (url: string) =>
+    fetchApi<{ success: boolean; source: 'amazon' | 'generic'; data: ProductEnrichmentData }>(
+      '/api/product/enrich',
+      {
+        method: 'POST',
+        body: JSON.stringify({ url }),
+      }
+    ),
 };
 
 // Orders API

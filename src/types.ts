@@ -10,6 +10,9 @@ export interface LineItem {
   sourceOrderId?: string;
   normalizedName?: string;  // For matching across orders
   sku?: string;  // Part number/SKU if available
+  // Optional enrichment (from emails or product pages)
+  imageUrl?: string;
+  productUrl?: string;
   // Amazon-specific fields
   asin?: string;  // Amazon Standard Identification Number
   amazonEnriched?: AmazonItemData;  // Enriched data from Amazon API

@@ -37,6 +37,9 @@ export interface ProcessedOrderItem {
   unit: string;
   unitPrice: number;
   asin?: string;
+  productUrl?: string;
+  imageUrl?: string;
+  sku?: string;
   amazonEnriched?: AmazonEnrichedData;
 }
 
@@ -297,10 +300,7 @@ export const jobManager = {
 
 export async function initializeJobManager(): Promise<void> {
   if (!redisClient) {
-    if (requireRedis) {
-      throw new Error('Redis is required for job manager in production');
-    }
-    console.log('⚠️ Redis unavailable – job store will remain in-memory only');
+    console.log('⚠️ Redis unavailable – job store will remain in-memory only (jobs won\'t persist across restarts)');
     startCleanupScheduler();
     return;
   }

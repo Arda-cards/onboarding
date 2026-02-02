@@ -7,6 +7,8 @@ interface BarcodeScanStepProps {
   sessionId: string;
   scannedBarcodes: ScannedBarcode[];
   onBarcodeScanned: (barcode: ScannedBarcode) => void;
+  onComplete?: () => void;
+  onBack?: () => void;
 }
 
 // Generate QR code URL for mobile scanning page

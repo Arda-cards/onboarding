@@ -8,19 +8,79 @@ const ARDA_TENANT_ID = process.env.ARDA_TENANT_ID;
 // Cache for tenant lookups (reserved for future use)
 // const tenantCache = new Map<string, string>();
 
-// Types based on Arda OpenAPI schemas
+// Types based on Arda OpenAPI schemas (Item service)
+// Source of truth: https://prod.alpha001.io.arda.cards/v1/item/docs/openapi/index.html#/
+export type OrderMethod =
+  | 'UNKNOWN'
+  | 'PURCHASE_ORDER'
+  | 'EMAIL'
+  | 'PHONE'
+  | 'IN_STORE'
+  | 'ONLINE'
+  | 'RFQ'
+  | 'PRODUCTION'
+  | 'TASK'
+  | 'THIRD_PARTY'
+  | 'OTHER';
+
+export type Currency =
+  | 'USD'
+  | 'CAD'
+  | 'EUR'
+  | 'GBP'
+  | 'JPY'
+  | 'AUD'
+  | 'CNY'
+  | 'INR'
+  | 'RUB'
+  | 'BRL'
+  | 'ZAR'
+  | 'MXN'
+  | 'KRW'
+  | 'SGD'
+  | 'HKD'
+  | 'NZD'
+  | 'CHF';
+
+export interface QuantityValue {
+  amount: number;
+  unit: string;
+}
+
+export interface MoneyValue {
+  value: number;
+  currency: Currency;
+}
+
+export interface ItemSupplyValue {
+  supplier: string;
+  name?: string | null;
+  sku?: string | null;
+  orderMethod?: OrderMethod | null;
+  url?: string | null;
+  orderQuantity?: QuantityValue | null;
+  unitCost?: MoneyValue | null;
+  // averageLeadTime intentionally omitted (not used by OrderPulse yet)
+}
+
+export interface PhysicalLocatorValue {
+  facility: string;
+  department?: string | null;
+  location?: string | null;
+  subLocation?: string | null;
+}
+
 export interface ItemInput {
-  externalGuid: string;
   name: string;
-  orderMechanism: string;
-  location?: string;
-  minQty: number;
-  minQtyUnit: string;
-  orderQty?: number;
-  orderQtyUnit?: string;
-  primarySupplier: string;
-  primarySupplierLink?: string;
-  imageUrl?: string;
+  description?: string | null;
+  notes?: string | null;
+  imageUrl?: string | null;
+  internalSKU?: string | null;
+  minQuantity?: QuantityValue | null;
+  locator?: PhysicalLocatorValue | null;
+  primarySupply?: ItemSupplyValue | null;
+  secondarySupply?: ItemSupplyValue | null;
+  defaultSupply?: string | null;
 }
 
 export interface ItemInputMetadata {
@@ -182,23 +242,17 @@ export function isMockMode(): boolean {
 }
 
 // Create an item in Arda's Item Data Authority
-// NOTE: The Items API expects ItemInput directly at root, not wrapped in RequestCreate
-// Auth is done via headers (X-Author, X-Tenant-Id) not body fields
+// NOTE: Arda Items API expects ItemInput directly at root.
+// Auth is done via headers (X-Author, X-Tenant-Id).
 export async function createItem(
-  item: Omit<ItemInput, 'externalGuid'>,
+  item: ItemInput,
   author: string
 ): Promise<EntityRecord> {
   const tenantId = await resolveTenantId(author);
 
-  // Send ItemInput directly at root (NOT wrapped in payload/metadata/effectiveAt/author)
-  const itemInput: ItemInput = {
-    ...item,
-    externalGuid: uuidv4(),
-  };
-
-  return ardaFetch<EntityRecord>('/v1/items/item', {
+  return ardaFetch<EntityRecord>('/v1/item/item', {
     method: 'POST',
-    body: itemInput,
+    body: item,
     author,
     tenantId,
   });
@@ -257,7 +311,7 @@ export interface VelocitySyncResult {
 }
 
 // Create an item in Arda from velocity profile data
-// Calculates kanban parameters and sets order mechanism based on velocity
+// Calculates kanban parameters and sets best-effort supply fields
 export async function createItemFromVelocity(
   profile: ItemVelocityProfileInput,
   author: string
@@ -267,22 +321,21 @@ export async function createItemFromVelocity(
   const orderQty = profile.recommendedOrderQty;
   const unit = profile.unit || 'EA';
 
-  // Set order mechanism based on velocity: AUTO for high velocity (>5/day), MANUAL otherwise
-  const orderMechanism = profile.dailyBurnRate > 5 ? 'AUTO' : 'MANUAL';
+  const facility = process.env.ARDA_FACILITY || 'Default';
 
-  // Create item using existing createItem function
+  // Create item using Arda ItemInput schema
   return createItem(
     {
       name: profile.displayName,
-      orderMechanism,
-      location: profile.location,
-      minQty,
-      minQtyUnit: unit,
-      orderQty,
-      orderQtyUnit: unit,
-      primarySupplier: profile.supplier,
-      primarySupplierLink: profile.primarySupplierLink,
       imageUrl: profile.imageUrl,
+      minQuantity: { amount: minQty, unit },
+      locator: profile.location ? { facility, location: profile.location } : undefined,
+      primarySupply: {
+        supplier: profile.supplier,
+        url: profile.primarySupplierLink,
+        orderMethod: 'EMAIL',
+        orderQuantity: { amount: orderQty, unit },
+      },
     },
     author
   );

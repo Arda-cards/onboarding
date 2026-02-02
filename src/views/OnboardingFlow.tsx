@@ -1,6 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { Icons } from '../components/Icons';
 import { ExtractedOrder } from '../types';
+import { buildVelocityProfiles } from '../utils/inventoryLogic';
 import { SupplierSetup, EmailScanState } from './SupplierSetup';
 import { BarcodeScanStep } from './BarcodeScanStep';
 import { PhotoCaptureStep } from './PhotoCaptureStep';
@@ -15,6 +16,7 @@ interface EmailItem {
   supplier: string;
   asin?: string;
   imageUrl?: string;
+  productUrl?: string;
   lastPrice?: number;
   quantity?: number;
   location?: string;
@@ -215,19 +217,24 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   // Handle email orders update (does NOT auto-advance - user clicks Continue)
   const handleEmailOrdersUpdate = useCallback((orders: ExtractedOrder[]) => {
     setEmailOrders(orders);
-    // Convert orders to simple email items for master list
-    const items: EmailItem[] = orders.flatMap(order => 
-      order.items.map(item => ({
-        id: `email-${order.id}-${item.name}`,
-        name: item.name,
-        supplier: order.supplier,
-        asin: item.asin,
-        lastPrice: item.unitPrice,
-        quantity: item.quantity,
-        recommendedMin: Math.ceil((item.quantity || 1) / 2),
-        recommendedOrderQty: item.quantity || 1,
-      }))
-    );
+    // Convert orders into de-duped, velocity-aware email items for master list.
+    // This uses inferred takt time + NPK and a ReLoWiSa-style sizing (two-bin) for recommended quantities.
+    const profiles = buildVelocityProfiles(orders);
+    const items: EmailItem[] = Array.from(profiles.values()).map(profile => {
+      const lastOrder = profile.orders[profile.orders.length - 1];
+      return {
+        id: profile.normalizedName,
+        name: profile.displayName || profile.normalizedName,
+        supplier: profile.supplier,
+        asin: profile.asin,
+        imageUrl: profile.imageUrl,
+        productUrl: profile.amazonUrl,
+        lastPrice: lastOrder?.unitPrice,
+        quantity: lastOrder?.quantity,
+        recommendedMin: profile.recommendedMin,
+        recommendedOrderQty: profile.recommendedOrderQty,
+      };
+    });
     setEmailItems(items);
     // Don't auto-advance - user will click Continue when ready
   }, []);
@@ -474,7 +481,6 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
         return (
           <CSVUploadStep
             onComplete={handleCSVComplete}
-            onBack={() => setCurrentStep('photo')}
           />
         );
 
@@ -486,7 +492,6 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
             capturedPhotos={capturedPhotos}
             csvItems={csvItems}
             onComplete={handleMasterListComplete}
-            onBack={() => setCurrentStep('csv')}
           />
         );
 
@@ -496,7 +501,6 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
             items={masterListItems}
             userEmail={userProfile?.email}
             onComplete={handleSyncComplete}
-            onBack={() => setCurrentStep('masterlist')}
           />
         );
       
@@ -581,9 +585,10 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
                 disabled={!canGoForward}
                 className={[
                   'flex items-center gap-2 px-4 py-2 rounded-arda font-semibold text-sm transition-colors',
+                  'bg-arda-accent text-white',
                   canGoForward
-                    ? 'bg-arda-accent text-white hover:bg-arda-accent-hover'
-                    : 'bg-arda-border text-arda-text-muted cursor-not-allowed',
+                    ? 'hover:bg-arda-accent-hover'
+                    : 'opacity-50 cursor-not-allowed',
                 ].join(' ')}
               >
                 Continue

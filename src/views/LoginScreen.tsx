@@ -3,9 +3,10 @@ import { API_BASE_URL } from '../services/api';
 
 interface LoginScreenProps {
   onCheckingAuth?: boolean;
+  authError?: string | null;
 }
 
-export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth }) => {
+export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth, authError }) => {
   const handleGoogleLogin = () => {
     window.location.href = `${API_BASE_URL}/auth/google`;
   };
@@ -60,6 +61,15 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth }) => {
           </div>
 
           <div className="space-y-4">
+            {authError && (
+              <div className="rounded-xl bg-red-50 border border-red-200 p-4 text-sm text-red-700">
+                <div className="flex items-center gap-2 mb-1 font-semibold">
+                  <Icons.AlertTriangle className="w-4 h-4" />
+                  Authentication error
+                </div>
+                <div className="text-red-700/90">{authError}</div>
+              </div>
+            )}
             {onCheckingAuth ? (
               <div className="flex flex-col items-center py-6">
                 <div className="animate-spin w-10 h-10 border-2 border-orange-500 border-t-transparent rounded-full mb-4" />

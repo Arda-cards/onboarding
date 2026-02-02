@@ -15,14 +15,12 @@ interface ArdaSyncStepProps {
   items: MasterListItem[];
   userEmail?: string;
   onComplete: () => void;
-  onBack: () => void;
 }
 
 export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
   items,
   userEmail,
   onComplete,
-  onBack,
 }) => {
   // Sync state
   const [isSyncing, setIsSyncing] = useState(false);
@@ -47,14 +45,35 @@ export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
+          // Backward compat / debugging helpers
+          itemName: item.name,
           name: item.name,
           sku: item.sku,
-          barcode: item.barcode,
-          supplier: item.supplier,
           location: item.location,
           minQty: item.minQty || 1,
+          minQtyUnit: 'each',
           orderQty: item.orderQty || item.minQty || 1,
+          orderQtyUnit: 'each',
+          orderMechanism: 'email',
           unitPrice: item.unitPrice,
+          currency: 'USD',
+
+          // Legacy field (server accepts) + new Arda ItemInput field (server prefers)
+          primarySupplier: item.supplier || 'Unknown',
+          primarySupplierLink: item.productUrl,
+          primarySupply: {
+            supplier: item.supplier || 'Unknown',
+            url: item.productUrl,
+            orderMethod: 'EMAIL',
+            orderQuantity: {
+              amount: item.orderQty || item.minQty || 1,
+              unit: 'EA',
+            },
+            unitCost:
+              typeof item.unitPrice === 'number'
+                ? { value: item.unitPrice, currency: 'USD' as const }
+                : null,
+          },
           imageUrl: item.imageUrl,
         }),
       });
@@ -69,12 +88,12 @@ export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
         };
       }
 
-      const data = await response.json();
+      const data = await response.json() as { record?: { rId?: string }; rId?: string; entityId?: string };
       return {
         itemId: item.id,
         itemName: item.name,
         success: true,
-        ardaEntityId: data.entityId || data.rId,
+        ardaEntityId: data.record?.rId || data.entityId || data.rId,
       };
     } catch (error) {
       return {
@@ -199,10 +218,10 @@ export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
 
           <button
             onClick={startSync}
-            className="btn-arda-primary inline-flex items-center gap-2 px-8 py-3 rounded-xl"
+            className="inline-flex items-center gap-2 px-8 py-3 rounded-xl font-semibold text-sm bg-green-600 text-white hover:bg-green-700 transition-colors"
           >
-            <Icons.Zap className="w-5 h-5" />
-            Start Sync to Arda
+            <Icons.ArrowRight className="w-5 h-5" />
+            Add {items.length} Item{items.length === 1 ? '' : 's'} to Arda
           </button>
         </div>
       )}
@@ -285,7 +304,7 @@ export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   onClick={onComplete}
-                  className="btn-arda-primary flex items-center gap-2"
+                  className="flex items-center gap-2 px-4 py-2 rounded-arda font-semibold text-sm bg-green-600 text-white hover:bg-green-700 transition-colors"
                 >
                   <Icons.Check className="w-4 h-4" />
                   Complete setup
