@@ -1,6 +1,8 @@
 // API client for backend communication
-// Default to production API if VITE_API_URL isn't provided at build time
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://order-pulse-api-production.up.railway.app';
+// In production on Vercel, use same-origin (empty string) to leverage Vercel rewrites/proxy
+// This avoids cross-origin cookie issues. In development, use the direct API URL.
+const API_BASE_URL = import.meta.env.VITE_API_URL || 
+  (import.meta.env.PROD ? '' : 'https://order-pulse-api-production.up.railway.app');
 
 interface ApiError {
   error: string;

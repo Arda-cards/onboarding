@@ -8,6 +8,9 @@
   "outputDirectory": "dist",
   "framework": "vite",
   "rewrites": [
+    { "source": "/auth/:path*", "destination": "https://order-pulse-api-production.up.railway.app/auth/:path*" },
+    { "source": "/api/:path*", "destination": "https://order-pulse-api-production.up.railway.app/api/:path*" },
+    { "source": "/health", "destination": "https://order-pulse-api-production.up.railway.app/health" },
     { "source": "/scan/:sessionId", "destination": "/index.html" },
     { "source": "/photo/:sessionId", "destination": "/index.html" },
     { "source": "/((?!assets/).*)", "destination": "/index.html" }
