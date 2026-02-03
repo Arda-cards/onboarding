@@ -8,10 +8,12 @@ const router = Router();
 
 // Constants
 const SESSION_TTL = 24 * 60 * 60; // 24 hours in seconds
+const IMAGE_TTL = 30 * 24 * 60 * 60; // 30 days for uploaded images
 const MAX_PHOTOS_PER_SESSION = 100;
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB
 const REDIS_PREFIX = 'photo:session:';
 const PHOTO_DATA_PREFIX = 'photo:data:';
+const IMAGE_UPLOAD_PREFIX = 'image:upload:';
 
 // Initialize Gemini with error handling
 let genAI: GoogleGenerativeAI | null = null;
@@ -488,5 +490,114 @@ Omit fields that cannot be determined.`;
     throw new Error('Image analysis failed');
   }
 }
+
+/**
+ * POST /api/photo/upload
+ * Upload a base64 image and get a URL back
+ * Used for syncing images to Arda - converts data URLs to hosted URLs
+ */
+router.post('/upload', async (req: Request, res: Response) => {
+  try {
+    const { imageData } = req.body;
+    
+    // Validate image data
+    const validation = isValidImageData(imageData);
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error });
+    }
+    
+    // Generate unique image ID
+    const imageId = `img-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Store image data
+    if (redisClient) {
+      try {
+        await redisClient.setex(
+          `${IMAGE_UPLOAD_PREFIX}${imageId}`,
+          IMAGE_TTL,
+          imageData
+        );
+      } catch (error) {
+        appLogger.error({ err: error }, 'Redis set image error');
+        return res.status(500).json({ error: 'Failed to store image' });
+      }
+    } else {
+      // In-memory fallback (not recommended for production)
+      memoryPhotoData.set(`upload-${imageId}`, imageData);
+    }
+    
+    // Build the URL for this image
+    const baseUrl = process.env.BACKEND_URL || `${req.protocol}://${req.get('host')}`;
+    const imageUrl = `${baseUrl}/api/photo/image/${imageId}`;
+    
+    appLogger.info(`Image uploaded: ${imageId} (${Math.round(validation.sizeBytes / 1024)}KB)`);
+    
+    res.json({ 
+      success: true, 
+      imageId,
+      imageUrl,
+    });
+  } catch (error) {
+    appLogger.error({ err: error }, 'Image upload error');
+    res.status(500).json({ error: 'Failed to upload image' });
+  }
+});
+
+/**
+ * GET /api/photo/image/:imageId
+ * Serve a stored image by ID
+ */
+router.get('/image/:imageId', async (req: Request, res: Response) => {
+  try {
+    const { imageId } = req.params;
+    
+    // Validate image ID format
+    if (!/^img-\d+-[a-z0-9]+$/.test(imageId)) {
+      return res.status(400).json({ error: 'Invalid image ID format' });
+    }
+    
+    // Retrieve image data
+    let imageData: string | null = null;
+    
+    if (redisClient) {
+      try {
+        imageData = await redisClient.get(`${IMAGE_UPLOAD_PREFIX}${imageId}`);
+      } catch (error) {
+        appLogger.error({ err: error }, 'Redis get image error');
+      }
+    }
+    
+    // Fallback to memory
+    if (!imageData) {
+      imageData = memoryPhotoData.get(`upload-${imageId}`) || null;
+    }
+    
+    if (!imageData) {
+      return res.status(404).json({ error: 'Image not found' });
+    }
+    
+    // Parse the data URL
+    const match = imageData.match(/^data:image\/(\w+);base64,(.+)$/);
+    if (!match) {
+      return res.status(500).json({ error: 'Invalid image data format' });
+    }
+    
+    const imageType = match[1];
+    const base64Data = match[2];
+    const buffer = Buffer.from(base64Data, 'base64');
+    
+    // Set appropriate headers and send image
+    res.set({
+      'Content-Type': `image/${imageType}`,
+      'Content-Length': buffer.length,
+      'Cache-Control': 'public, max-age=31536000', // Cache for 1 year
+    });
+    
+    res.send(buffer);
+  } catch (error) {
+    appLogger.error({ err: error }, 'Image serve error');
+    res.status(500).json({ error: 'Failed to serve image' });
+  }
+});
 
 export default router;

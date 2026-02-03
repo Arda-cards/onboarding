@@ -39,9 +39,41 @@ export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
     items: Array<{ id: string; name: string; found: boolean }>;
   } | null>(null);
 
+  // Upload a base64 image and get a URL back
+  const uploadImage = async (imageData: string): Promise<string | null> => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/photo/upload`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ imageData }),
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        return data.imageUrl;
+      }
+    } catch (error) {
+      console.warn('Image upload failed:', error);
+    }
+    return null;
+  };
+
   // Sync a single item to Arda
   const syncItemToArda = async (item: MasterListItem): Promise<SyncResult> => {
     try {
+      // If imageUrl is a data URL (base64), upload it first to get a real URL
+      let imageUrl = item.imageUrl;
+      if (imageUrl?.startsWith('data:image/')) {
+        const uploadedUrl = await uploadImage(imageUrl);
+        if (uploadedUrl) {
+          imageUrl = uploadedUrl;
+        } else {
+          // If upload fails, don't include the image
+          imageUrl = undefined;
+        }
+      }
+
       const response = await fetch(`${API_BASE_URL}/api/arda/items`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -55,7 +87,7 @@ export const ArdaSyncStep: React.FC<ArdaSyncStepProps> = ({
           minQty: item.minQty || 1,
           orderQty: item.orderQty || item.minQty || 1,
           unitPrice: item.unitPrice,
-          imageUrl: item.imageUrl,
+          imageUrl,
         }),
       });
 

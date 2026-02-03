@@ -98,6 +98,8 @@ export interface EmailScanState {
   isPriorityComplete: boolean;
   discoveredSuppliers: DiscoveredSupplier[];
   hasDiscovered: boolean;
+  hasStartedOtherImport?: boolean;
+  selectedOtherSuppliers?: string[];
 }
 
 interface SupplierSetupProps {
@@ -171,6 +173,9 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [otherOrders, setOtherOrders] = useState<ExtractedOrder[]>(initialState?.otherOrders || []);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [hasStartedOtherImport, setHasStartedOtherImport] = useState<boolean>(
+    initialState?.hasStartedOtherImport || false,
+  );
 
   // Computed values for the experience
   const allItems = useMemo(() => {
@@ -230,6 +235,23 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
   // Merge priority suppliers with discovered ones (excluding Amazon)
   const allSuppliers = useMemo(() => mergeSuppliers(OTHER_PRIORITY_SUPPLIERS, discoveredSuppliers), [discoveredSuppliers]);
+
+  // Suppliers that actually require an explicit import (non-priority, non-Amazon)
+  const otherSuppliersToScan = useMemo(
+    () =>
+      allSuppliers
+        .filter(s => !PRIORITY_SUPPLIER_DOMAINS.has(s.domain) && !s.domain.includes('amazon'))
+        .map(s => s.domain),
+    [allSuppliers],
+  );
+
+  const selectedOtherSuppliers = useMemo(
+    () => Array.from(enabledSuppliers).filter(domain => otherSuppliersToScan.includes(domain)),
+    [enabledSuppliers, otherSuppliersToScan],
+  );
+
+  const selectedOtherCount = selectedOtherSuppliers.length;
+  const hasSelectableOtherSuppliers = otherSuppliersToScan.length > 0;
 
   // Check for milestone achievements
   useEffect(() => {
@@ -464,11 +486,24 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     }
   }, [priorityJobId, isPriorityComplete, pollPriorityStatus]);
 
-  // Notify parent when Amazon + Priority suppliers are done (user can proceed)
+  // Notify parent when user can leave email step
   useEffect(() => {
-    const keySuppliersDone = isAmazonComplete && isPriorityComplete;
-    onCanProceed?.(keySuppliersDone);
-  }, [isAmazonComplete, isPriorityComplete, onCanProceed]);
+    const requireOtherImport = hasSelectableOtherSuppliers && hasDiscovered;
+    const canProceed =
+      hasStartedOtherImport ||
+      otherOrders.length > 0 ||
+      (!requireOtherImport && hasDiscovered && isAmazonComplete && isPriorityComplete);
+
+    onCanProceed?.(canProceed);
+  }, [
+    hasSelectableOtherSuppliers,
+    hasDiscovered,
+    hasStartedOtherImport,
+    otherOrders.length,
+    isAmazonComplete,
+    isPriorityComplete,
+    onCanProceed,
+  ]);
 
   // Preserve state for parent (so navigation back doesn't lose progress)
   useEffect(() => {
