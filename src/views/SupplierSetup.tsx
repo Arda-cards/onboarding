@@ -80,6 +80,12 @@ const LEAN_WISDOM = [
   },
 ];
 
+// Module-level cache for discovery results to handle StrictMode remounts
+// When the first mount's API call completes, results are cached here
+// so the second mount can use them instead of making another call
+let moduleDiscoveryPromise: Promise<{ suppliers: DiscoveredSupplier[] }> | null = null;
+let moduleDiscoveryResult: DiscoveredSupplier[] | null = null;
+
 // Background progress type for parent components
 interface BackgroundEmailProgress {
   isActive: boolean;
@@ -172,8 +178,11 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     }
     return base;
   });
-  const [, setDiscoverError] = useState<string | null>(null);
+  const [discoverError, setDiscoverError] = useState<string | null>(null);
   const [hasDiscovered, setHasDiscovered] = useState(initialState?.hasDiscovered || false);
+  // Ref to prevent re-triggering discovery after an error (avoids infinite loop)
+  // Initialize based on whether we already have discovered state (handles StrictMode remounts)
+  const hasInitiatedDiscovery = useRef(initialState?.hasDiscovered || false);
 
   // Other suppliers scanning state
   const [isScanning, setIsScanning] = useState(false);
@@ -386,12 +395,57 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     };
   }, [hasRestoredState]);
 
+  // Discover suppliers - memoized to allow proper dependency tracking
+  // Uses module-level caching to handle StrictMode remounts
+  const handleDiscoverSuppliers = useCallback(async () => {
+    // Check if we already have cached results (from previous mount in StrictMode)
+    if (moduleDiscoveryResult) {
+      setDiscoveredSuppliers(moduleDiscoveryResult);
+      setHasDiscovered(true);
+      return;
+    }
+    
+    setIsDiscovering(true);
+    setDiscoverError(null);
+    setDiscoveryProgress('Scanning your inbox for suppliers...');
+    
+    try {
+      // Reuse in-flight promise if one exists (prevents duplicate API calls)
+      if (!moduleDiscoveryPromise) {
+        moduleDiscoveryPromise = discoverApi.discoverSuppliers();
+      }
+      
+      const result = await moduleDiscoveryPromise;
+      // Filter out Amazon since we handle it separately
+      const nonAmazonSuppliers = result.suppliers.filter((s: DiscoveredSupplier) => !s.domain.includes('amazon'));
+      
+      // Cache the result for potential StrictMode remount
+      moduleDiscoveryResult = nonAmazonSuppliers;
+      
+      setDiscoveredSuppliers(nonAmazonSuppliers);
+      setHasDiscovered(true);
+      setDiscoveryProgress('');
+    } catch (err: unknown) {
+      console.error('Discovery error:', err);
+      const message = err instanceof Error ? err.message : 'Failed to discover suppliers';
+      setDiscoverError(message);
+      // Still mark as discovered so the grid shows (with priority suppliers at minimum)
+      setHasDiscovered(true);
+      // Clear the failed promise so next attempt can retry
+      moduleDiscoveryPromise = null;
+    } finally {
+      setIsDiscovering(false);
+    }
+  }, []);
+
   // 2. START SUPPLIER DISCOVERY (start immediately for faster supplier identification)
+  // Uses ref to prevent infinite loop and module-level caching for StrictMode
   useEffect(() => {
-    if (!hasDiscovered && !isDiscovering) {
+    if (!hasDiscovered && !isDiscovering && !hasInitiatedDiscovery.current) {
+      hasInitiatedDiscovery.current = true;
       handleDiscoverSuppliers();
     }
-  }, [hasDiscovered, isDiscovering]);
+  }, [hasDiscovered, isDiscovering, handleDiscoverSuppliers]);
 
   // Poll Amazon job status with adaptive backoff
   const pollAmazonStatus = useCallback(async () => {
@@ -534,27 +588,6 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     onStateChange,
   ]);
 
-  // Discover suppliers
-  const handleDiscoverSuppliers = async () => {
-    setIsDiscovering(true);
-    setDiscoverError(null);
-    setDiscoveryProgress('Scanning your inbox for suppliers...');
-    
-    try {
-      const result = await discoverApi.discoverSuppliers();
-      // Filter out Amazon since we handle it separately
-      const nonAmazonSuppliers = result.suppliers.filter((s: DiscoveredSupplier) => !s.domain.includes('amazon'));
-      setDiscoveredSuppliers(nonAmazonSuppliers);
-      setHasDiscovered(true);
-      setDiscoveryProgress('');
-    } catch (err: unknown) {
-      console.error('Discovery error:', err);
-      const message = err instanceof Error ? err.message : 'Failed to discover suppliers';
-      setDiscoverError(message);
-    } finally {
-      setIsDiscovering(false);
-    }
-  };
 
   // Poll job status for other suppliers with adaptive backoff
   const pollJobStatus = useCallback(async () => {
@@ -1146,6 +1179,23 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Discovery Error Message */}
+        {discoverError && !isDiscovering && (
+          <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl p-4">
+            <div className="flex items-center gap-3">
+              <Icons.AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0" />
+              <div>
+                <span className="font-medium text-amber-700">
+                  Could not fully discover suppliers
+                </span>
+                <p className="text-sm text-amber-600 mt-1">
+                  Showing available suppliers. You can still select and import from the list below.
+                </p>
+              </div>
+            </div>
           </div>
         )}
 
