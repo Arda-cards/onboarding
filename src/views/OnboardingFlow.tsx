@@ -467,77 +467,68 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
     </div>
   );
 
-  // Render current step content
-  const renderStepContent = () => {
-    switch (currentStep) {
-      case 'email':
-        return (
-          <SupplierSetup
-            onScanComplete={handleEmailOrdersUpdate}
-            onSkip={() => handleStepComplete('email')}
-            onProgressUpdate={handleEmailProgressUpdate}
-            onCanProceed={handleCanProceedFromEmail}
-            onStateChange={handleEmailScanStateChange}
-            initialState={emailScanState}
-          />
-        );
+  // Render current step content (keep SupplierSetup mounted so background imports continue)
+  const renderStepContent = () => (
+    <>
+      <div className={currentStep === 'email' ? '' : 'hidden'}>
+        <SupplierSetup
+          onScanComplete={handleEmailOrdersUpdate}
+          onSkip={() => handleStepComplete('email')}
+          onProgressUpdate={handleEmailProgressUpdate}
+          onCanProceed={handleCanProceedFromEmail}
+          onStateChange={handleEmailScanStateChange}
+          initialState={emailScanState}
+        />
+      </div>
       
-      case 'barcode':
-        return (
-          <BarcodeScanStep
-            sessionId={mobileSessionId}
-            scannedBarcodes={scannedBarcodes}
-            onBarcodeScanned={handleBarcodeScanned}
-            onComplete={() => handleStepComplete('barcode')}
-            onBack={() => setCurrentStep('email')}
-          />
-        );
+      {currentStep === 'barcode' && (
+        <BarcodeScanStep
+          sessionId={mobileSessionId}
+          scannedBarcodes={scannedBarcodes}
+          onBarcodeScanned={handleBarcodeScanned}
+          onComplete={() => handleStepComplete('barcode')}
+          onBack={() => setCurrentStep('email')}
+        />
+      )}
       
-      case 'photo':
-        return (
-          <PhotoCaptureStep
-            sessionId={mobileSessionId}
-            capturedPhotos={capturedPhotos}
-            onPhotoCaptured={handlePhotoCaptured}
-            onComplete={() => handleStepComplete('photo')}
-            onBack={() => setCurrentStep('barcode')}
-          />
-        );
+      {currentStep === 'photo' && (
+        <PhotoCaptureStep
+          sessionId={mobileSessionId}
+          capturedPhotos={capturedPhotos}
+          onPhotoCaptured={handlePhotoCaptured}
+          onComplete={() => handleStepComplete('photo')}
+          onBack={() => setCurrentStep('barcode')}
+        />
+      )}
 
-      case 'csv':
-        return (
-          <CSVUploadStep
-            onComplete={handleCSVComplete}
-            onBack={() => setCurrentStep('photo')}
-          />
-        );
+      {currentStep === 'csv' && (
+        <CSVUploadStep
+          onComplete={handleCSVComplete}
+          onBack={() => setCurrentStep('photo')}
+        />
+      )}
 
-      case 'masterlist':
-        return (
-          <MasterListStep
-            emailItems={emailItems}
-            scannedBarcodes={scannedBarcodes}
-            capturedPhotos={capturedPhotos}
-            csvItems={csvItems}
-            onComplete={handleMasterListComplete}
-            onBack={() => setCurrentStep('csv')}
-          />
-        );
+      {currentStep === 'masterlist' && (
+        <MasterListStep
+          emailItems={emailItems}
+          scannedBarcodes={scannedBarcodes}
+          capturedPhotos={capturedPhotos}
+          csvItems={csvItems}
+          onComplete={handleMasterListComplete}
+          onBack={() => setCurrentStep('csv')}
+        />
+      )}
 
-      case 'sync':
-        return (
-          <ArdaSyncStep
-            items={masterListItems}
-            userEmail={userProfile?.email}
-            onComplete={handleSyncComplete}
-            onBack={() => setCurrentStep('masterlist')}
-          />
-        );
-      
-      default:
-        return null;
-    }
-  };
+      {currentStep === 'sync' && (
+        <ArdaSyncStep
+          items={masterListItems}
+          userEmail={userProfile?.email}
+          onComplete={handleSyncComplete}
+          onBack={() => setCurrentStep('masterlist')}
+        />
+      )}
+    </>
+  );
 
   // Render persistent footer
   const renderFooter = () => (
@@ -596,7 +587,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
               )}
             </div>
 
-            {emailProgress && emailProgress.isActive && currentStep === 'email' && (
+            {emailProgress && emailProgress.isActive && (
               <div className="mt-2 inline-flex items-center gap-2 text-xs text-arda-text-secondary bg-white/70 border border-arda-border rounded-full px-3 py-1">
                 <Icons.Loader2 className="w-3 h-3 animate-spin text-arda-accent" />
                 <span>

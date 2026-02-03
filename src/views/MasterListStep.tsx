@@ -447,6 +447,8 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
                 <th className="px-2 py-2 text-right font-medium text-gray-600 w-16">Order</th>
                 <th className="px-2 py-2 text-right font-medium text-gray-600 w-20">Price</th>
                 <th className="px-2 py-2 text-left font-medium text-gray-600 w-24">Color</th>
+                <th className="px-2 py-2 text-left font-medium text-gray-600 min-w-[120px]">Image URL</th>
+                <th className="px-2 py-2 text-left font-medium text-gray-600 min-w-[120px]">Product URL</th>
                 <th className="px-2 py-2 text-center font-medium text-gray-600 w-20">Actions</th>
               </tr>
             </thead>
@@ -552,6 +554,26 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
                     <ColorPicker
                       value={item.color}
                       onChange={(v) => updateItem(item.id, 'color', v)}
+                    />
+                  </td>
+                  
+                  {/* Image URL */}
+                  <td className="px-1 py-1">
+                    <EditableCell
+                      value={item.imageUrl}
+                      onChange={(v) => updateItem(item.id, 'imageUrl', v || undefined)}
+                      placeholder="https://..."
+                      className="text-xs text-blue-600 truncate max-w-[120px]"
+                    />
+                  </td>
+                  
+                  {/* Product URL */}
+                  <td className="px-1 py-1">
+                    <EditableCell
+                      value={item.productUrl}
+                      onChange={(v) => updateItem(item.id, 'productUrl', v || undefined)}
+                      placeholder="https://..."
+                      className="text-xs text-blue-600 truncate max-w-[120px]"
                     />
                   </td>
                   

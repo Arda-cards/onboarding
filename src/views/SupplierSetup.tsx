@@ -161,9 +161,13 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [discoveryProgress, setDiscoveryProgress] = useState<string>('');
   const [discoveredSuppliers, setDiscoveredSuppliers] = useState<DiscoveredSupplier[]>(initialState?.discoveredSuppliers || []);
-  const [enabledSuppliers, setEnabledSuppliers] = useState<Set<string>>(
-    new Set(['mcmaster.com', 'uline.com'])
-  );
+  const [enabledSuppliers, setEnabledSuppliers] = useState<Set<string>>(() => {
+    const base = new Set(['mcmaster.com', 'uline.com']);
+    if (initialState?.selectedOtherSuppliers) {
+      initialState.selectedOtherSuppliers.forEach(domain => base.add(domain));
+    }
+    return base;
+  });
   const [, setDiscoverError] = useState<string | null>(null);
   const [hasDiscovered, setHasDiscovered] = useState(initialState?.hasDiscovered || false);
 
@@ -489,19 +493,18 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   // Notify parent when user can leave email step
   useEffect(() => {
     const requireOtherImport = hasSelectableOtherSuppliers && hasDiscovered;
+    const hasSelectedOther = selectedOtherCount > 0;
     const canProceed =
-      hasStartedOtherImport ||
-      otherOrders.length > 0 ||
-      (!requireOtherImport && hasDiscovered && isAmazonComplete && isPriorityComplete);
+      (!requireOtherImport && hasDiscovered) ||
+      (requireOtherImport && hasSelectedOther && (hasStartedOtherImport || otherOrders.length > 0));
 
     onCanProceed?.(canProceed);
   }, [
     hasSelectableOtherSuppliers,
     hasDiscovered,
     hasStartedOtherImport,
+    selectedOtherCount,
     otherOrders.length,
-    isAmazonComplete,
-    isPriorityComplete,
     onCanProceed,
   ]);
 
@@ -515,8 +518,21 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       isPriorityComplete,
       discoveredSuppliers,
       hasDiscovered,
+      hasStartedOtherImport,
+      selectedOtherSuppliers,
     });
-  }, [amazonOrders, priorityOrders, otherOrders, isAmazonComplete, isPriorityComplete, discoveredSuppliers, hasDiscovered, onStateChange]);
+  }, [
+    amazonOrders,
+    priorityOrders,
+    otherOrders,
+    isAmazonComplete,
+    isPriorityComplete,
+    discoveredSuppliers,
+    hasDiscovered,
+    hasStartedOtherImport,
+    selectedOtherSuppliers,
+    onStateChange,
+  ]);
 
   // Discover suppliers
   const handleDiscoverSuppliers = async () => {
@@ -586,6 +602,13 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     }
   }, [currentJobId, isScanning, pollJobStatus]);
 
+  // Mark that other import was initiated if we resumed an in-flight job or already have data
+  useEffect(() => {
+    if (!hasStartedOtherImport && (currentJobId || otherOrders.length > 0)) {
+      setHasStartedOtherImport(true);
+    }
+  }, [currentJobId, otherOrders.length, hasStartedOtherImport]);
+
   // Scan selected suppliers
   const handleScanSuppliers = useCallback(async () => {
     // Filter to only non-Amazon, non-priority enabled suppliers
@@ -599,6 +622,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     
     setIsScanning(true);
     setJobStatus(null);
+    setHasStartedOtherImport(true);
     
     try {
       const response = await jobsApi.startJob(domainsToScan, 'other');
@@ -629,7 +653,6 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   }, [combinedOrders, onScanComplete]);
 
   const supplierCount = allSuppliers.length;
-  const enabledCount = enabledSuppliers.size;
   const isPriorityProcessing = useMemo(
     () => Boolean(!isPriorityComplete && priorityJobId),
     [isPriorityComplete, priorityJobId],
@@ -1051,13 +1074,21 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
             </p>
           </div>
           
-          {hasDiscovered && !isScanning && enabledCount > 0 && (
+          {hasDiscovered && !isScanning && hasSelectableOtherSuppliers && (
             <button
               onClick={handleScanSuppliers}
-              className="bg-arda-accent hover:bg-arda-accent-hover text-white px-5 py-2.5 rounded-xl font-medium transition-all flex items-center gap-2"
+              disabled={selectedOtherCount === 0}
+              className={[
+                "px-5 py-2.5 rounded-xl font-medium transition-all flex items-center gap-2",
+                selectedOtherCount > 0
+                  ? "bg-arda-accent hover:bg-arda-accent-hover text-white"
+                  : "bg-arda-border text-arda-text-muted cursor-not-allowed"
+              ].join(" ")}
             >
               <Icons.Download className="w-4 h-4" />
-              Import {enabledCount} Suppliers
+              {selectedOtherCount > 0
+                ? `Import ${selectedOtherCount} Supplier${selectedOtherCount === 1 ? '' : 's'}`
+                : 'Select suppliers to import'}
             </button>
           )}
         </div>
