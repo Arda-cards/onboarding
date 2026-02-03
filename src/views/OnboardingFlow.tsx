@@ -248,7 +248,11 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
           quantity: item.quantity,
           // Use ReLoWiSa-calculated recommendations from velocity profile
           recommendedMin: profile?.recommendedMin || Math.ceil((item.quantity || 1) * 1.5),
-          recommendedOrderQty: profile?.recommendedOrderQty || item.quantity || 1,
+          recommendedOrderQty: Math.max(
+            profile?.recommendedOrderQty ?? 0,
+            profile?.recommendedMin ?? 0,
+            item.quantity || 1,
+          ),
         };
       })
     );

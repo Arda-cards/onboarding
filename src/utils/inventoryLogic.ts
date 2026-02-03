@@ -475,9 +475,9 @@ export const buildVelocityProfiles = (
     // Round up to pack size for practical ordering
     profile.recommendedMin = roundUpToMultiple(rawMinQty, packSize);
     
-    // Order quantity = pack size (for one-card system, order exactly one pack)
-    // For two-bin system, order qty should replenish one bin
-    profile.recommendedOrderQty = Math.max(packSize, profile.recommendedMin);
+    // Two-bin system: reorder quantity should fully refill the empty bin.
+    // That equals the reorder point (recommendedMin), already rounded to pack size.
+    profile.recommendedOrderQty = profile.recommendedMin;
     
     // Predict next order date
     if (profile.orderCount >= 2) {
@@ -739,7 +739,8 @@ export const processOrdersToInventory = (orders: ExtractedOrder[]): InventoryIte
     const rawMinQty = usageDuringLeadTime + safetyStock;
     
     item.recommendedMin = roundUpToMultiple(rawMinQty, itemPackSize);
-    item.recommendedOrderQty = Math.max(itemPackSize, item.recommendedMin);
+    // Two-bin: refill one bin; order qty equals the (pack-rounded) minimum.
+    item.recommendedOrderQty = item.recommendedMin;
 
     // Clean up temp field before returning - destructure to remove internal fields
     const { orderIds: _ids, packSize: _ps, ...cleanItem } = item;
