@@ -14,6 +14,11 @@ export interface CSVItem {
   minQty?: number;
   orderQty?: number;
   unitPrice?: number;
+  // URLs and media
+  productUrl?: string;
+  imageUrl?: string;
+  // Arda-specific
+  color?: string;
   // Approval status
   isApproved: boolean;
   isRejected: boolean;
@@ -31,6 +36,9 @@ interface ColumnMapping {
   minQty?: string;
   orderQty?: string;
   unitPrice?: string;
+  productUrl?: string;
+  imageUrl?: string;
+  color?: string;
 }
 
 interface CSVUploadStepProps {
@@ -109,6 +117,15 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
       if (h.includes('price') || h.includes('cost')) {
         mapping.unitPrice = mapping.unitPrice || header;
       }
+      if (h.includes('product') && h.includes('url') || h === 'url' || h === 'link') {
+        mapping.productUrl = mapping.productUrl || header;
+      }
+      if (h.includes('image') || h.includes('img') || h.includes('photo') || h.includes('picture')) {
+        mapping.imageUrl = mapping.imageUrl || header;
+      }
+      if (h.includes('color') || h.includes('colour')) {
+        mapping.color = mapping.color || header;
+      }
     });
     
     setColumnMapping(mapping);
@@ -144,6 +161,9 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
       minQty: columnMapping.minQty ? parseFloat(row[columnMapping.minQty]) || undefined : undefined,
       orderQty: columnMapping.orderQty ? parseFloat(row[columnMapping.orderQty]) || undefined : undefined,
       unitPrice: columnMapping.unitPrice ? parseFloat(row[columnMapping.unitPrice]) || undefined : undefined,
+      productUrl: row[columnMapping.productUrl || ''] || undefined,
+      imageUrl: row[columnMapping.imageUrl || ''] || undefined,
+      color: row[columnMapping.color || ''] || undefined,
       isApproved: false,
       isRejected: false,
       rawData: row,
@@ -550,6 +570,9 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                 { key: 'minQty', label: 'Minimum Quantity' },
                 { key: 'orderQty', label: 'Order Quantity' },
                 { key: 'unitPrice', label: 'Unit Price' },
+                { key: 'productUrl', label: 'Product URL' },
+                { key: 'imageUrl', label: 'Image URL' },
+                { key: 'color', label: 'Color' },
               ].map(({ key, label, required }) => (
                 <div key={key} className="flex items-center gap-4">
                   <label className="w-40 text-sm font-medium text-arda-text-secondary">

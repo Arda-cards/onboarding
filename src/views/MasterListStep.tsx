@@ -10,6 +10,7 @@ interface EmailItem {
   supplier: string;
   asin?: string;
   imageUrl?: string;
+  productUrl?: string;
   lastPrice?: number;
   quantity?: number;
   location?: string;
@@ -36,8 +37,9 @@ export interface MasterListItem {
   currentQty?: number;
   // Pricing
   unitPrice?: number;
-  // Media
+  // Media & URLs
   imageUrl?: string;
+  productUrl?: string;
   // Color for Arda
   color?: string;
   // Status
@@ -200,6 +202,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
         orderQty: item.recommendedOrderQty,
         unitPrice: item.lastPrice,
         imageUrl: item.imageUrl,
+        productUrl: item.productUrl,
         isVerified: false,
         needsAttention: !item.name || item.name.includes('Unknown'),
       });
@@ -248,6 +251,9 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
         minQty: csvItem.minQty,
         orderQty: csvItem.orderQty,
         unitPrice: csvItem.unitPrice,
+        productUrl: csvItem.productUrl,
+        imageUrl: csvItem.imageUrl,
+        color: csvItem.color,
         isVerified: false,
         needsAttention: false,
       });

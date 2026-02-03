@@ -16,6 +16,7 @@ interface EmailItem {
   supplier: string;
   asin?: string;
   imageUrl?: string;
+  productUrl?: string;
   lastPrice?: number;
   quantity?: number;
   location?: string;
@@ -242,6 +243,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
           supplier: order.supplier,
           asin: item.asin,
           imageUrl: item.amazonEnriched?.imageUrl,
+          productUrl: item.amazonEnriched?.amazonUrl,
           lastPrice: item.unitPrice,
           quantity: item.quantity,
           // Use ReLoWiSa-calculated recommendations from velocity profile
