@@ -1,8 +1,11 @@
 // API client for backend communication
 // In production on Vercel, use same-origin (empty string) to leverage Vercel rewrites/proxy
 // This avoids cross-origin cookie issues. In development, use the direct API URL.
-const API_BASE_URL = import.meta.env.VITE_API_URL || 
-  (import.meta.env.PROD ? '' : 'https://order-pulse-api-production.up.railway.app');
+//
+// Note: Some deployments may not have Vercel rewrites configured for /auth and /api.
+// Defaulting production builds to the Railway API keeps OAuth/login working even without rewrites.
+const API_BASE_URL =
+  import.meta.env.VITE_API_URL || 'https://order-pulse-api-production.up.railway.app';
 
 interface ApiError {
   error: string;

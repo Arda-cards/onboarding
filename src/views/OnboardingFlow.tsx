@@ -1,7 +1,7 @@
 import { useState, useCallback, useMemo } from 'react';
 import { Icons } from '../components/Icons';
 import { ExtractedOrder } from '../types';
-import { buildVelocityProfiles } from '../utils/inventoryLogic';
+import { buildVelocityProfiles, normalizeItemName } from '../utils/inventoryLogic';
 import { SupplierSetup, EmailScanState } from './SupplierSetup';
 import { BarcodeScanStep } from './BarcodeScanStep';
 import { PhotoCaptureStep } from './PhotoCaptureStep';
@@ -79,6 +79,49 @@ const ONBOARDING_STEPS: StepConfig[] = [
     icon: 'Upload',
   },
 ];
+
+const buildEmailItemsFromOrders = (orders: ExtractedOrder[]): EmailItem[] => {
+  if (orders.length === 0) return [];
+
+  const velocityProfiles = buildVelocityProfiles(orders);
+  const uniqueItems = new Map<string, EmailItem>();
+
+  orders.forEach(order => {
+    order.items.forEach(item => {
+      const normalizedKey = item.normalizedName ?? normalizeItemName(item.name);
+      const profile = velocityProfiles.get(normalizedKey);
+
+      const displayName = profile?.displayName
+        ?? item.amazonEnriched?.humanizedName
+        ?? item.amazonEnriched?.itemName
+        ?? item.name;
+
+      const emailItem: EmailItem = {
+        id: `email-${order.id}-${item.name}`,
+        name: displayName,
+        supplier: order.supplier,
+        asin: item.asin,
+        imageUrl: item.amazonEnriched?.imageUrl,
+        productUrl: item.amazonEnriched?.amazonUrl,
+        lastPrice: item.unitPrice,
+        quantity: item.quantity,
+        recommendedMin: profile?.recommendedMin || Math.ceil((item.quantity || 1) * 1.5),
+        recommendedOrderQty: Math.max(
+          profile?.recommendedOrderQty ?? 0,
+          profile?.recommendedMin ?? 0,
+          item.quantity || 1,
+        ),
+      };
+
+      const existing = uniqueItems.get(normalizedKey);
+      if (!existing || (emailItem.imageUrl && !existing.imageUrl)) {
+        uniqueItems.set(normalizedKey, emailItem);
+      }
+    });
+  });
+
+  return Array.from(uniqueItems.values());
+};
 
 // Scanned barcode item
 export interface ScannedBarcode {
@@ -159,8 +202,8 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   const [completedSteps, setCompletedSteps] = useState<Set<OnboardingStep>>(new Set());
   
   // Data from each step
-  const [, setEmailOrders] = useState<ExtractedOrder[]>([]);
-  const [emailItems, setEmailItems] = useState<EmailItem[]>([]);
+  const [emailOrders, setEmailOrders] = useState<ExtractedOrder[]>([]);
+  const emailItems = useMemo(() => buildEmailItemsFromOrders(emailOrders), [emailOrders]);
   const [scannedBarcodes, setScannedBarcodes] = useState<ScannedBarcode[]>([]);
   const [capturedPhotos, setCapturedPhotos] = useState<CapturedPhoto[]>([]);
   const [csvItems, setCsvItems] = useState<CSVItem[]>([]);
@@ -180,15 +223,24 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
     `session-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
   );
 
-  // Calculate total items across all sources
-  const totalItems = emailItems.length + scannedBarcodes.length + capturedPhotos.filter(p => p.suggestedName).length + csvItems.length;
-
-  // Get current step index
-  const currentStepIndex = ONBOARDING_STEPS.findIndex(s => s.id === currentStep);
-  const currentStepConfig = useMemo(
-    () => ONBOARDING_STEPS.find(s => s.id === currentStep) || ONBOARDING_STEPS[0],
-    [currentStep],
+  const capturedPhotoCount = useMemo(
+    () => capturedPhotos.reduce((count, photo) => count + (photo.suggestedName ? 1 : 0), 0),
+    [capturedPhotos],
   );
+
+  const totalItems = useMemo(
+    () => emailItems.length + scannedBarcodes.length + capturedPhotoCount + csvItems.length,
+    [emailItems.length, scannedBarcodes.length, capturedPhotoCount, csvItems.length],
+  );
+
+  const { currentStepIndex, currentStepConfig } = useMemo(() => {
+    const index = ONBOARDING_STEPS.findIndex(step => step.id === currentStep);
+    const safeIndex = index === -1 ? 0 : index;
+    return {
+      currentStepIndex: safeIndex,
+      currentStepConfig: ONBOARDING_STEPS[safeIndex],
+    };
+  }, [currentStep]);
   
   // Check if can go back
   const canGoBack = currentStepIndex > 0;
@@ -217,56 +269,6 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   // Handle email orders update (does NOT auto-advance - user clicks Continue)
   const handleEmailOrdersUpdate = useCallback((orders: ExtractedOrder[]) => {
     setEmailOrders(orders);
-    
-    // Build velocity profiles using ReLoWiSa calculations
-    // This calculates recommended min/order qty based on:
-    // - Pack size (NPK) from Amazon enrichment
-    // - Order frequency (Takt time)
-    // - Assumed lead time with safety factor
-    const velocityProfiles = buildVelocityProfiles(orders);
-    
-    // Convert orders to email items with velocity-based recommendations
-    const items: EmailItem[] = orders.flatMap(order => 
-      order.items.map(item => {
-        // Find velocity profile for this item
-        const normalizedName = item.normalizedName || item.name.toLowerCase().trim();
-        const profile = velocityProfiles.get(normalizedName);
-        
-        // Use Amazon enriched name if available
-        const displayName = item.amazonEnriched?.humanizedName || 
-                           item.amazonEnriched?.itemName || 
-                           item.name;
-        
-        return {
-          id: `email-${order.id}-${item.name}`,
-          name: displayName,
-          supplier: order.supplier,
-          asin: item.asin,
-          imageUrl: item.amazonEnriched?.imageUrl,
-          productUrl: item.amazonEnriched?.amazonUrl,
-          lastPrice: item.unitPrice,
-          quantity: item.quantity,
-          // Use ReLoWiSa-calculated recommendations from velocity profile
-          recommendedMin: profile?.recommendedMin || Math.ceil((item.quantity || 1) * 1.5),
-          recommendedOrderQty: Math.max(
-            profile?.recommendedOrderQty ?? 0,
-            profile?.recommendedMin ?? 0,
-            item.quantity || 1,
-          ),
-        };
-      })
-    );
-    
-    // Dedupe by normalized name to avoid duplicate items
-    const uniqueItems = new Map<string, EmailItem>();
-    items.forEach(item => {
-      const key = item.name.toLowerCase().trim();
-      if (!uniqueItems.has(key) || (item.imageUrl && !uniqueItems.get(key)?.imageUrl)) {
-        uniqueItems.set(key, item);
-      }
-    });
-    
-    setEmailItems(Array.from(uniqueItems.values()));
     // Don't auto-advance - user will click Continue when ready
   }, []);
 
@@ -571,10 +573,10 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
                   {scannedBarcodes.length} scanned
                 </span>
               )}
-              {capturedPhotos.filter(p => p.suggestedName).length > 0 && (
+              {capturedPhotoCount > 0 && (
                 <span className="inline-flex items-center gap-1">
                   <Icons.Camera className="w-3 h-3" />
-                  {capturedPhotos.filter(p => p.suggestedName).length} photos
+                  {capturedPhotoCount} photos
                 </span>
               )}
               {csvItems.length > 0 && (
