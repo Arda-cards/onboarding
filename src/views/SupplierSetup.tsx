@@ -147,7 +147,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   const [amazonOrders, setAmazonOrders] = useState<ExtractedOrder[]>(initialState?.amazonOrders || []);
   const [amazonError, setAmazonError] = useState<string | null>(null);
   const [isAmazonComplete, setIsAmazonComplete] = useState(initialState?.isAmazonComplete || false);
-  const amazonPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const amazonPollAbortRef = useRef<{ cancelled: boolean }>({ cancelled: false });
 
   // Priority suppliers (McMaster-Carr, Uline) processing state (starts immediately if no initial state)
   const [priorityJobId, setPriorityJobId] = useState<string | null>(null);
@@ -155,16 +155,20 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   const [priorityOrders, setPriorityOrders] = useState<ExtractedOrder[]>(initialState?.priorityOrders || []);
   const [priorityError, setPriorityError] = useState<string | null>(null);
   const [isPriorityComplete, setIsPriorityComplete] = useState(initialState?.isPriorityComplete || false);
-  const priorityPollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const priorityPollAbortRef = useRef<{ cancelled: boolean }>({ cancelled: false });
 
   // Discovery state (runs in parallel)
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [discoveryProgress, setDiscoveryProgress] = useState<string>('');
   const [discoveredSuppliers, setDiscoveredSuppliers] = useState<DiscoveredSupplier[]>(initialState?.discoveredSuppliers || []);
   const [enabledSuppliers, setEnabledSuppliers] = useState<Set<string>>(() => {
-    const base = new Set(['mcmaster.com', 'uline.com']);
+    const base = new Set<string>();
     if (initialState?.selectedOtherSuppliers) {
-      initialState.selectedOtherSuppliers.forEach(domain => base.add(domain));
+      initialState.selectedOtherSuppliers.forEach(domain => {
+        if (!PRIORITY_SUPPLIER_DOMAINS.has(domain) && !domain.includes('amazon')) {
+          base.add(domain);
+        }
+      });
     }
     return base;
   });
@@ -176,7 +180,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [otherOrders, setOtherOrders] = useState<ExtractedOrder[]>(initialState?.otherOrders || []);
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const otherPollAbortRef = useRef<{ cancelled: boolean }>({ cancelled: false });
   const [hasStartedOtherImport, setHasStartedOtherImport] = useState<boolean>(
     initialState?.hasStartedOtherImport || false,
   );
@@ -240,14 +244,17 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   // Merge priority suppliers with discovered ones (excluding Amazon)
   const allSuppliers = useMemo(() => mergeSuppliers(OTHER_PRIORITY_SUPPLIERS, discoveredSuppliers), [discoveredSuppliers]);
 
-  // Suppliers that actually require an explicit import (non-priority, non-Amazon)
-  const otherSuppliersToScan = useMemo(
+  // Filter out priority suppliers for the selectable list
+  const selectableOtherSuppliers = useMemo(
     () =>
-      allSuppliers
-        .filter(s => !PRIORITY_SUPPLIER_DOMAINS.has(s.domain) && !s.domain.includes('amazon'))
-        .map(s => s.domain),
+      allSuppliers.filter(
+        s => !PRIORITY_SUPPLIER_DOMAINS.has(s.domain) && !s.domain.includes('amazon'),
+      ),
     [allSuppliers],
   );
+
+  // Suppliers that actually require an explicit import (non-priority, non-Amazon)
+  const otherSuppliersToScan = useMemo(() => selectableOtherSuppliers.map(s => s.domain), [selectableOtherSuppliers]);
 
   const selectedOtherSuppliers = useMemo(
     () => Array.from(enabledSuppliers).filter(domain => otherSuppliersToScan.includes(domain)),
@@ -312,7 +319,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     return () => clearInterval(interval);
   }, [isDiscovering, DISCOVERY_MESSAGES.length]);
 
-  // 1. START PRIORITY SUPPLIERS - STAGGERED TO AVOID RATE LIMITS
+  // 1. START PRIORITY SUPPLIERS - start immediately (light jitter handled server-side)
   // Skip if we have restored state (user navigated back)
   useEffect(() => {
     // Skip initialization if we restored from saved state
@@ -322,7 +329,6 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     }
     
     let amazonRetryTimeout: ReturnType<typeof setTimeout> | null = null;
-    let priorityDelayTimeout: ReturnType<typeof setTimeout> | null = null;
     
     // Start Amazon with retry logic
     const startAmazon = async (retryCount = 0) => {
@@ -346,7 +352,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       }
     };
     
-    // Start McMaster-Carr and Uline (delayed to avoid rate limits)
+    // Start McMaster-Carr and Uline
     const startPrioritySuppliers = async (retryCount = 0) => {
       try {
         console.log(`🏭 Starting McMaster-Carr & Uline${retryCount > 0 ? ` (retry ${retryCount})` : ''}...`);
@@ -371,31 +377,23 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     // Start Amazon immediately
     startAmazon();
     
-    // Delay priority suppliers by 2 seconds to stagger API calls
-    priorityDelayTimeout = setTimeout(() => {
-      startPrioritySuppliers();
-    }, 2000);
+    // Start priority suppliers immediately (server manages rate limiting)
+    startPrioritySuppliers();
     
     // Cleanup on unmount
     return () => {
       if (amazonRetryTimeout) clearTimeout(amazonRetryTimeout);
-      if (priorityDelayTimeout) clearTimeout(priorityDelayTimeout);
     };
   }, [hasRestoredState]);
 
-  // 2. START SUPPLIER DISCOVERY (delayed to stagger API calls)
+  // 2. START SUPPLIER DISCOVERY (start immediately for faster supplier identification)
   useEffect(() => {
     if (!hasDiscovered && !isDiscovering) {
-      // Delay discovery by 4 seconds to avoid overwhelming the server
-      const discoveryTimeout = setTimeout(() => {
-        handleDiscoverSuppliers();
-      }, 4000);
-      
-      return () => clearTimeout(discoveryTimeout);
+      handleDiscoverSuppliers();
     }
   }, [hasDiscovered, isDiscovering]);
 
-  // Poll Amazon job status
+  // Poll Amazon job status with adaptive backoff
   const pollAmazonStatus = useCallback(async () => {
     if (!amazonJobId) return;
     
@@ -419,10 +417,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       
       if (status.status === 'completed' || status.status === 'failed') {
         setIsAmazonComplete(true);
-        if (amazonPollingRef.current) {
-          clearInterval(amazonPollingRef.current);
-          amazonPollingRef.current = null;
-        }
+        amazonPollAbortRef.current.cancelled = true;
       }
     } catch (error) {
       console.error('Amazon polling error:', error);
@@ -431,20 +426,23 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
   useEffect(() => {
     if (amazonJobId && !isAmazonComplete) {
-      console.log('🛒 Starting Amazon polling interval');
-      pollAmazonStatus();
-      amazonPollingRef.current = setInterval(pollAmazonStatus, 1000);
-      return () => {
-        console.log('🛒 Clearing Amazon polling interval');
-        if (amazonPollingRef.current) {
-          clearInterval(amazonPollingRef.current);
-          amazonPollingRef.current = null;
+      amazonPollAbortRef.current.cancelled = false;
+      const pollWithBackoff = async (delayMs: number) => {
+        if (amazonPollAbortRef.current.cancelled) return;
+        await pollAmazonStatus();
+        if (!amazonPollAbortRef.current.cancelled) {
+          const nextDelay = Math.min(Math.floor(delayMs * 1.35), 1800);
+          setTimeout(() => pollWithBackoff(nextDelay), nextDelay);
         }
+      };
+      pollWithBackoff(700);
+      return () => {
+        amazonPollAbortRef.current.cancelled = true;
       };
     }
   }, [amazonJobId, isAmazonComplete, pollAmazonStatus]);
 
-  // Poll Priority Suppliers (McMaster-Carr, Uline) job status
+  // Poll Priority Suppliers (McMaster-Carr, Uline) job status with adaptive backoff
   const pollPriorityStatus = useCallback(async () => {
     if (!priorityJobId) return;
     
@@ -467,10 +465,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       
       if (status.status === 'completed' || status.status === 'failed') {
         setIsPriorityComplete(true);
-        if (priorityPollingRef.current) {
-          clearInterval(priorityPollingRef.current);
-          priorityPollingRef.current = null;
-        }
+        priorityPollAbortRef.current.cancelled = true;
       }
     } catch (error) {
       console.error('Priority polling error:', error);
@@ -479,13 +474,18 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
   useEffect(() => {
     if (priorityJobId && !isPriorityComplete) {
-      pollPriorityStatus();
-      priorityPollingRef.current = setInterval(pollPriorityStatus, 1000);
-      return () => {
-        if (priorityPollingRef.current) {
-          clearInterval(priorityPollingRef.current);
-          priorityPollingRef.current = null;
+      priorityPollAbortRef.current.cancelled = false;
+      const pollWithBackoff = async (delayMs: number) => {
+        if (priorityPollAbortRef.current.cancelled) return;
+        await pollPriorityStatus();
+        if (!priorityPollAbortRef.current.cancelled) {
+          const nextDelay = Math.min(Math.floor(delayMs * 1.35), 1800);
+          setTimeout(() => pollWithBackoff(nextDelay), nextDelay);
         }
+      };
+      pollWithBackoff(700);
+      return () => {
+        priorityPollAbortRef.current.cancelled = true;
       };
     }
   }, [priorityJobId, isPriorityComplete, pollPriorityStatus]);
@@ -556,7 +556,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     }
   };
 
-  // Poll job status
+  // Poll job status for other suppliers with adaptive backoff
   const pollJobStatus = useCallback(async () => {
     if (!currentJobId) return;
     
@@ -579,10 +579,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       
       if (status.status === 'completed' || status.status === 'failed') {
         setIsScanning(false);
-        if (pollingRef.current) {
-          clearInterval(pollingRef.current);
-          pollingRef.current = null;
-        }
+        otherPollAbortRef.current.cancelled = true;
       }
     } catch (error) {
       console.error('Job polling error:', error);
@@ -591,13 +588,18 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
   useEffect(() => {
     if (currentJobId && isScanning) {
-      pollJobStatus();
-      pollingRef.current = setInterval(pollJobStatus, 1000);
-      return () => {
-        if (pollingRef.current) {
-          clearInterval(pollingRef.current);
-          pollingRef.current = null;
+      otherPollAbortRef.current.cancelled = false;
+      const pollWithBackoff = async (delayMs: number) => {
+        if (otherPollAbortRef.current.cancelled) return;
+        await pollJobStatus();
+        if (!otherPollAbortRef.current.cancelled) {
+          const nextDelay = Math.min(Math.floor(delayMs * 1.35), 2000);
+          setTimeout(() => pollWithBackoff(nextDelay), nextDelay);
         }
+      };
+      pollWithBackoff(650);
+      return () => {
+        otherPollAbortRef.current.cancelled = true;
       };
     }
   }, [currentJobId, isScanning, pollJobStatus]);
@@ -652,7 +654,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     }
   }, [combinedOrders, onScanComplete]);
 
-  const supplierCount = allSuppliers.length;
+  const supplierCount = selectableOtherSuppliers.length;
   const isPriorityProcessing = useMemo(
     () => Boolean(!isPriorityComplete && priorityJobId),
     [isPriorityComplete, priorityJobId],
@@ -724,8 +726,8 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   );
 
   const supplierGridItems = useMemo(
-    () => buildSupplierGridItems(allSuppliers, enabledSuppliers),
-    [allSuppliers, enabledSuppliers],
+    () => buildSupplierGridItems(selectableOtherSuppliers, enabledSuppliers),
+    [selectableOtherSuppliers, enabledSuppliers],
   );
 
   return (

@@ -61,17 +61,65 @@ const normalizePackSizeValue = (value: number | null | undefined): number | null
   return rounded;
 };
 
+/**
+ * Extract pack size from product text (title, description, etc.)
+ * Uses multiple patterns to catch various formats like:
+ * - "100 Pack", "100-Pack", "100pk", "100 ct", "100 count"
+ * - "Pack of 100", "Box of 50", "Case of 24"
+ * - "(100 Count)", "[50 Pack]"
+ * - "100 Sheets", "500 Envelopes", "24 Rolls"
+ * - "12-Pack", "6 Pack", "24pk"
+ * - Quantity x Size like "2 x 100 count"
+ */
 const parsePackSizeFromText = (text?: string): number | null => {
   if (!text) return null;
+  
   const patterns = [
-    /\b(\d+)\s*(?:pack|pk|ct|count|pcs|pieces|units|unit|each|ea|bag|box|case)\b/i,
-    /\b(?:pack|box|case|bag)\s+of\s+(\d+)\b/i,
-    /\b(\d+)\s*[-\s]?(?:pk|ct)\b/i,
+    // "100 Pack", "100-Pack", "100pk", "100 ct", "100 count", "100 pcs"
+    /\b(\d+)\s*[-\s]?(?:pack|pk|ct|count|pcs|pieces|units|unit|sheets|rolls|envelopes|bags|boxes|pairs)\b/i,
+    
+    // "Pack of 100", "Box of 50", "Case of 24", "Set of 12"
+    /\b(?:pack|box|case|bag|set|bundle)\s+of\s+(\d+)\b/i,
+    
+    // Parenthetical: "(100 Count)", "(50 Pack)", "[24 ct]"
+    /[(\[](\d+)\s*(?:count|ct|pack|pk|pcs|pieces)[)\]]/i,
+    
+    // "100-ct", "50-pk", "24-pack"
+    /\b(\d+)\s*[-](?:ct|pk|pack|count)\b/i,
+    
+    // "Qty: 100", "Quantity: 50"
+    /\b(?:qty|quantity)[:\s]+(\d+)\b/i,
+    
+    // "2 x 100 count" or "3x50 pack" - multiply these
+    /\b(\d+)\s*x\s*(\d+)\s*(?:count|ct|pack|pk|pcs)?\b/i,
+    
+    // Comma-separated large numbers like "1,000 Count"
+    /\b(\d{1,3}(?:,\d{3})+)\s*(?:count|ct|pack|pk|pcs|pieces|sheets)\b/i,
+    
+    // Just "100 Count" at end of title
+    /\b(\d+)\s+(?:count|sheets|rolls|wipes|tablets|capsules|pills)\s*$/i,
+    
+    // "12/Pack" or "24/Case" format
+    /\b(\d+)\s*\/\s*(?:pack|case|box|bag)\b/i,
   ];
+  
   for (const pattern of patterns) {
     const match = text.match(pattern);
     if (match) {
-      const value = parseInt(match[1], 10);
+      // Handle "2 x 100" multiplication pattern
+      if (match[2] && pattern.source.includes('x')) {
+        const multiplied = parseInt(match[1], 10) * parseInt(match[2], 10);
+        const normalized = normalizePackSizeValue(multiplied);
+        if (normalized) return normalized;
+      }
+      
+      // Handle comma-separated numbers like "1,000"
+      let valueStr = match[1];
+      if (valueStr.includes(',')) {
+        valueStr = valueStr.replace(/,/g, '');
+      }
+      
+      const value = parseInt(valueStr, 10);
       const normalized = normalizePackSizeValue(value);
       if (normalized) return normalized;
     }
@@ -79,15 +127,73 @@ const parsePackSizeFromText = (text?: string): number | null => {
   return null;
 };
 
+/**
+ * Extract pack size from price string (e.g., "$0.05/Count" means per-unit pricing)
+ * If we see per-unit pricing and have total price, we can derive pack size
+ */
+const parsePackSizeFromPrice = (priceStr?: string, totalPrice?: number): number | null => {
+  if (!priceStr) return null;
+  
+  // Look for per-unit pricing like "$0.05/Count" or "$1.25/ea"
+  const perUnitMatch = priceStr.match(/\$?([\d.]+)\s*\/\s*(?:count|ct|ea|each|unit|piece)/i);
+  if (perUnitMatch && totalPrice) {
+    const perUnitPrice = parseFloat(perUnitMatch[1]);
+    if (perUnitPrice > 0) {
+      const estimatedCount = Math.round(totalPrice / perUnitPrice);
+      return normalizePackSizeValue(estimatedCount);
+    }
+  }
+  
+  // Look for "($0.05/Count)" format common in Amazon titles
+  const parentheticalMatch = priceStr.match(/\(\$?([\d.]+)\s*\/\s*(?:count|ct|ea|each)\)/i);
+  if (parentheticalMatch && totalPrice) {
+    const perUnitPrice = parseFloat(parentheticalMatch[1]);
+    if (perUnitPrice > 0) {
+      const estimatedCount = Math.round(totalPrice / perUnitPrice);
+      return normalizePackSizeValue(estimatedCount);
+    }
+  }
+  
+  return null;
+};
+
+/**
+ * Get pack size for an item using multiple fallback sources:
+ * 1. Amazon API unitCount field
+ * 2. Parse from Amazon item title
+ * 3. Parse from original item name
+ * 4. Parse from price string (per-unit pricing)
+ * 5. Parse from humanized name
+ * 6. Default to 1
+ */
 const getPackSizeForItem = (item: LineItem): number => {
-  const amazonPack = normalizePackSizeValue(
-    typeof item.amazonEnriched?.unitCount === 'string'
-      ? parseFloat(item.amazonEnriched.unitCount)
-      : item.amazonEnriched?.unitCount
+  const amazon = item.amazonEnriched;
+  
+  // 1. Try Amazon API unitCount field first (most reliable)
+  const amazonUnitCount = normalizePackSizeValue(
+    typeof amazon?.unitCount === 'string'
+      ? parseFloat(amazon.unitCount)
+      : amazon?.unitCount
   );
-  if (amazonPack) return amazonPack;
-  const fromName = parsePackSizeFromText(item.amazonEnriched?.itemName || item.name);
-  if (fromName) return fromName;
+  if (amazonUnitCount) return amazonUnitCount;
+  
+  // 2. Parse from Amazon item title (often contains "100 Count", "50 Pack", etc.)
+  const fromAmazonTitle = parsePackSizeFromText(amazon?.itemName);
+  if (fromAmazonTitle) return fromAmazonTitle;
+  
+  // 3. Parse from original item name
+  const fromOriginalName = parsePackSizeFromText(item.name);
+  if (fromOriginalName) return fromOriginalName;
+  
+  // 4. Try to derive from per-unit pricing in Amazon price string
+  const fromPrice = parsePackSizeFromPrice(amazon?.price, item.unitPrice);
+  if (fromPrice) return fromPrice;
+  
+  // 5. Parse from humanized name (LLM-generated)
+  const fromHumanizedName = parsePackSizeFromText(amazon?.humanizedName);
+  if (fromHumanizedName) return fromHumanizedName;
+  
+  // 6. Default fallback
   return 1;
 };
 
