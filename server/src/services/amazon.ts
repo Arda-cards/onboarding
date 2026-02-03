@@ -215,6 +215,14 @@ export async function getAmazonItemDetails(asins: string[]): Promise<Map<string,
               UnitCount: item.ItemInfo?.ProductInfo?.UnitCount?.DisplayValue,
             };
             
+            // Parse numeric unit price from display price string (e.g., "$19.99" -> 19.99)
+            if (itemData.Price) {
+              const numericPrice = parseFloat(itemData.Price.replace(/[^0-9.]/g, ''));
+              if (!isNaN(numericPrice)) {
+                itemData.UnitPrice = numericPrice;
+              }
+            }
+            
             // Extract UPC from ExternalIds
             const upcs = item.ItemInfo?.ExternalIds?.UPCs?.DisplayValues;
             if (upcs && upcs.length > 0) {
