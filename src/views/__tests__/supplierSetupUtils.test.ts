@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { DiscoveredSupplier } from '../../services/api';
-import { buildSupplierGridItems, calculateProgressPercent, getMilestoneMessage } from '../supplierSetupUtils';
+import {
+  buildSupplierGridItems,
+  calculateProgressPercent,
+  canonicalizePrioritySupplierDomain,
+  getMilestoneMessage,
+  isPrioritySupplierDomain,
+  PRIORITY_SUPPLIER_SCAN_DOMAINS,
+} from '../supplierSetupUtils';
 
 describe('supplierSetupUtils', () => {
   it('marks enabled suppliers correctly', () => {
@@ -51,6 +58,21 @@ describe('supplierSetupUtils', () => {
     expect(calculateProgressPercent({ total: 5, processed: 10, success: 0, failed: 0, currentTask: '' })).toBe(100);
     expect(calculateProgressPercent({ total: 4, processed: -2, success: 0, failed: 0, currentTask: '' })).toBe(0);
     expect(calculateProgressPercent({ total: 4, processed: Number.POSITIVE_INFINITY, success: 0, failed: 0, currentTask: '' })).toBe(0);
+  });
+
+  it('recognizes and canonicalizes priority supplier aliases', () => {
+    expect(canonicalizePrioritySupplierDomain('mcmaster-carr.com')).toBe('mcmaster.com');
+    expect(canonicalizePrioritySupplierDomain('Mcmaster.com')).toBe('mcmaster.com');
+    expect(canonicalizePrioritySupplierDomain('uline.com')).toBe('uline.com');
+
+    expect(isPrioritySupplierDomain('mcmaster.com')).toBe(true);
+    expect(isPrioritySupplierDomain('mcmaster-carr.com')).toBe(true);
+    expect(isPrioritySupplierDomain('uline.com')).toBe(true);
+    expect(isPrioritySupplierDomain('example.com')).toBe(false);
+
+    expect(PRIORITY_SUPPLIER_SCAN_DOMAINS).toEqual(
+      expect.arrayContaining(['mcmaster.com', 'mcmaster-carr.com', 'uline.com']),
+    );
   });
 
   it('returns milestone metadata for known milestones and fallback for unknown', () => {

@@ -21,6 +21,12 @@ import {
   logConsolidationSummary,
   RawOrderData,
 } from '../utils/orderConsolidation.js';
+import {
+  buildSupplierJobQuery,
+  expandPrioritySupplierDomains,
+  getSupplierLookbackMonths,
+  sanitizeSupplierDomains,
+} from './jobsQueryUtils.js';
 
 const router = Router();
 
@@ -43,8 +49,6 @@ const amazonLimiter = rateLimit({
   keyGenerator: (req: Request) => req.session?.userId || req.ip || 'anonymous',
 });
 
-const MAX_SUPPLIERS = 25;
-
 function parseEmailDate(dateHeader?: string): string | null {
   if (!dateHeader) return null;
   const parsed = new Date(dateHeader);
@@ -62,17 +66,6 @@ function normalizeOrderDate(orderDate?: string, fallbackDate?: string): string {
     }
   }
   return new Date().toISOString().split('T')[0];
-}
-
-function sanitizeSupplierDomains(domains: unknown): string[] {
-  if (!Array.isArray(domains)) return [];
-
-  return domains
-    .map((domain) =>
-      typeof domain === 'string' ? domain.trim().toLowerCase() : '',
-    )
-    .filter((domain) => domain.length > 2 && domain.includes('.') && !domain.includes(' '))
-    .slice(0, MAX_SUPPLIERS);
 }
 
 // Extract text from PDF attachments
@@ -826,7 +819,8 @@ async function processEmailsInBackground(
   jobId: string,
   userId: string,
   accessToken: string,
-  supplierDomains?: string[]
+  supplierDomains: string[],
+  jobType: string,
 ) {
   const job = jobManager.getJob(jobId);
   if (!job) return;
@@ -842,14 +836,9 @@ async function processEmailsInBackground(
     oauth2Client.setCredentials({ access_token: accessToken });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-    // Calculate 6 months ago for date filter
-    const sixMonthsAgo = new Date();
-    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-    const afterDate = sixMonthsAgo.toISOString().split('T')[0].replace(/-/g, '/');
-
     // Build query - ONLY for selected suppliers, EXCLUDING Amazon (handled separately)
     // Remove any Amazon domains from the list since Amazon is processed separately
-    const nonAmazonDomains = (supplierDomains || []).filter(d => 
+    const nonAmazonDomains = supplierDomains.filter(d =>
       !d.toLowerCase().includes('amazon')
     );
     
@@ -858,24 +847,53 @@ async function processEmailsInBackground(
       jobManager.updateJob(jobId, { status: 'completed' });
       return;
     }
-    
-    // Build query ONLY for selected suppliers - no general query
-    const fromClause = nonAmazonDomains.map(d => `from:${d}`).join(' OR ');
-    const query = `(${fromClause}) subject:(order OR invoice OR receipt OR confirmation OR shipment OR purchase OR payment) after:${afterDate}`;
-    
-    jobManager.addJobLog(jobId, `🔍 Processing ${nonAmazonDomains.length} suppliers: ${nonAmazonDomains.slice(0, 5).join(', ')}${nonAmazonDomains.length > 5 ? '...' : ''}`);
-    
-    const listResponse = await gmail.users.messages.list({
-      userId: 'me',
-      q: query,
-      maxResults: 200, // Reduced for faster processing
+
+    const lookbackMonths = getSupplierLookbackMonths(jobType);
+    const strictQuery = buildSupplierJobQuery({
+      supplierDomains: nonAmazonDomains,
+      jobType,
+      mode: 'strict',
     });
 
-    const messageIds = listResponse.data.messages || [];
-    jobManager.addJobLog(jobId, `📬 Found ${messageIds.length} matching emails`);
-    
+    jobManager.addJobLog(
+      jobId,
+      `🔍 Processing ${nonAmazonDomains.length} suppliers: ${nonAmazonDomains.slice(0, 5).join(', ')}${nonAmazonDomains.length > 5 ? '...' : ''}`,
+    );
+    jobManager.addJobLog(jobId, `🧭 Query mode=strict, lookback=${lookbackMonths} months`);
+
+    let queryMode: 'strict' | 'fallback' = 'strict';
+    let messageIds: Array<{ id?: string | null }> = [];
+
+    const strictResponse = await gmail.users.messages.list({
+      userId: 'me',
+      q: strictQuery,
+      maxResults: 200,
+    });
+    messageIds = strictResponse.data.messages || [];
+    jobManager.addJobLog(jobId, `📬 Strict query found ${messageIds.length} matching emails`);
+
+    if (jobType === 'priority' && messageIds.length === 0) {
+      const fallbackQuery = buildSupplierJobQuery({
+        supplierDomains: nonAmazonDomains,
+        jobType,
+        mode: 'fallback',
+      });
+      queryMode = 'fallback';
+      jobManager.addJobLog(jobId, '🔁 Strict query returned 0, retrying fallback query without subject filter');
+
+      const fallbackResponse = await gmail.users.messages.list({
+        userId: 'me',
+        q: fallbackQuery,
+        maxResults: 200,
+      });
+      messageIds = fallbackResponse.data.messages || [];
+      jobManager.addJobLog(jobId, `📬 Fallback query found ${messageIds.length} matching emails`);
+    }
+
+    jobManager.addJobLog(jobId, `🧪 Effective query mode: ${queryMode}`);
+
     if (messageIds.length === 0) {
-      jobManager.addJobLog(jobId, '⚠️ No order-related emails found in the last 6 months');
+      jobManager.addJobLog(jobId, `⚠️ No order-related emails found in the last ${lookbackMonths} months`);
       jobManager.updateJob(jobId, { status: 'completed' });
       return;
     }
@@ -1199,32 +1217,36 @@ router.post('/start', jobsLimiter, requireAuth, async (req: Request, res: Respon
     }
 
     const { supplierDomains, jobType } = req.body as { supplierDomains?: unknown; jobType?: string };
-    const validDomains = sanitizeSupplierDomains(supplierDomains);
-    if (supplierDomains && validDomains.length === 0) {
-      return res.status(400).json({ error: 'supplierDomains must contain valid hostnames' });
-    }
-
     // Create job with specified type (defaults to 'suppliers')
     // allowConcurrent=true ensures this job won't cancel other job types
     const effectiveJobType = typeof jobType === 'string' && jobType.length > 0 ? jobType : 'suppliers';
-    console.log(`📥 /start request: userId=${userId.substring(0, 8)}, jobType=${effectiveJobType}, domains=${validDomains.length}`);
+    const sanitizedDomains = sanitizeSupplierDomains(supplierDomains);
+    if (supplierDomains && sanitizedDomains.length === 0) {
+      return res.status(400).json({ error: 'supplierDomains must contain valid hostnames' });
+    }
+
+    const effectiveDomains = effectiveJobType === 'priority'
+      ? expandPrioritySupplierDomains(sanitizedDomains)
+      : sanitizedDomains;
+
+    console.log(`📥 /start request: userId=${userId.substring(0, 8)}, jobType=${effectiveJobType}, domains=${effectiveDomains.length}`);
     const job = jobManager.createJob(userId, { jobType: effectiveJobType, allowConcurrent: true });
     
-    if (validDomains.length > 0) {
-      jobManager.addJobLog(job.id, `🚀 Job created for ${validDomains.length} selected suppliers: ${validDomains.join(', ')}`);
+    if (effectiveDomains.length > 0) {
+      jobManager.addJobLog(job.id, `🚀 Job created for ${effectiveDomains.length} selected suppliers: ${effectiveDomains.join(', ')}`);
     } else {
       jobManager.addJobLog(job.id, '🚀 Job created, processing all suppliers...');
     }
 
     // Start processing in background (don't await)
-    processEmailsInBackground(job.id, userId, accessToken, validDomains);
+    processEmailsInBackground(job.id, userId, accessToken, effectiveDomains, effectiveJobType);
 
     // Return immediately with job ID
     res.status(202).json({ 
       jobId: job.id,
       status: 'started',
-      message: validDomains.length 
-        ? `Processing ${validDomains.length} suppliers in background`
+      message: effectiveDomains.length 
+        ? `Processing ${effectiveDomains.length} suppliers in background`
         : 'Processing all suppliers in background'
     });
   } catch (error: any) {

@@ -1,15 +1,17 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Icons } from '../components/Icons';
 import { ExtractedOrder } from '../types';
-import { discoverApi, jobsApi, JobStatus, DiscoveredSupplier } from '../services/api';
+import { discoverApi, jobsApi, JobStatus, DiscoveredSupplier, isSessionExpiredError } from '../services/api';
 import { mergeSuppliers } from '../utils/supplierUtils';
 import {
   buildSupplierGridItems,
+  canonicalizePrioritySupplierDomain,
   calculateProgressPercent,
   getMilestoneMessage,
+  isPrioritySupplierDomain,
   MILESTONES,
   OTHER_PRIORITY_SUPPLIERS,
-  PRIORITY_SUPPLIER_DOMAINS,
+  PRIORITY_SUPPLIER_SCAN_DOMAINS,
 } from './supplierSetupUtils';
 
 // Lean manufacturing wisdom - displayed while we ironically batch-process emails
@@ -85,6 +87,7 @@ const LEAN_WISDOM = [
 // so the second mount can use them instead of making another call
 let moduleDiscoveryPromise: Promise<{ suppliers: DiscoveredSupplier[] }> | null = null;
 let moduleDiscoveryResult: DiscoveredSupplier[] | null = null;
+const SESSION_EXPIRED_MESSAGE = 'Session expired. Please sign in again.';
 
 // Background progress type for parent components
 interface BackgroundEmailProgress {
@@ -171,8 +174,9 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     const base = new Set<string>();
     if (initialState?.selectedOtherSuppliers) {
       initialState.selectedOtherSuppliers.forEach(domain => {
-        if (!PRIORITY_SUPPLIER_DOMAINS.has(domain) && !domain.includes('amazon')) {
-          base.add(domain);
+        const normalizedDomain = canonicalizePrioritySupplierDomain(domain);
+        if (!isPrioritySupplierDomain(normalizedDomain) && !normalizedDomain.includes('amazon')) {
+          base.add(normalizedDomain);
         }
       });
     }
@@ -193,6 +197,13 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   const [hasStartedOtherImport, setHasStartedOtherImport] = useState<boolean>(
     initialState?.hasStartedOtherImport || false,
   );
+
+  const getErrorMessage = useCallback((error: unknown, fallback: string): string => {
+    if (isSessionExpiredError(error)) {
+      return SESSION_EXPIRED_MESSAGE;
+    }
+    return error instanceof Error && error.message ? error.message : fallback;
+  }, []);
 
   // Computed values for the experience
   const allItems = useMemo(() => {
@@ -251,13 +262,19 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   }, [allItems]);
 
   // Merge priority suppliers with discovered ones (excluding Amazon)
-  const allSuppliers = useMemo(() => mergeSuppliers(OTHER_PRIORITY_SUPPLIERS, discoveredSuppliers), [discoveredSuppliers]);
+  const allSuppliers = useMemo(
+    () =>
+      mergeSuppliers(OTHER_PRIORITY_SUPPLIERS, discoveredSuppliers, {
+        canonicalizeDomain: canonicalizePrioritySupplierDomain,
+      }),
+    [discoveredSuppliers],
+  );
 
   // Filter out priority suppliers for the selectable list
   const selectableOtherSuppliers = useMemo(
     () =>
       allSuppliers.filter(
-        s => !PRIORITY_SUPPLIER_DOMAINS.has(s.domain) && !s.domain.includes('amazon'),
+        s => !isPrioritySupplierDomain(s.domain) && !s.domain.includes('amazon'),
       ),
     [allSuppliers],
   );
@@ -347,7 +364,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         setAmazonJobId(response.jobId);
         setAmazonError(null);
       } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Failed to start Amazon processing';
+        const errorMessage = getErrorMessage(error, 'Failed to start Amazon processing');
         console.error('Amazon processing error:', errorMessage);
         
         // Retry on rate limit or temporary errors (up to 3 times)
@@ -365,11 +382,11 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     const startPrioritySuppliers = async (retryCount = 0) => {
       try {
         console.log(`🏭 Starting McMaster-Carr & Uline${retryCount > 0 ? ` (retry ${retryCount})` : ''}...`);
-        const response = await jobsApi.startJob(['mcmaster.com', 'uline.com'], 'priority');
+        const response = await jobsApi.startJob(PRIORITY_SUPPLIER_SCAN_DOMAINS, 'priority');
         setPriorityJobId(response.jobId);
         setPriorityError(null);
       } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Failed to start McMaster-Carr & Uline';
+        const errorMessage = getErrorMessage(error, 'Failed to start McMaster-Carr & Uline');
         console.error('Priority suppliers error:', errorMessage);
         
         // Retry on rate limit (up to 3 times)
@@ -427,7 +444,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       setDiscoveryProgress('');
     } catch (err: unknown) {
       console.error('Discovery error:', err);
-      const message = err instanceof Error ? err.message : 'Failed to discover suppliers';
+      const message = getErrorMessage(err, 'Failed to discover suppliers');
       setDiscoverError(message);
       // Still mark as discovered so the grid shows (with priority suppliers at minimum)
       setHasDiscovered(true);
@@ -436,7 +453,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     } finally {
       setIsDiscovering(false);
     }
-  }, []);
+  }, [getErrorMessage]);
 
   // 2. START SUPPLIER DISCOVERY (start immediately for faster supplier identification)
   // Uses ref to prevent infinite loop and module-level caching for StrictMode
@@ -655,9 +672,9 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   // Scan selected suppliers
   const handleScanSuppliers = useCallback(async () => {
     // Filter to only non-Amazon, non-priority enabled suppliers
-    const domainsToScan = Array.from(enabledSuppliers).filter(
-      d => !d.includes('amazon') && !PRIORITY_SUPPLIER_DOMAINS.has(d)
-    );
+    const domainsToScan = Array.from(
+      new Set(Array.from(enabledSuppliers).map((domain) => canonicalizePrioritySupplierDomain(domain))),
+    ).filter((domain) => !domain.includes('amazon') && !isPrioritySupplierDomain(domain));
     
     if (domainsToScan.length === 0) {
       return; // Nothing additional to scan
@@ -684,12 +701,13 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   }, [shouldAutoStartOtherImport, handleScanSuppliers]);
 
   const handleToggleSupplier = useCallback((domain: string) => {
+    const normalizedDomain = canonicalizePrioritySupplierDomain(domain);
     setEnabledSuppliers(prev => {
       const next = new Set(prev);
-      if (next.has(domain)) {
-        next.delete(domain);
+      if (next.has(normalizedDomain)) {
+        next.delete(normalizedDomain);
       } else {
-        next.add(domain);
+        next.add(normalizedDomain);
       }
       return next;
     });
@@ -1189,10 +1207,12 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
               <Icons.AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0" />
               <div>
                 <span className="font-medium text-amber-700">
-                  Could not fully discover suppliers
+                  {discoverError === SESSION_EXPIRED_MESSAGE ? SESSION_EXPIRED_MESSAGE : 'Could not fully discover suppliers'}
                 </span>
                 <p className="text-sm text-amber-600 mt-1">
-                  Showing available suppliers. You can still select and import from the list below.
+                  {discoverError === SESSION_EXPIRED_MESSAGE
+                    ? 'Please sign in again to continue importing suppliers.'
+                    : 'Showing available suppliers. You can still select and import from the list below.'}
                 </p>
               </div>
             </div>
