@@ -868,6 +868,20 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         </div>
       )}
 
+      <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
+            <Icons.Clock className="w-4 h-4 text-blue-700" />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-blue-900">Continue anytime</p>
+            <p className="text-sm text-blue-800 mt-1">
+              Email import keeps running in the background after you move to the next step. We’ll keep adding items as scans finish.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Lean Wisdom - Always visible */}
       <div>
         <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-5">

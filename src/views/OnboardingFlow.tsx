@@ -603,7 +603,12 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
           </div>
 
           {/* Right: Primary CTA */}
-          <div className="min-w-[7.5rem] flex justify-end">
+          <div className="min-w-[7.5rem] flex flex-col items-end gap-2">
+            {currentStep === 'email' && (
+              <p className="max-w-[18rem] text-right text-xs text-arda-text-muted">
+                Continuing won’t stop email scanning. Import keeps running in the background.
+              </p>
+            )}
             {showFooterContinue && (
               <button
                 type="button"
