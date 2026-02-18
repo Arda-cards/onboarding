@@ -17,8 +17,8 @@ vi.mock('../BarcodeScanStep', () => ({
   BarcodeScanStep: () => <div>barcode-step</div>,
 }));
 
-vi.mock('../UrlScrapeStep', () => ({
-  UrlScrapeStep: () => <div>url-step</div>,
+vi.mock('../IntegrationsStep', () => ({
+  IntegrationsStep: () => <div>integrations-step</div>,
 }));
 
 vi.mock('../PhotoCaptureStep', () => ({
@@ -45,7 +45,7 @@ describe('OnboardingFlow email continuation reminder', () => {
     ).toBeInTheDocument();
   });
 
-  it('hides the reminder after advancing to URL step', async () => {
+  it('hides the reminder after advancing to Integrations step', async () => {
     const user = userEvent.setup();
 
     render(<OnboardingFlow onComplete={vi.fn()} onSkip={vi.fn()} />);
@@ -53,7 +53,7 @@ describe('OnboardingFlow email continuation reminder', () => {
     await user.click(screen.getByRole('button', { name: 'enable-email-continue' }));
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    expect(screen.getByText('url-step')).toBeInTheDocument();
+    expect(screen.getByText('integrations-step')).toBeInTheDocument();
     expect(screen.getAllByText('Step 2 of 6').length).toBeGreaterThan(0);
     expect(
       screen.queryByText('Continuing won’t stop email scanning. Import keeps running in the background.'),

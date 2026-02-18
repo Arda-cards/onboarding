@@ -5,10 +5,9 @@ import { buildVelocityProfiles, normalizeItemName } from '../utils/inventoryLogi
 import { SupplierSetup, EmailScanState } from './SupplierSetup';
 import { BarcodeScanStep } from './BarcodeScanStep';
 import { PhotoCaptureStep } from './PhotoCaptureStep';
-import { CSVUploadStep, CSVItem } from './CSVUploadStep';
-import { MasterListStep, MasterListItem } from './MasterListStep';
-import { UrlScrapeStep } from './UrlScrapeStep';
-import { UrlScrapedItem } from '../services/api';
+import { CSVUploadStep, CSVItem, CSVFooterState } from './CSVUploadStep';
+import { MasterListStep, MasterListItem, MasterListFooterState } from './MasterListStep';
+import { IntegrationsStep } from './IntegrationsStep';
 
 // Simple email item for onboarding (before full InventoryItem processing)
 interface EmailItem {
@@ -26,7 +25,7 @@ interface EmailItem {
 }
 
 // Onboarding step definitions
-export type OnboardingStep = 'email' | 'urls' | 'barcode' | 'photo' | 'csv' | 'masterlist';
+export type OnboardingStep = 'email' | 'integrations' | 'barcode' | 'photo' | 'csv' | 'masterlist';
 
 interface StepConfig {
   id: OnboardingStep;
@@ -45,11 +44,11 @@ const ONBOARDING_STEPS: StepConfig[] = [
     icon: 'Mail',
   },
   {
-    id: 'urls',
+    id: 'integrations',
     number: 2,
-    title: 'URLs',
-    description: 'Paste product links to scrape',
-    icon: 'Link',
+    title: 'Integrations',
+    description: 'Connect your systems and data sources',
+    icon: 'Building2',
   },
   {
     id: 'barcode',
@@ -194,6 +193,8 @@ interface BackgroundEmailProgress {
   currentTask?: string;
 }
 
+const noop = () => {};
+
 export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   onComplete,
   onSkip,
@@ -205,10 +206,25 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   // Data from each step
   const [emailOrders, setEmailOrders] = useState<ExtractedOrder[]>([]);
   const emailItems = useMemo(() => buildEmailItemsFromOrders(emailOrders), [emailOrders]);
-  const [urlItems, setUrlItems] = useState<UrlScrapedItem[]>([]);
   const [scannedBarcodes, setScannedBarcodes] = useState<ScannedBarcode[]>([]);
   const [capturedPhotos, setCapturedPhotos] = useState<CapturedPhoto[]>([]);
   const [csvItems, setCsvItems] = useState<CSVItem[]>([]);
+  const [urlItems] = useState([]);
+  const [csvFooterState, setCsvFooterState] = useState<CSVFooterState>({
+    approvedCount: 0,
+    canContinue: false,
+    onSkip: noop,
+    onContinue: noop,
+  });
+  const [masterListFooterState, setMasterListFooterState] = useState<MasterListFooterState>({
+    selectedCount: 0,
+    syncedCount: 0,
+    canSyncSelected: false,
+    canComplete: false,
+    isSyncing: false,
+    onSyncSelected: noop,
+    onComplete: noop,
+  });
   
   // Background email scanning progress
   const [emailProgress, setEmailProgress] = useState<BackgroundEmailProgress | null>(null);
@@ -230,8 +246,8 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   );
 
   const totalItems = useMemo(
-    () => emailItems.length + urlItems.length + scannedBarcodes.length + capturedPhotoCount + csvItems.length,
-    [emailItems.length, urlItems.length, scannedBarcodes.length, capturedPhotoCount, csvItems.length],
+    () => emailItems.length + scannedBarcodes.length + capturedPhotoCount + csvItems.length,
+    [emailItems.length, scannedBarcodes.length, capturedPhotoCount, csvItems.length],
   );
 
   const { currentStepIndex, currentStepConfig } = useMemo(() => {
@@ -302,17 +318,6 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
     setCsvItems(approvedItems);
     handleStepComplete('csv');
   }, [handleStepComplete]);
-
-  const handleUrlItemsImport = useCallback((items: UrlScrapedItem[]) => {
-    setUrlItems(prev => {
-      const merged = new Map<string, UrlScrapedItem>();
-      [...prev, ...items].forEach(item => {
-        const key = `${item.sourceUrl}::${item.productUrl || ''}`;
-        merged.set(key, item);
-      });
-      return Array.from(merged.values());
-    });
-  }, []);
 
   // Handle master list completion
   const handleMasterListComplete = useCallback((items: MasterListItem[]) => {
@@ -485,11 +490,8 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
         />
       </div>
 
-      {currentStep === 'urls' && (
-        <UrlScrapeStep
-          importedItems={urlItems}
-          onImportItems={handleUrlItemsImport}
-        />
+      {currentStep === 'integrations' && (
+        <IntegrationsStep />
       )}
       
       {currentStep === 'barcode' && (
@@ -498,7 +500,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
           scannedBarcodes={scannedBarcodes}
           onBarcodeScanned={handleBarcodeScanned}
           onComplete={() => handleStepComplete('barcode')}
-          onBack={() => setCurrentStep('urls')}
+          onBack={() => setCurrentStep('integrations')}
         />
       )}
       
@@ -516,6 +518,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
         <CSVUploadStep
           onComplete={handleCSVComplete}
           onBack={() => setCurrentStep('photo')}
+          onFooterStateChange={setCsvFooterState}
         />
       )}
 
@@ -528,6 +531,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
           csvItems={csvItems}
           onComplete={handleMasterListComplete}
           onBack={() => setCurrentStep('csv')}
+          onFooterStateChange={setMasterListFooterState}
         />
       )}
     </>
@@ -563,13 +567,6 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
                 <span className="inline-flex items-center gap-1">
                   <Icons.Mail className="w-3 h-3" />
                   {emailItems.length} email
-                </span>
-              )}
-              {urlItems.length > 0 && (
-                <span className="inline-flex items-center gap-1">
-                  <Icons.Link className="w-3 h-3" />
-                  {urlItems.length} URL
-                  {urlItems.length === 1 ? '' : 's'}
                 </span>
               )}
               {scannedBarcodes.length > 0 && (
@@ -613,6 +610,62 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
               <p className="max-w-[18rem] text-right text-xs text-arda-text-muted">
                 Continuing won’t stop email scanning. Import keeps running in the background.
               </p>
+            )}
+            {currentStep === 'csv' && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={csvFooterState.onSkip === noop ? () => handleCSVComplete([]) : csvFooterState.onSkip}
+                  className="btn-arda-outline"
+                >
+                  Skip CSV
+                </button>
+                <button
+                  type="button"
+                  onClick={csvFooterState.onContinue}
+                  disabled={!csvFooterState.canContinue}
+                  className={[
+                    'flex items-center gap-2 px-4 py-2 rounded-arda font-semibold text-sm transition-colors',
+                    csvFooterState.canContinue
+                      ? 'bg-arda-accent text-white hover:bg-arda-accent-hover'
+                      : 'bg-arda-border text-arda-text-muted cursor-not-allowed',
+                  ].join(' ')}
+                >
+                  Continue
+                  <Icons.ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+            {currentStep === 'masterlist' && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={masterListFooterState.onSyncSelected}
+                  disabled={!masterListFooterState.canSyncSelected}
+                  className="btn-arda-outline text-sm py-1.5 flex items-center gap-2 disabled:opacity-50"
+                >
+                  {masterListFooterState.isSyncing ? (
+                    <Icons.Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Icons.Upload className="w-4 h-4" />
+                  )}
+                  Sync Selected ({masterListFooterState.selectedCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={masterListFooterState.onComplete}
+                  disabled={!masterListFooterState.canComplete}
+                  className={[
+                    'flex items-center gap-2 px-4 py-2 rounded-arda font-semibold text-sm transition-colors',
+                    masterListFooterState.canComplete
+                      ? 'bg-arda-accent text-white hover:bg-arda-accent-hover'
+                      : 'bg-arda-border text-arda-text-muted cursor-not-allowed',
+                  ].join(' ')}
+                >
+                  <Icons.ArrowRight className="w-4 h-4" />
+                  Complete setup ({masterListFooterState.syncedCount} synced)
+                </button>
+              </div>
             )}
             {showFooterContinue && (
               <button
