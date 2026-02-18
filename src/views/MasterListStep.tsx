@@ -21,6 +21,7 @@ interface EmailItem {
 export interface MasterListItem {
   id: string;
   source: 'email' | 'url' | 'barcode' | 'photo' | 'csv';
+  orderMethod: OrderMethod;
   name: string;
   description?: string;
   supplier?: string;
@@ -38,6 +39,24 @@ export interface MasterListItem {
   needsAttention: boolean;
   validationErrors?: string[];
 }
+
+export type OrderMethod = 'online' | 'purchase_order' | 'production' | 'shopping' | 'email';
+
+const ORDER_METHOD_OPTIONS: Array<{ value: OrderMethod; label: string }> = [
+  { value: 'online', label: 'Online' },
+  { value: 'purchase_order', label: 'Purchase Order' },
+  { value: 'production', label: 'Production' },
+  { value: 'shopping', label: 'Shopping' },
+  { value: 'email', label: 'Email' },
+];
+
+const DEFAULT_ORDER_METHOD_BY_SOURCE: Record<MasterListItem['source'], OrderMethod> = {
+  email: 'online',
+  url: 'online',
+  barcode: 'shopping',
+  photo: 'production',
+  csv: 'purchase_order',
+};
 
 interface MasterListStepProps {
   emailItems: EmailItem[];
@@ -230,6 +249,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
       items.push({
         id: item.id,
         source: 'email',
+        orderMethod: DEFAULT_ORDER_METHOD_BY_SOURCE.email,
         name: item.name,
         supplier: item.supplier,
         location: item.location,
@@ -247,6 +267,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
       items.push({
         id: `url-${index}-${item.sourceUrl}`,
         source: 'url',
+        orderMethod: DEFAULT_ORDER_METHOD_BY_SOURCE.url,
         name: item.itemName || 'Unknown item',
         description: item.description,
         supplier: item.supplier,
@@ -265,6 +286,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
         items.push({
           id: `barcode-${barcode.id}`,
           source: 'barcode',
+          orderMethod: DEFAULT_ORDER_METHOD_BY_SOURCE.barcode,
           name: barcode.productName || `Unknown (${barcode.barcode})`,
           barcode: barcode.barcode,
           imageUrl: barcode.imageUrl,
@@ -277,6 +299,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
       items.push({
         id: `photo-${photo.id}`,
         source: 'photo',
+        orderMethod: DEFAULT_ORDER_METHOD_BY_SOURCE.photo,
         name: photo.suggestedName || 'Captured Item (analyzing...)',
         supplier: photo.suggestedSupplier,
         imageUrl: photo.imageData,
@@ -288,6 +311,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
       items.push({
         id: csvItem.id,
         source: 'csv',
+        orderMethod: DEFAULT_ORDER_METHOD_BY_SOURCE.csv,
         name: csvItem.name,
         supplier: csvItem.supplier,
         location: csvItem.location,
@@ -496,6 +520,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
         body: JSON.stringify({
           name: item.name,
           primarySupplier: item.supplier || 'Unknown Supplier',
+          orderMechanism: item.orderMethod,
           sku: item.sku,
           barcode: item.barcode,
           location: item.location,
@@ -728,6 +753,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
                 <th className="px-2 py-2 text-left font-medium text-gray-600 w-24">Sync</th>
                 <th className="px-2 py-2 text-left font-medium text-gray-600 min-w-[200px]">Name</th>
                 <th className="px-2 py-2 text-left font-medium text-gray-600 min-w-[120px]">Supplier</th>
+                <th className="px-2 py-2 text-left font-medium text-gray-600 w-40">Order Method</th>
                 <th className="px-2 py-2 text-left font-medium text-gray-600 w-24">Location</th>
                 <th className="px-2 py-2 text-left font-medium text-gray-600 w-24">SKU</th>
                 <th className="px-2 py-2 text-right font-medium text-gray-600 w-16">Min</th>
@@ -835,6 +861,21 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
                         onChange={(v) => updateItem(item.id, 'supplier', v)}
                         placeholder="Supplier"
                       />
+                    </td>
+
+                    <td className="px-1 py-1">
+                      <select
+                        value={item.orderMethod}
+                        onChange={(event) => updateItem(item.id, 'orderMethod', event.target.value as OrderMethod)}
+                        className="w-full px-2 py-1 text-sm border border-arda-border rounded bg-white focus:outline-none focus:ring-1 focus:ring-arda-accent"
+                        aria-label={`Order method for ${item.name}`}
+                      >
+                        {ORDER_METHOD_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
                     </td>
 
                     <td className="px-1 py-1">

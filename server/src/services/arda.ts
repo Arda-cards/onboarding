@@ -429,6 +429,13 @@ function mapToArdaOrderMethod(mechanism?: string): ItemSupplyValue['orderMethod'
     'phone': 'PHONE',
     'web': 'WEB',
     'edi': 'EDI',
+    // Order Pulse review workflow methods
+    'online': 'WEB',
+    'purchase_order': 'EDI',
+    'purchase order': 'EDI',
+    'po': 'EDI',
+    'production': 'AUTO',
+    'shopping': 'MANUAL',
   };
   return methodMap[mechanism.toLowerCase()] || 'EMAIL';
 }
