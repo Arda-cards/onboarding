@@ -27,6 +27,7 @@ declare module 'express-session' {
     userId: string;
     ardaTenantIdOverride?: string;
     ardaAuthorOverride?: string;
+    authProvider?: 'google' | 'local';
   }
 }
 
@@ -501,9 +502,9 @@ router.post('/items', async (req: Request, res: Response) => {
       primarySupplier: itemData.primarySupplier,
       orderMechanism: itemData.orderMechanism || 'email',
       minQty: itemData.minQty || 1,
-      minQtyUnit: itemData.minQtyUnit || 'each',
+      minQtyUnit: itemData.minQtyUnit || 'EA',
       orderQty: itemData.orderQty || 1,
-      orderQtyUnit: itemData.orderQtyUnit || 'each',
+      orderQtyUnit: itemData.orderQtyUnit || 'EA',
       location: itemData.location,
       primarySupplierLink: itemData.primarySupplierLink,
       imageUrl: hostedImageUrl, // Use hosted URL instead of data URL

@@ -3,7 +3,6 @@ import { v4 as uuidv4 } from 'uuid';
 
 const ARDA_BASE_URL = process.env.ARDA_BASE_URL || 'https://prod.alpha001.io.arda.cards';
 const ARDA_API_KEY = process.env.ARDA_API_KEY;
-const ARDA_TENANT_ID = process.env.ARDA_TENANT_ID;
 
 // Cache for tenant lookups (reserved for future use)
 // const tenantCache = new Map<string, string>();
@@ -355,15 +354,8 @@ export async function getTenantByEmail(email: string): Promise<string | null> {
   return null;
 }
 
-function getConfiguredTenantId(): string | null {
-  if (ARDA_TENANT_ID && ARDA_TENANT_ID !== 'your_tenant_uuid_here') {
-    return ARDA_TENANT_ID;
-  }
-  return null;
-}
-
 // Resolve tenant using actor context:
-// 1) explicit actor tenant, 2) email->Cognito mapping, 3) env fallback for legacy non-email flows, 4) mock fallback
+// 1) explicit actor tenant, 2) email->Cognito mapping.
 async function resolveTenantId(actor: ArdaActor): Promise<string> {
   if (actor.tenantId) {
     return actor.tenantId;
@@ -381,24 +373,14 @@ async function resolveTenantId(actor: ArdaActor): Promise<string> {
     );
   }
 
-  const configuredTenantId = getConfiguredTenantId();
-  if (configuredTenantId) {
-    return configuredTenantId;
-  }
-
-  if (process.env.ARDA_MOCK_MODE === 'true') {
-    return 'mock-tenant-id';
-  }
-
   throw new Error(
-    'Unable to resolve tenant ID: no authenticated email mapping and ARDA_TENANT_ID is not configured.'
+    'Unable to resolve tenant ID: authenticated email mapping or explicit actor tenantId is required.'
   );
 }
 
 // Check if mock mode is enabled
 export function isMockMode(): boolean {
-  return process.env.ARDA_MOCK_MODE === 'true' || 
-         (!ARDA_API_KEY || !ARDA_TENANT_ID || ARDA_TENANT_ID === 'your_tenant_uuid_here');
+  return process.env.ARDA_MOCK_MODE === 'true' || !ARDA_API_KEY;
 }
 
 // Map color string to Arda ItemColor enum
@@ -440,6 +422,16 @@ function mapToArdaOrderMethod(mechanism?: string): ItemSupplyValue['orderMethod'
   return methodMap[mechanism.toLowerCase()] || 'EMAIL';
 }
 
+function normalizeUnit(unit?: string): string {
+  const raw = unit?.trim();
+  if (!raw) return 'EA';
+  const normalized = raw.toLowerCase();
+  if (['each', 'ea', 'unit', 'units', 'piece', 'pieces', 'pcs'].includes(normalized)) {
+    return 'EA';
+  }
+  return raw.toUpperCase();
+}
+
 // Create an item in Arda's Item Data Authority
 // Maps our simplified ItemInput to Arda's Item.Entity schema
 export async function createItem(
@@ -462,7 +454,7 @@ export async function createItem(
   if (item.minQty) {
     ardaItem.minQuantity = {
       amount: item.minQty,
-      unit: item.minQtyUnit || 'each',
+      unit: normalizeUnit(item.minQtyUnit),
     };
   }
 
@@ -485,7 +477,7 @@ export async function createItem(
   if (item.orderQty) {
     ardaItem.primarySupply.orderQuantity = {
       amount: item.orderQty,
-      unit: item.orderQtyUnit || item.minQtyUnit || 'each',
+      unit: normalizeUnit(item.orderQtyUnit || item.minQtyUnit),
     };
   }
 
@@ -624,5 +616,5 @@ export const ardaService = {
   isMockMode,
   createItemFromVelocity,
   syncVelocityToArda,
-  isConfigured: () => Boolean(ARDA_API_KEY && ARDA_TENANT_ID && ARDA_TENANT_ID !== 'your_tenant_uuid_here'),
+  isConfigured: () => Boolean(ARDA_API_KEY),
 };
