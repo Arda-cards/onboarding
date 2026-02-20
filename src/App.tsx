@@ -3,7 +3,14 @@ import { LoginScreen } from './views/LoginScreen';
 import { OnboardingFlow } from './views/OnboardingFlow';
 import { MobileScanner } from './views/MobileScanner';
 import { GoogleUserProfile } from './types';
-import { authApi, SESSION_EXPIRED_EVENT } from './services/api';
+import {
+  ardaApi,
+  ArdaSyncedTenantContext,
+  authApi,
+  buildArdaOpenUrl,
+  getLastSuccessfulSyncTenant,
+  SESSION_EXPIRED_EVENT,
+} from './services/api';
 import { Icons } from './components/Icons';
 
 export default function App() {
@@ -14,6 +21,17 @@ export default function App() {
   // Track if user has completed onboarding
   const [hasCompletedOnboarding, setHasCompletedOnboarding] = useState(false);
   const [importedItemCount, setImportedItemCount] = useState(0);
+  const [syncedTenant, setSyncedTenant] = useState<ArdaSyncedTenantContext | null>(null);
+
+  const loadSyncedTenant = async () => {
+    try {
+      const status = await ardaApi.getSyncStatus();
+      setSyncedTenant(getLastSuccessfulSyncTenant(status));
+    } catch {
+      // Keep completion UX resilient when sync-status can't be fetched.
+      setSyncedTenant(null);
+    }
+  };
 
   useEffect(() => {
     const handleSessionExpired = () => {
@@ -28,6 +46,14 @@ export default function App() {
       window.removeEventListener(SESSION_EXPIRED_EVENT, handleSessionExpired);
     };
   }, []);
+
+  useEffect(() => {
+    if (!userProfile) {
+      setSyncedTenant(null);
+      return;
+    }
+    void loadSyncedTenant();
+  }, [userProfile?.id]);
 
   // Check auth on mount
   useEffect(() => {
@@ -86,6 +112,7 @@ export default function App() {
     setImportedItemCount(items.length);
     setHasCompletedOnboarding(true);
     localStorage.setItem('orderPulse_onboardingComplete', 'true');
+    void loadSyncedTenant();
   };
 
   const handleStartOver = () => {
@@ -95,7 +122,8 @@ export default function App() {
   };
 
   const handleOpenArda = () => {
-    window.open('https://live.app.arda.cards', '_blank');
+    const targetUrl = buildArdaOpenUrl(syncedTenant?.tenantId);
+    window.open(targetUrl, '_blank', 'noopener,noreferrer');
   };
 
   // Check for mobile scanner routes (no auth required for scanning)
@@ -117,7 +145,24 @@ export default function App() {
   }
   
   if (!userProfile) {
-    return <LoginScreen />;
+    return (
+      <LoginScreen
+        onLoginSuccess={(user) =>
+          {
+            setUserProfile({
+              id: user.id,
+              email: user.email,
+              name: user.name,
+              picture: user.picture_url,
+            });
+            const completed = localStorage.getItem('orderPulse_onboardingComplete');
+            if (completed === 'true') {
+              setHasCompletedOnboarding(true);
+            }
+          }
+        }
+      />
+    );
   }
 
   // Show completion screen if onboarding is done
@@ -162,6 +207,19 @@ export default function App() {
                 ? `You've successfully imported ${importedItemCount} items to Arda.`
                 : "Your inventory setup is complete."}
             </p>
+            <div className="mb-6 rounded-lg border border-gray-200 bg-white p-4 text-left">
+              <p className="text-xs uppercase tracking-wide text-gray-500 mb-1">Synced tenant</p>
+              {syncedTenant ? (
+                <>
+                  <p className="font-mono text-sm text-gray-900 break-all">{syncedTenant.tenantId}</p>
+                  {syncedTenant.email && (
+                    <p className="text-xs text-gray-500 mt-1">Synced as {syncedTenant.email}</p>
+                  )}
+                </>
+              ) : (
+                <p className="text-xs text-gray-500">Opening Arda home (no synced tenant detected).</p>
+              )}
+            </div>
             <div className="flex flex-col gap-3">
               <button
                 onClick={handleOpenArda}

@@ -1,8 +1,9 @@
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react';
 import { Icons } from '../components/Icons';
-import { API_BASE_URL, UrlScrapedItem } from '../services/api';
+import { API_BASE_URL, UrlScrapedItem, ardaApi, ArdaTenantResolutionDetails, isApiRequestError } from '../services/api';
 import { ScannedBarcode, CapturedPhoto } from './OnboardingFlow';
 import { CSVItem } from './CSVUploadStep';
+import { exportItemsToCSV } from '../utils/exportUtils';
 
 interface EmailItem {
   id: string;
@@ -505,6 +506,72 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
     }
   }, []);
 
+  const resolveTenantForSync = useCallback(async (details?: ArdaTenantResolutionDetails): Promise<boolean> => {
+    const suggested = details?.suggestedTenant;
+    if (suggested && details?.canUseSuggestedTenant) {
+      const useSuggestion = window.confirm(
+        `No tenant was mapped to your login email. Use suggested tenant ${suggested.tenantId} from ${suggested.matchedEmail}?`
+      );
+      if (useSuggestion) {
+        const resolution = await ardaApi.resolveTenant('use_suggested');
+        return resolution.success;
+      }
+    }
+
+    if (details?.canCreateTenant) {
+      const createNew = window.confirm('No tenant is mapped for this account. Create a new tenant now?');
+      if (createNew) {
+        const resolution = await ardaApi.resolveTenant('create_new');
+        return resolution.success;
+      }
+    }
+
+    return false;
+  }, []);
+
+  const exportMasterListItemsFallback = useCallback((itemsToExport: MasterListItem[]) => {
+    exportItemsToCSV(
+      itemsToExport.map((item) => ({
+        source: item.source,
+        name: item.name,
+        supplier: item.supplier,
+        description: item.description,
+        location: item.location,
+        orderMethod: item.orderMethod,
+        minQty: item.minQty,
+        orderQty: item.orderQty,
+        unitPrice: item.unitPrice,
+        sku: item.sku,
+        barcode: item.barcode,
+        asin: item.asin,
+        productUrl: item.productUrl,
+        imageUrl: item.imageUrl,
+        color: item.color,
+      })),
+      'master-list-tenant-unresolved'
+    );
+  }, []);
+
+  const ensureTenantForSync = useCallback(async (itemsToExportOnFailure: MasterListItem[]): Promise<boolean> => {
+    try {
+      const status = await ardaApi.getTenantStatus();
+      if (status.resolved) return true;
+
+      const resolved = await resolveTenantForSync(status.details);
+      if (resolved) return true;
+
+      exportMasterListItemsFallback(itemsToExportOnFailure);
+      return false;
+    } catch (error) {
+      if (isApiRequestError(error) && error.code === 'TENANT_REQUIRED') {
+        const resolved = await resolveTenantForSync(error.details as ArdaTenantResolutionDetails | undefined);
+        if (resolved) return true;
+      }
+      exportMasterListItemsFallback(itemsToExportOnFailure);
+      return false;
+    }
+  }, [exportMasterListItemsFallback, resolveTenantForSync]);
+
   const syncItemToArda = useCallback(async (item: MasterListItem): Promise<SyncResult> => {
     try {
       let imageUrl = item.imageUrl;
@@ -513,53 +580,73 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
         imageUrl = uploadedUrl || undefined;
       }
 
-      const response = await fetch(`${API_BASE_URL}/api/arda/items`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({
-          name: item.name,
-          primarySupplier: item.supplier || 'Unknown Supplier',
-          orderMechanism: item.orderMethod,
-          sku: item.sku,
-          barcode: item.barcode,
-          location: item.location,
-          minQty: item.minQty || 1,
-          orderQty: item.orderQty || item.minQty || 1,
-          unitPrice: item.unitPrice,
-          imageUrl,
-          primarySupplierLink: item.productUrl,
-          description: item.description,
-        }),
-      });
+      const payload = {
+        name: item.name,
+        primarySupplier: item.supplier || 'Unknown Supplier',
+        orderMechanism: item.orderMethod,
+        sku: item.sku,
+        barcode: item.barcode,
+        location: item.location,
+        minQty: item.minQty || 1,
+        orderQty: item.orderQty || item.minQty || 1,
+        unitPrice: item.unitPrice,
+        imageUrl,
+        primarySupplierLink: item.productUrl,
+        description: item.description,
+      };
 
-      let data: Record<string, unknown> = {};
-      try {
-        data = await response.json();
-      } catch {
-        data = {};
+      const attemptSync = async (): Promise<{
+        data?: { success: boolean; record?: { rId?: string } };
+        error?: unknown;
+      }> => {
+        try {
+          return { data: await ardaApi.createItem(payload) };
+        } catch (error) {
+          return { error };
+        }
+      };
+
+      let attempt = await attemptSync();
+
+      if (attempt.error && isApiRequestError(attempt.error) && attempt.error.code === 'TENANT_REQUIRED') {
+        const resolved = await resolveTenantForSync(attempt.error.details as ArdaTenantResolutionDetails | undefined);
+        if (resolved) {
+          attempt = await attemptSync();
+        } else {
+          exportMasterListItemsFallback([item]);
+          return {
+            success: false,
+            error: `${(attempt.error.details as ArdaTenantResolutionDetails | undefined)?.message || 'Tenant unresolved for sync.'} Exported item to CSV.`,
+          };
+        }
       }
 
-      const errorMessage = typeof data.error === 'string' ? data.error : '';
-      if (response.status === 409 || errorMessage.includes('already exists')) {
-        return { success: true, ardaEntityId: 'already-exists' };
-      }
+      if (attempt.error) {
+        if (isApiRequestError(attempt.error)) {
+          const resolvedErrorMessage = attempt.error.message || '';
+          if (
+            attempt.error.status === 409 ||
+            resolvedErrorMessage.toLowerCase().includes('already exists')
+          ) {
+            return { success: true, ardaEntityId: 'already-exists' };
+          }
 
-      if (!response.ok) {
+          const tenantDetails = attempt.error.details as ArdaTenantResolutionDetails | undefined;
+          return {
+            success: false,
+            error: tenantDetails?.message || resolvedErrorMessage || 'Failed to sync item',
+          };
+        }
         return {
           success: false,
-          error: errorMessage || 'Failed to sync item',
+          error: attempt.error instanceof Error ? attempt.error.message : 'Unknown sync error',
         };
       }
 
+      const data = attempt.data;
       return {
         success: true,
-        ardaEntityId: String(
-          (data.record as { rId?: string } | undefined)?.rId
-          || data.entityId
-          || data.rId
-          || '',
-        ) || undefined,
+        ardaEntityId: data?.record?.rId,
       };
     } catch (error) {
       return {
@@ -567,7 +654,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
         error: error instanceof Error ? error.message : 'Unknown sync error',
       };
     }
-  }, [uploadImage]);
+  }, [exportMasterListItemsFallback, resolveTenantForSync, uploadImage]);
 
   const syncSingleItem = useCallback(async (id: string): Promise<boolean> => {
     const item = items.find(entry => entry.id === id);
@@ -604,6 +691,18 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
 
     setIsBulkSyncing(true);
     try {
+      const selectedItems = items.filter(item => selectedIds.includes(item.id));
+      const tenantReady = await ensureTenantForSync(selectedItems);
+      if (!tenantReady) {
+        selectedIds.forEach((id) => {
+          setSyncStateById(prev => ({
+            ...prev,
+            [id]: { status: 'error', error: 'Tenant unresolved. Exported selected items to CSV.' },
+          }));
+        });
+        return;
+      }
+
       for (let i = 0; i < selectedIds.length; i += 1) {
         const id = selectedIds[i];
         await syncSingleItem(id);
@@ -614,7 +713,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
     } finally {
       setIsBulkSyncing(false);
     }
-  }, [selectedItemIds, isBulkSyncing, syncSingleItem]);
+  }, [ensureTenantForSync, isBulkSyncing, items, selectedItemIds, syncSingleItem]);
 
   const toggleItemSelected = useCallback((id: string) => {
     setSelectedItemIds(prev => {
@@ -918,7 +1017,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
                           value={item.imageUrl}
                           onChange={(v) => updateItem(item.id, 'imageUrl', v || undefined)}
                           placeholder="https://..."
-                          className="text-xs text-blue-600 truncate max-w-[120px]"
+                          className="w-full text-xs text-gray-700 truncate border border-gray-300 rounded bg-white hover:bg-white max-w-[140px]"
                         />
                       </div>
                     </td>
@@ -932,7 +1031,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
                             window.open(productHref, '_blank', 'noopener,noreferrer');
                           }}
                           disabled={!productHref}
-                          className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-blue-200 text-blue-700 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                          className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded border border-blue-700 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-blue-200 disabled:border-blue-200 disabled:text-blue-500"
                         >
                           Open product
                           <Icons.ExternalLink className="w-3 h-3" />
@@ -941,7 +1040,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
                           value={item.productUrl}
                           onChange={(v) => updateItem(item.id, 'productUrl', v || undefined)}
                           placeholder="https://..."
-                          className="text-xs text-blue-600 truncate max-w-[120px]"
+                          className="w-full text-xs text-gray-700 truncate border border-gray-300 rounded bg-white hover:bg-white max-w-[140px]"
                         />
                       </div>
                     </td>
@@ -952,7 +1051,7 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
                           type="button"
                           onClick={() => void syncSingleItem(item.id)}
                           disabled={isBulkSyncing || rowStatus === 'syncing'}
-                          className="inline-flex items-center justify-center gap-1 px-2 py-1 text-xs rounded border border-green-200 text-green-700 hover:bg-green-50 disabled:opacity-50 disabled:cursor-not-allowed w-full"
+                          className="inline-flex items-center justify-center gap-1 px-2 py-1 text-xs rounded border border-green-700 bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-green-200 disabled:border-green-200 disabled:text-green-500 w-full"
                           title={rowStatus === 'success' ? 'Resync item' : 'Sync item'}
                         >
                           {rowStatus === 'syncing' ? (
@@ -977,10 +1076,11 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
                         <button
                           type="button"
                           onClick={() => removeItem(item.id)}
-                          className="p-1 hover:bg-red-100 rounded text-gray-400 hover:text-red-600"
+                          className="inline-flex items-center justify-center gap-1 px-2 py-1 text-xs rounded border border-red-700 bg-red-600 text-white hover:bg-red-700 w-full"
                           title="Remove"
                         >
                           <Icons.Trash2 className="w-4 h-4" />
+                          Delete
                         </button>
                       </div>
                     </td>

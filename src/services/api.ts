@@ -1,6 +1,8 @@
 // API client for backend communication
 // Production defaults to same-origin so Vercel rewrites keep session cookies first-party.
 const DEFAULT_DEV_API_BASE_URL = 'http://localhost:3001';
+const DEFAULT_ARDA_APP_URL = 'https://live.app.arda.cards';
+const DEFAULT_ARDA_APP_URL_TEMPLATE = `${DEFAULT_ARDA_APP_URL}/?tenantId={tenantId}`;
 const SESSION_EXPIRED_MESSAGE = 'Session expired. Please sign in again.';
 export const SESSION_EXPIRED_EVENT = 'orderpulse:session-expired';
 
@@ -26,8 +28,30 @@ const API_BASE_URL = resolveApiBaseUrl({
   isProd: import.meta.env.PROD,
 });
 
+export function buildArdaOpenUrl(
+  tenantId: string | null | undefined,
+  options?: { appUrl?: string; appUrlTemplate?: string },
+): string {
+  const appUrl = normalizeApiBaseUrl(
+    options?.appUrl ?? (import.meta.env.VITE_ARDA_APP_URL as string | undefined) ?? DEFAULT_ARDA_APP_URL,
+  );
+  const appUrlTemplate = (
+    options?.appUrlTemplate ??
+    (import.meta.env.VITE_ARDA_APP_URL_TEMPLATE as string | undefined) ??
+    DEFAULT_ARDA_APP_URL_TEMPLATE
+  ).trim();
+
+  if (!tenantId || !appUrlTemplate.includes('{tenantId}')) {
+    return appUrl;
+  }
+
+  return appUrlTemplate.replaceAll('{tenantId}', encodeURIComponent(tenantId));
+}
+
 interface ApiError {
   error: string;
+  code?: string;
+  details?: unknown;
 }
 
 export class SessionExpiredError extends Error {
@@ -37,8 +61,26 @@ export class SessionExpiredError extends Error {
   }
 }
 
+export class ApiRequestError extends Error {
+  status: number;
+  code?: string;
+  details?: unknown;
+
+  constructor(message: string, status: number, code?: string, details?: unknown) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
 export function isSessionExpiredError(error: unknown): error is SessionExpiredError {
   return error instanceof SessionExpiredError;
+}
+
+export function isApiRequestError(error: unknown): error is ApiRequestError {
+  return error instanceof ApiRequestError;
 }
 
 let hasNotifiedSessionExpired = false;
@@ -72,7 +114,12 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
       notifySessionExpired();
       throw new SessionExpiredError();
     }
-    throw new Error(error.error || `HTTP ${response.status}`);
+    throw new ApiRequestError(
+      error.error || `HTTP ${response.status}`,
+      response.status,
+      error.code,
+      error.details
+    );
   }
 
   return response.json();
@@ -81,6 +128,24 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
 // Auth API
 export const authApi = {
   getLoginUrl: () => `${API_BASE_URL}/auth/google`,
+
+  login: (email: string, password: string) =>
+    fetchApi<{ success: boolean; user: { id: string; email: string; name: string; picture_url: string } }>(
+      '/auth/local/login',
+      {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      }
+    ),
+
+  signup: (email: string, password: string, name?: string) =>
+    fetchApi<{ success: boolean; user: { id: string; email: string; name: string; picture_url: string } }>(
+      '/auth/local/signup',
+      {
+        method: 'POST',
+        body: JSON.stringify({ email, password, name }),
+      }
+    ),
   
   getCurrentUser: () => fetchApi<{ user: { id: string; email: string; name: string; picture_url: string } }>('/auth/me'),
   
@@ -105,6 +170,9 @@ export const gmailApi = {
     fetchApi<{ messages: GmailMessage[]; total: number }>(
       `/api/gmail/messages?q=${encodeURIComponent(query || '')}&maxResults=${maxResults || 10}`
     ),
+
+  getStatus: () =>
+    fetchApi<{ connected: boolean; gmailEmail?: string | null }>('/api/gmail/status'),
   
   sendEmail: (to: string, subject: string, body: string) =>
     fetchApi<{ success: boolean; messageId: string }>('/api/gmail/send', {
@@ -483,6 +551,78 @@ export interface ArdaVelocitySyncResult {
   error?: string;
 }
 
+export interface ArdaTenantSuggestion {
+  tenantId: string;
+  matchedEmail: string;
+  domain: string;
+  matchCount: number;
+}
+
+export interface ArdaTenantResolutionDetails {
+  email?: string;
+  message?: string;
+  authorFound?: boolean;
+  tenantIdFound?: boolean;
+  canUseSuggestedTenant?: boolean;
+  canCreateTenant?: boolean;
+  suggestedTenant?: ArdaTenantSuggestion | null;
+  tenantId?: string;
+}
+
+export interface ArdaSyncStatusEvent {
+  id: string;
+  operation: string;
+  success: boolean;
+  requested: number;
+  successful: number;
+  failed: number;
+  timestamp: string;
+  error?: string;
+  email?: string;
+  tenantId?: string;
+}
+
+export interface ArdaSyncStatusResponse {
+  success: boolean;
+  message: string;
+  user: string;
+  ardaConfigured: boolean;
+  totalAttempts: number;
+  successfulAttempts: number;
+  failedAttempts: number;
+  totalRequested: number;
+  totalSuccessful: number;
+  totalFailed: number;
+  lastAttemptAt: string | null;
+  lastSuccessAt: string | null;
+  lastErrorAt: string | null;
+  recent: ArdaSyncStatusEvent[];
+  updatedAt: string;
+  timestamp: string;
+}
+
+export interface ArdaSyncedTenantContext {
+  tenantId: string;
+  email?: string;
+  timestamp: string;
+}
+
+export function getLastSuccessfulSyncTenant(
+  syncStatus: Pick<ArdaSyncStatusResponse, 'recent'> | null | undefined,
+): ArdaSyncedTenantContext | null {
+  const recentEvents = syncStatus?.recent ?? [];
+  for (const event of recentEvents) {
+    if (event.success && event.tenantId) {
+      return {
+        tenantId: event.tenantId,
+        email: event.email,
+        timestamp: event.timestamp,
+      };
+    }
+  }
+  return null;
+}
+
 export const ardaApi = {
   // Check if Arda is configured
   getStatus: () => fetchApi<{ configured: boolean; message: string }>('/api/arda/status'),
@@ -498,14 +638,32 @@ export const ardaApi = {
   bulkCreateItems: (items: ArdaItemInput[]) =>
     fetchApi<{
       success: boolean;
+      code?: string;
       error?: string;
-      details?: { email?: string; message?: string; authorFound?: boolean; tenantIdFound?: boolean };
+      details?: ArdaTenantResolutionDetails;
       summary?: { total: number; successful: number; failed: number };
       results?: Array<{ item: string; status: string; error?: string }>;
     }>('/api/arda/items/bulk', {
       method: 'POST',
       body: JSON.stringify({ items }),
     }),
+
+  resolveTenant: (action: 'create_new' | 'use_suggested') =>
+    fetchApi<{ success: boolean; tenantId?: string; author?: string; error?: string }>('/api/arda/tenant/resolve', {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    }),
+
+  getTenantStatus: () =>
+    fetchApi<{
+      success: boolean;
+      resolved: boolean;
+      code?: string;
+      error?: string;
+      details?: ArdaTenantResolutionDetails;
+    }>('/api/arda/tenant/status'),
+
+  getSyncStatus: () => fetchApi<ArdaSyncStatusResponse>('/api/arda/sync-status'),
 
   // Create Kanban card
   createKanbanCard: (card: ArdaKanbanCardInput) =>
