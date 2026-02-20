@@ -145,24 +145,7 @@ export default function App() {
   }
   
   if (!userProfile) {
-    return (
-      <LoginScreen
-        onLoginSuccess={(user) =>
-          {
-            setUserProfile({
-              id: user.id,
-              email: user.email,
-              name: user.name,
-              picture: user.picture_url,
-            });
-            const completed = localStorage.getItem('orderPulse_onboardingComplete');
-            if (completed === 'true') {
-              setHasCompletedOnboarding(true);
-            }
-          }
-        }
-      />
-    );
+    return <LoginScreen />;
   }
 
   // Show completion screen if onboarding is done

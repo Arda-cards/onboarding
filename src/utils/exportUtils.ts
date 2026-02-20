@@ -175,3 +175,69 @@ export function exportOrdersToCSV(orders: ExtractedOrder[]): void {
   const csvContent = rows.join('\n');
   downloadCSV('orders', csvContent);
 }
+
+export interface ItemExportRow {
+  source?: string;
+  name: string;
+  supplier?: string;
+  description?: string;
+  location?: string;
+  orderMethod?: string;
+  minQty?: number;
+  orderQty?: number;
+  unitPrice?: number;
+  sku?: string;
+  barcode?: string;
+  asin?: string;
+  productUrl?: string;
+  imageUrl?: string;
+  color?: string;
+}
+
+export function exportItemsToCSV(items: ItemExportRow[], filenamePrefix = 'items-export'): void {
+  const headers = [
+    'Source',
+    'Item Name',
+    'Supplier',
+    'Description',
+    'Location',
+    'Order Method',
+    'Min Qty',
+    'Order Qty',
+    'Unit Price',
+    'SKU',
+    'Barcode',
+    'ASIN',
+    'Product URL',
+    'Image URL',
+    'Color',
+  ];
+
+  const rows: string[] = [];
+  rows.push(headers.map(escapeCSVValue).join(','));
+
+  for (const item of items) {
+    const row = [
+      item.source || '',
+      item.name,
+      item.supplier || '',
+      item.description || '',
+      item.location || '',
+      item.orderMethod || '',
+      item.minQty ?? '',
+      item.orderQty ?? '',
+      item.unitPrice ?? '',
+      item.sku || '',
+      item.barcode || '',
+      item.asin || '',
+      item.productUrl || '',
+      item.imageUrl || '',
+      item.color || '',
+    ];
+    rows.push(row.map(escapeCSVValue).join(','));
+  }
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const csvContent = rows.join('\n');
+  downloadCSV(`${filenamePrefix}-${timestamp}`, csvContent);
+}
