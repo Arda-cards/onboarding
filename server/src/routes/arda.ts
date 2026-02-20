@@ -10,9 +10,14 @@ import {
   syncVelocityToArda,
   ItemVelocityProfileInput
 } from '../services/arda.js';
-import { cognitoService } from '../services/cognito.js';
+import { cognitoService, type TenantDomainSuggestion } from '../services/cognito.js';
 import { getUserEmail } from './auth.js';
 import { ensureHostedUrl, isDataUrl } from '../services/imageUpload.js';
+import {
+  getArdaSyncStatus,
+  recordArdaSyncEvent,
+  type ArdaSyncOperation,
+} from '../services/ardaSyncStatus.js';
 
 const router = Router();
 
@@ -20,18 +25,37 @@ const router = Router();
 declare module 'express-session' {
   interface SessionData {
     userId: string;
+    ardaTenantIdOverride?: string;
+    ardaAuthorOverride?: string;
   }
 }
 
-// Get user credentials from session - returns email, tenantId, and author (sub)
-// Falls back to demo user only when unauthenticated and mock mode is enabled.
-async function getUserCredentials(req: Request): Promise<{
+type TenantResolutionAction = 'create_new' | 'use_suggested';
+
+interface TenantResolutionDetails {
+  canCreateTenant: boolean;
+  suggestedTenant: TenantDomainSuggestion | null;
+}
+
+interface UserCredentials {
   email: string;
   tenantId: string | null;
   author: string | null;
   isAuthenticated: boolean;
-  autoProvisioned?: boolean;
-}> {
+  resolution: TenantResolutionDetails;
+}
+
+interface TrackArdaSyncInput {
+  operation: ArdaSyncOperation;
+  success: boolean;
+  requested?: number;
+  successful?: number;
+  failed?: number;
+  error?: string;
+}
+
+// Get user credentials from session - returns email, tenantId, and author (sub).
+async function getUserCredentials(req: Request): Promise<UserCredentials> {
   const isAuthenticated = Boolean(req.session?.userId);
   let email = '';
   
@@ -44,89 +68,91 @@ async function getUserCredentials(req: Request): Promise<{
   // Look up user in Cognito
   let cognitoUser = email ? cognitoService.getUserByEmail(email) : null;
 
-  // Authenticated user missing in Cognito cache: attempt account auto-provision in Arda.
-  if (isAuthenticated && email && !cognitoUser) {
-    const provisionedActor = await ardaService.provisionUserForEmail(email);
-    if (provisionedActor?.tenantId && provisionedActor.author) {
-      return {
-        email,
-        tenantId: provisionedActor.tenantId,
-        author: provisionedActor.author,
-        isAuthenticated,
-        autoProvisioned: true,
-      };
+  let tenantId = cognitoUser?.tenantId || req.session?.ardaTenantIdOverride || null;
+  let author = cognitoUser?.sub || req.session?.ardaAuthorOverride || null;
+
+  if (isAuthenticated && email && !tenantId) {
+    const refreshed = await cognitoService.syncUsersOnDemand('missing-tenant');
+    if (refreshed) {
+      cognitoUser = cognitoService.getUserByEmail(email);
+      tenantId = cognitoUser?.tenantId || req.session?.ardaTenantIdOverride || null;
+      author = cognitoUser?.sub || req.session?.ardaAuthorOverride || null;
     }
   }
-  
-  // Fallback only for unauthenticated demo requests in mock mode
-  if (!cognitoUser && !isAuthenticated && process.env.ARDA_MOCK_MODE === 'true') {
-    const fallbackEmail = 'kyle@arda.cards';
-    cognitoUser = cognitoService.getUserByEmail(fallbackEmail);
-    if (cognitoUser) {
-      email = fallbackEmail;
-      console.log(`🎭 Using fallback user ${fallbackEmail} for demo mode`);
-    }
-  }
+
+  const suggestedTenant = (
+    isAuthenticated && email && !tenantId
+      ? cognitoService.findTenantSuggestionForEmail(email)
+      : null
+  );
   
   return {
     email,
-    tenantId: cognitoUser?.tenantId || null,
-    author: cognitoUser?.sub || null,
+    tenantId,
+    author,
     isAuthenticated,
-    autoProvisioned: false,
+    resolution: {
+      canCreateTenant: isAuthenticated && Boolean(email),
+      suggestedTenant,
+    },
   };
 }
 
-function credentialFailureResponse(credentials: {
-  email: string;
-  tenantId: string | null;
-  author: string | null;
-  isAuthenticated: boolean;
-}) {
+function credentialFailureResponse(credentials: UserCredentials) {
   const cognitoStatus = cognitoService.getSyncStatus();
 
   if (credentials.isAuthenticated) {
+    const tenantRequired = !credentials.tenantId && !!credentials.email;
+    const canUseSuggested = Boolean(credentials.author && credentials.resolution.suggestedTenant);
+    const suggestionMessage = credentials.resolution.suggestedTenant
+      ? `A tenant was found from your company domain (${credentials.resolution.suggestedTenant.domain}) via ${credentials.resolution.suggestedTenant.matchedEmail}.`
+      : 'No same-domain tenant suggestion is available.';
+    const emailMessage = credentials.email
+      ? `No tenant mapping found for logged-in email ${credentials.email}.`
+      : 'Authenticated session has no email. Re-authenticate with Google and retry.';
+
     return {
       status: 400,
       body: {
         success: false,
-        error: 'Missing Cognito credentials for authenticated Arda sync',
+        code: tenantRequired ? 'TENANT_REQUIRED' : 'MISSING_COGNITO_CREDENTIALS',
+        error: tenantRequired
+          ? 'Tenant required for Arda sync'
+          : 'Missing Cognito credentials for authenticated Arda sync',
         details: {
           email: credentials.email,
           authorFound: !!credentials.author,
           tenantIdFound: !!credentials.tenantId,
           cognitoUsersLoaded: cognitoStatus.userCount,
-          message: credentials.email
-            ? `No Cognito mapping found for logged-in email ${credentials.email}. Ensure the user exists in Arda and run POST /api/cognito/sync.`
-            : 'Authenticated session has no email. Re-authenticate with Google and retry.',
+          canUseSuggestedTenant: canUseSuggested,
+          canCreateTenant: credentials.resolution.canCreateTenant,
+          suggestedTenant: credentials.resolution.suggestedTenant,
+          message: tenantRequired
+            ? `${emailMessage} ${suggestionMessage} Choose "Use Suggested Tenant" or "Create New Tenant".`
+            : emailMessage,
         },
       },
     };
   }
 
   return {
-    status: 400,
+    status: 401,
     body: {
       success: false,
-      error: 'Missing credentials for Arda sync',
+      error: 'Authentication required for Arda sync',
       details: {
         email: credentials.email,
         authorFound: !!credentials.author,
         tenantIdFound: !!credentials.tenantId,
         cognitoUsersLoaded: cognitoStatus.userCount,
-        message: 'Provide author credentials, configure ARDA_TENANT_ID, or enable ARDA_MOCK_MODE for demo usage.',
+        message: 'Sign in and sync to your account tenant, or export items to CSV.',
       },
     },
   };
 }
 
 function buildActor(
-  credentials: {
-    email: string;
-    tenantId: string | null;
-    author: string | null;
-    isAuthenticated: boolean;
-  },
+  credentials: UserCredentials,
   providedAuthor?: string | null
 ): { actor?: ArdaActor; error?: { status: number; body: unknown } } {
   if (providedAuthor !== undefined && providedAuthor !== null && typeof providedAuthor !== 'string') {
@@ -169,15 +195,66 @@ function buildActor(
     };
   }
 
-  const author = providedAuthor || credentials.author;
-  if (!author) {
-    return { error: credentialFailureResponse(credentials) };
+  return { error: credentialFailureResponse(credentials) };
+}
+
+function getSyncStatusUserKey(req: Request, credentials?: UserCredentials): string {
+  if (req.session?.userId) {
+    return `user:${req.session.userId}`;
+  }
+  if (credentials?.email) {
+    return `email:${credentials.email.toLowerCase()}`;
+  }
+  return 'anonymous';
+}
+
+function extractSyncErrorMessage(payload: unknown): string {
+  if (typeof payload === 'string') {
+    return payload;
   }
 
-  const actor: ArdaActor = { author };
-  if (credentials.email) actor.email = credentials.email;
-  if (credentials.tenantId) actor.tenantId = credentials.tenantId;
-  return { actor };
+  if (!payload || typeof payload !== 'object') {
+    return 'Unknown sync error';
+  }
+
+  const candidate = payload as {
+    error?: unknown;
+    code?: unknown;
+    details?: { message?: unknown };
+  };
+
+  if (typeof candidate.error === 'string' && candidate.error.trim()) {
+    return candidate.error;
+  }
+
+  if (typeof candidate.details?.message === 'string' && candidate.details.message.trim()) {
+    return candidate.details.message;
+  }
+
+  if (typeof candidate.code === 'string' && candidate.code.trim()) {
+    return candidate.code;
+  }
+
+  return 'Sync request failed';
+}
+
+async function trackArdaSync(
+  req: Request,
+  credentials: UserCredentials | undefined,
+  input: TrackArdaSyncInput
+): Promise<void> {
+  try {
+    await recordArdaSyncEvent(
+      getSyncStatusUserKey(req, credentials),
+      {
+        ...input,
+        email: credentials?.email || undefined,
+        tenantId: credentials?.tenantId || undefined,
+      }
+    );
+  } catch (error) {
+    console.warn('⚠️ Failed to record Arda sync status:', error);
+  }
 }
 
 // Check if Arda is configured
@@ -186,7 +263,7 @@ router.get('/status', (req: Request, res: Response) => {
     configured: ardaService.isConfigured(),
     message: ardaService.isConfigured()
       ? 'Arda API is configured'
-      : 'Missing ARDA_API_KEY or ARDA_TENANT_ID environment variables',
+      : 'Missing ARDA_API_KEY environment variable',
   });
 });
 
@@ -215,7 +292,7 @@ router.get('/lookup-tenant', async (req: Request, res: Response) => {
         success: true,
         email,
         tenantId,
-        message: `Found tenant ID! Add this to your .env: ARDA_TENANT_ID=${tenantId}`
+        message: `Found tenant ID for ${email}`
       });
     } else {
       res.json({
@@ -234,12 +311,160 @@ router.get('/lookup-tenant', async (req: Request, res: Response) => {
   }
 });
 
-// Create item in Arda
-router.post('/items', async (req: Request, res: Response) => {
+router.post('/tenant/resolve', async (req: Request, res: Response) => {
   try {
     const credentials = await getUserCredentials(req);
+    if (!credentials.isAuthenticated || !credentials.email) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required to resolve tenant',
+      });
+    }
+
+    const action = req.body?.action as TenantResolutionAction | undefined;
+    if (action !== 'create_new' && action !== 'use_suggested') {
+      return res.status(400).json({
+        success: false,
+        error: 'action must be one of: create_new, use_suggested',
+      });
+    }
+
+    if (credentials.tenantId && credentials.author) {
+      return res.json({
+        success: true,
+        action,
+        tenantId: credentials.tenantId,
+        author: credentials.author,
+      });
+    }
+
+    if (action === 'create_new') {
+      if (!ardaService.isConfigured()) {
+        return res.status(503).json({
+          success: false,
+          code: 'ARDA_NOT_CONFIGURED',
+          error: 'Tenant auto-provisioning is unavailable: ARDA_API_KEY is not configured.',
+        });
+      }
+
+      const provisioned = await ardaService.provisionUserForEmail(credentials.email);
+      if (!provisioned?.tenantId || !provisioned.author) {
+        return res.status(502).json({
+          success: false,
+          code: 'TENANT_PROVISION_FAILED',
+          error: 'Unable to create tenant for this email. Automatic provisioning failed; please contact support.',
+          details: {
+            email: credentials.email,
+            message: 'Server logs contain endpoint/status details under "Auto-provision failed".',
+          },
+        });
+      }
+
+      try {
+        await cognitoService.ensureUserMappingForEmail(
+          credentials.email,
+          provisioned.tenantId,
+          { role: 'User', suppressMessage: true }
+        );
+      } catch (error) {
+        console.warn(
+          `⚠️ Failed to update Cognito mapping for ${credentials.email}:`,
+          error instanceof Error ? error.message : error
+        );
+      }
+
+      req.session.ardaTenantIdOverride = provisioned.tenantId;
+      req.session.ardaAuthorOverride = provisioned.author;
+
+      return res.json({
+        success: true,
+        action,
+        tenantId: provisioned.tenantId,
+        author: provisioned.author,
+      });
+    }
+
+    const suggestion = cognitoService.findTenantSuggestionForEmail(credentials.email);
+    if (!suggestion) {
+      return res.status(404).json({
+        success: false,
+        error: 'No suggested tenant found for this email domain',
+      });
+    }
+
+    if (!credentials.author) {
+      return res.status(400).json({
+        success: false,
+        error: 'No Cognito author found for this email. Create a new tenant instead.',
+      });
+    }
+
+    req.session.ardaTenantIdOverride = suggestion.tenantId;
+    req.session.ardaAuthorOverride = credentials.author;
+
+    return res.json({
+      success: true,
+      action,
+      tenantId: suggestion.tenantId,
+      author: credentials.author,
+      suggestedTenant: suggestion,
+    });
+  } catch (error) {
+    console.error('Arda tenant resolve error:', error);
+    res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to resolve tenant',
+    });
+  }
+});
+
+router.get('/tenant/status', async (req: Request, res: Response) => {
+  try {
+    const credentials = await getUserCredentials(req);
+    if (!credentials.isAuthenticated) {
+      const error = credentialFailureResponse(credentials);
+      return res.status(error.status).json(error.body);
+    }
+
+    if (credentials.email && credentials.author && credentials.tenantId) {
+      return res.json({
+        success: true,
+        resolved: true,
+        details: {
+          email: credentials.email,
+          authorFound: true,
+          tenantIdFound: true,
+          tenantId: credentials.tenantId,
+        },
+      });
+    }
+
+    const error = credentialFailureResponse(credentials);
+    return res.status(error.status).json({
+      ...(error.body as Record<string, unknown>),
+      resolved: false,
+    });
+  } catch (error) {
+    console.error('Arda tenant status error:', error);
+    return res.status(500).json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to check tenant status',
+    });
+  }
+});
+
+// Create item in Arda
+router.post('/items', async (req: Request, res: Response) => {
+  let credentials: UserCredentials | undefined;
+  try {
+    credentials = await getUserCredentials(req);
     const actorResult = buildActor(credentials);
     if (actorResult.error) {
+      await trackArdaSync(req, credentials, {
+        operation: 'item_create',
+        success: false,
+        error: extractSyncErrorMessage(actorResult.error.body),
+      });
       return res.status(actorResult.error.status).json(actorResult.error.body);
     }
 
@@ -247,6 +472,11 @@ router.post('/items', async (req: Request, res: Response) => {
 
     // Validate required fields
     if (!itemData.name || !itemData.primarySupplier) {
+      await trackArdaSync(req, credentials, {
+        operation: 'item_create',
+        success: false,
+        error: 'Missing required fields: name and primarySupplier are required',
+      });
       return res.status(400).json({
         error: 'Missing required fields: name and primarySupplier are required',
       });
@@ -282,9 +512,21 @@ router.post('/items', async (req: Request, res: Response) => {
     };
 
     const result = await ardaService.createItem(item, actorResult.actor!);
+    await trackArdaSync(req, credentials, {
+      operation: 'item_create',
+      success: true,
+      requested: 1,
+      successful: 1,
+      failed: 0,
+    });
     res.json({ success: true, record: result });
   } catch (error) {
     console.error('Arda create item error:', error);
+    await trackArdaSync(req, credentials, {
+      operation: 'item_create',
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to create item in Arda',
+    });
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Failed to create item in Arda',
     });
@@ -293,10 +535,16 @@ router.post('/items', async (req: Request, res: Response) => {
 
 // Create Kanban card in Arda
 router.post('/kanban-cards', async (req: Request, res: Response) => {
+  let credentials: UserCredentials | undefined;
   try {
-    const credentials = await getUserCredentials(req);
+    credentials = await getUserCredentials(req);
     const actorResult = buildActor(credentials);
     if (actorResult.error) {
+      await trackArdaSync(req, credentials, {
+        operation: 'kanban_card_create',
+        success: false,
+        error: extractSyncErrorMessage(actorResult.error.body),
+      });
       return res.status(actorResult.error.status).json(actorResult.error.body);
     }
 
@@ -304,15 +552,32 @@ router.post('/kanban-cards', async (req: Request, res: Response) => {
 
     // Validate required fields
     if (!cardData.item || !cardData.quantity) {
+      await trackArdaSync(req, credentials, {
+        operation: 'kanban_card_create',
+        success: false,
+        error: 'Missing required fields: item and quantity are required',
+      });
       return res.status(400).json({
         error: 'Missing required fields: item and quantity are required',
       });
     }
 
     const result = await ardaService.createKanbanCard(cardData, actorResult.actor!);
+    await trackArdaSync(req, credentials, {
+      operation: 'kanban_card_create',
+      success: true,
+      requested: 1,
+      successful: 1,
+      failed: 0,
+    });
     res.json({ success: true, record: result });
   } catch (error) {
     console.error('Arda create kanban card error:', error);
+    await trackArdaSync(req, credentials, {
+      operation: 'kanban_card_create',
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to create Kanban card in Arda',
+    });
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Failed to create Kanban card in Arda',
     });
@@ -321,10 +586,16 @@ router.post('/kanban-cards', async (req: Request, res: Response) => {
 
 // Create order in Arda
 router.post('/orders', async (req: Request, res: Response) => {
+  let credentials: UserCredentials | undefined;
   try {
-    const credentials = await getUserCredentials(req);
+    credentials = await getUserCredentials(req);
     const actorResult = buildActor(credentials);
     if (actorResult.error) {
+      await trackArdaSync(req, credentials, {
+        operation: 'order_create',
+        success: false,
+        error: extractSyncErrorMessage(actorResult.error.body),
+      });
       return res.status(actorResult.error.status).json(actorResult.error.body);
     }
 
@@ -349,27 +620,50 @@ router.post('/orders', async (req: Request, res: Response) => {
     }
 
     const result = await ardaService.createOrder(order, actorResult.actor!);
+    await trackArdaSync(req, credentials, {
+      operation: 'order_create',
+      success: true,
+      requested: 1,
+      successful: 1,
+      failed: 0,
+    });
     res.json({ success: true, record: result });
   } catch (error) {
     console.error('Arda create order error:', error);
+    await trackArdaSync(req, credentials, {
+      operation: 'order_create',
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to create order in Arda',
+    });
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Failed to create order in Arda',
     });
   }
 });
 
-// Bulk sync items to Arda (no auth required for demo)
+// Bulk sync items to Arda
 router.post('/items/bulk', async (req: Request, res: Response) => {
+  let credentials: UserCredentials | undefined;
   try {
-    const credentials = await getUserCredentials(req);
+    credentials = await getUserCredentials(req);
     const actorResult = buildActor(credentials);
     if (actorResult.error) {
+      await trackArdaSync(req, credentials, {
+        operation: 'item_bulk_create',
+        success: false,
+        error: extractSyncErrorMessage(actorResult.error.body),
+      });
       return res.status(actorResult.error.status).json(actorResult.error.body);
     }
 
     const items: Array<Omit<ItemInput, 'externalGuid'>> = req.body.items;
 
     if (!Array.isArray(items) || items.length === 0) {
+      await trackArdaSync(req, credentials, {
+        operation: 'item_bulk_create',
+        success: false,
+        error: 'items array is required',
+      });
       return res.status(400).json({ 
         success: false,
         error: 'items array is required',
@@ -387,6 +681,14 @@ router.post('/items/bulk', async (req: Request, res: Response) => {
 
     const successful = results.filter((r) => r.status === 'fulfilled').length;
     const failed = results.filter((r) => r.status === 'rejected').length;
+    await trackArdaSync(req, credentials, {
+      operation: 'item_bulk_create',
+      success: failed === 0,
+      requested: items.length,
+      successful,
+      failed,
+      error: failed > 0 ? `${failed} items failed to sync` : undefined,
+    });
 
     res.json({
       success: failed === 0,
@@ -405,6 +707,11 @@ router.post('/items/bulk', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Arda bulk sync error:', error);
+    await trackArdaSync(req, credentials, {
+      operation: 'item_bulk_create',
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to bulk sync items',
+    });
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to bulk sync items',
@@ -415,12 +722,18 @@ router.post('/items/bulk', async (req: Request, res: Response) => {
 
 // Sync velocity profiles to Arda
 router.post('/sync-velocity', async (req: Request, res: Response) => {
+  let credentials: UserCredentials | undefined;
   try {
-    const credentials = await getUserCredentials(req);
+    credentials = await getUserCredentials(req);
     const { profiles, author } = req.body;
 
     // Validate request body
     if (!Array.isArray(profiles) || profiles.length === 0) {
+      await trackArdaSync(req, credentials, {
+        operation: 'velocity_sync',
+        success: false,
+        error: 'profiles array is required and must not be empty',
+      });
       return res.status(400).json({
         error: 'profiles array is required and must not be empty',
       });
@@ -428,12 +741,22 @@ router.post('/sync-velocity', async (req: Request, res: Response) => {
 
     const actorResult = buildActor(credentials, author);
     if (actorResult.error) {
+      await trackArdaSync(req, credentials, {
+        operation: 'velocity_sync',
+        success: false,
+        error: extractSyncErrorMessage(actorResult.error.body),
+      });
       return res.status(actorResult.error.status).json(actorResult.error.body);
     }
 
     // Validate each profile
     for (const profile of profiles) {
       if (!profile.displayName || !profile.supplier) {
+        await trackArdaSync(req, credentials, {
+          operation: 'velocity_sync',
+          success: false,
+          error: 'Each profile must have displayName and supplier',
+        });
         return res.status(400).json({
           error: 'Each profile must have displayName and supplier',
         });
@@ -443,10 +766,25 @@ router.post('/sync-velocity', async (req: Request, res: Response) => {
     console.log(`📤 Syncing ${profiles.length} velocity profiles to Arda for user ${credentials.email}`);
 
     const results = await syncVelocityToArda(profiles, actorResult.actor!);
+    const successful = results.filter((result) => result.success).length;
+    const failed = results.length - successful;
+    await trackArdaSync(req, credentials, {
+      operation: 'velocity_sync',
+      success: failed === 0,
+      requested: profiles.length,
+      successful,
+      failed,
+      error: failed > 0 ? `${failed} velocity profiles failed to sync` : undefined,
+    });
 
     res.json({ results });
   } catch (error) {
     console.error('Arda sync velocity error:', error);
+    await trackArdaSync(req, credentials, {
+      operation: 'velocity_sync',
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to sync velocity profiles to Arda',
+    });
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Failed to sync velocity profiles to Arda',
     });
@@ -455,10 +793,16 @@ router.post('/sync-velocity', async (req: Request, res: Response) => {
 
 // Push velocity items to Arda
 router.post('/push-velocity', async (req: Request, res: Response) => {
+  let credentials: UserCredentials | undefined;
   try {
-    const credentials = await getUserCredentials(req);
+    credentials = await getUserCredentials(req);
     const actorResult = buildActor(credentials);
     if (actorResult.error) {
+      await trackArdaSync(req, credentials, {
+        operation: 'velocity_push',
+        success: false,
+        error: extractSyncErrorMessage(actorResult.error.body),
+      });
       return res.status(actorResult.error.status).json(actorResult.error.body);
     }
 
@@ -466,6 +810,11 @@ router.post('/push-velocity', async (req: Request, res: Response) => {
 
     // Validate request body
     if (!Array.isArray(items) || items.length === 0) {
+      await trackArdaSync(req, credentials, {
+        operation: 'velocity_push',
+        success: false,
+        error: 'items array is required and must not be empty',
+      });
       return res.status(400).json({
         success: false,
         error: 'items array is required and must not be empty',
@@ -475,6 +824,11 @@ router.post('/push-velocity', async (req: Request, res: Response) => {
     // Validate each item
     for (const item of items) {
       if (!item.displayName || !item.supplier) {
+        await trackArdaSync(req, credentials, {
+          operation: 'velocity_push',
+          success: false,
+          error: 'Each item must have displayName and supplier',
+        });
         return res.status(400).json({
           success: false,
           error: 'Each item must have displayName and supplier',
@@ -489,6 +843,14 @@ router.post('/push-velocity', async (req: Request, res: Response) => {
 
     const successful = results.filter((r) => r.success).length;
     const failed = results.filter((r) => !r.success).length;
+    await trackArdaSync(req, credentials, {
+      operation: 'velocity_push',
+      success: failed === 0,
+      requested: items.length,
+      successful,
+      failed,
+      error: failed > 0 ? `${failed} velocity items failed to sync` : undefined,
+    });
 
     res.json({
       success: failed === 0,
@@ -497,6 +859,11 @@ router.post('/push-velocity', async (req: Request, res: Response) => {
     });
   } catch (error) {
     console.error('Arda push velocity error:', error);
+    await trackArdaSync(req, credentials, {
+      operation: 'velocity_push',
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to push velocity items to Arda',
+    });
     res.status(500).json({
       success: false,
       error: error instanceof Error ? error.message : 'Failed to push velocity items to Arda',
@@ -507,12 +874,18 @@ router.post('/push-velocity', async (req: Request, res: Response) => {
 
 // Sync a single item from velocity data
 router.post('/sync-item', async (req: Request, res: Response) => {
+  let credentials: UserCredentials | undefined;
   try {
-    const credentials = await getUserCredentials(req);
+    credentials = await getUserCredentials(req);
     const { author, ...profileData } = req.body;
 
     // Validate required fields
     if (!profileData.displayName || !profileData.supplier) {
+      await trackArdaSync(req, credentials, {
+        operation: 'velocity_item_sync',
+        success: false,
+        error: 'Missing required fields: displayName and supplier are required',
+      });
       return res.status(400).json({
         error: 'Missing required fields: displayName and supplier are required',
       });
@@ -520,32 +893,53 @@ router.post('/sync-item', async (req: Request, res: Response) => {
 
     const actorResult = buildActor(credentials, author);
     if (actorResult.error) {
+      await trackArdaSync(req, credentials, {
+        operation: 'velocity_item_sync',
+        success: false,
+        error: extractSyncErrorMessage(actorResult.error.body),
+      });
       return res.status(actorResult.error.status).json(actorResult.error.body);
     }
 
     console.log(`📤 Syncing item "${profileData.displayName}" to Arda for user ${credentials.email}`);
 
     const result = await createItemFromVelocity(profileData as ItemVelocityProfileInput, actorResult.actor!);
+    await trackArdaSync(req, credentials, {
+      operation: 'velocity_item_sync',
+      success: true,
+      requested: 1,
+      successful: 1,
+      failed: 0,
+    });
     res.json({ success: true, record: result });
   } catch (error) {
     console.error('Arda sync item error:', error);
+    await trackArdaSync(req, credentials, {
+      operation: 'velocity_item_sync',
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to sync item from velocity data',
+    });
     res.status(500).json({
       error: error instanceof Error ? error.message : 'Failed to sync item from velocity data',
     });
   }
 });
 
-// Get sync status (returns basic status since tracking is not yet implemented)
+// Get sync status for the current authenticated user/session.
 router.get('/sync-status', async (req: Request, res: Response) => {
   try {
     const credentials = await getUserCredentials(req);
-    
-    // Since sync status tracking is not yet implemented, return basic status
+    const status = await getArdaSyncStatus(getSyncStatusUserKey(req, credentials));
+    const hasAttempts = status.totalAttempts > 0;
+
     res.json({
       success: true,
-      message: 'Sync status tracking is not yet implemented',
+      message: hasAttempts
+        ? 'Sync status loaded'
+        : 'No Arda sync attempts have been recorded for this session yet',
       user: credentials.email,
       ardaConfigured: ardaService.isConfigured(),
+      ...status,
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
