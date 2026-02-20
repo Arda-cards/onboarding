@@ -17,7 +17,7 @@ export interface ItemSupplyValue {
   supplier: string;
   name?: string;
   sku?: string;
-  orderMethod?: 'EMAIL' | 'PHONE';
+  orderMethod?: 'EMAIL' | 'PHONE' | 'ONLINE';
   url?: string;
   orderQuantity?: QuantityValue;
   unitCost?: { value: number; currency: string };
@@ -407,7 +407,9 @@ function mapToArdaOrderMethod(mechanism?: string): ItemSupplyValue['orderMethod'
   if (normalized === 'phone' || normalized === 'call') {
     return 'PHONE';
   }
-  // Arda currently accepts EMAIL/PHONE for Item orderMethod.
+  if (['web', 'url', 'website', 'online', 'shopping'].includes(normalized)) {
+    return 'ONLINE';
+  }
   return 'EMAIL';
 }
 
