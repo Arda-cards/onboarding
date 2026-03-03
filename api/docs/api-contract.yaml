@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Onboarding API
-  version: 1.6.0
+  version: 1.7.0
   description: |
     Backend API for onboarding durable session storage and ingestion.
 
@@ -301,7 +301,7 @@ paths:
         "422":
           $ref: "#/components/responses/ValidationError"
         "429":
-          $ref: "#/components/responses/ValidationError"
+          $ref: "#/components/responses/RateLimited"
         "503":
           $ref: "#/components/responses/InternalError"
         "500":
@@ -668,6 +668,7 @@ components:
                 - AUTH_EXPIRED_TOKEN
                 - SESSION_EXPIRED
                 - INVALID_SESSION_TOKEN
+                - RATE_LIMITED
                 - VALIDATION_ERROR
                 - NOT_FOUND
                 - INTERNAL_ERROR
@@ -681,6 +682,17 @@ components:
               type: string
               format: uuid
               description: Correlation ID for log tracing. Echoed from X-Request-ID if provided.
+            details:
+              description: |
+                Optional structured details. For VALIDATION_ERROR, may contain an array of
+                field-level messages or an object with per-field diagnostics.
+                Clients should treat this field as advisory; match on `code` for control flow.
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - type: array
+                  items:
+                    type: string
 
     HealthResponse:
       type: object
@@ -1308,6 +1320,23 @@ components:
             error:
               code: INVALID_SESSION_TOKEN
               message: Invalid session token. Please reopen the link from the desktop session.
+              requestId: 550e8400-e29b-41d4-a716-446655440000
+
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: RATE_LIMITED
+              message: Photo analysis rate limit exceeded
               requestId: 550e8400-e29b-41d4-a716-446655440000
 
     InternalError:

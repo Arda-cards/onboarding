@@ -34,6 +34,7 @@ describe("API contract", () => {
       "AUTH_EXPIRED_TOKEN",
       "SESSION_EXPIRED",
       "INVALID_SESSION_TOKEN",
+      "RATE_LIMITED",
       "VALIDATION_ERROR",
       "NOT_FOUND",
       "INTERNAL_ERROR",
@@ -68,6 +69,14 @@ describe("API contract", () => {
       const requestIdSchema =
         errorSchema.properties.error.properties.requestId;
       expect(requestIdSchema.format).toBe("uuid");
+    });
+
+    it("details field is optional (not in required list)", () => {
+      const errorObj = errorSchema.properties.error;
+      // details must exist in properties (schema documents it)
+      expect(errorObj.properties.details).toBeDefined();
+      // details must NOT appear in the required array
+      expect(errorObj.required ?? []).not.toContain("details");
     });
   });
 
@@ -129,6 +138,20 @@ describe("API contract", () => {
           }
         }
       }
+    });
+  });
+
+  describe("RateLimited response component", () => {
+    it("defines a RateLimited response with Retry-After header", () => {
+      const rateLimited = contract.components.responses.RateLimited;
+      expect(rateLimited).toBeDefined();
+      expect(rateLimited.headers?.["Retry-After"]).toBeDefined();
+    });
+
+    it("RateLimited response example uses RATE_LIMITED code", () => {
+      const example =
+        contract.components.responses.RateLimited.content?.["application/json"]?.example;
+      expect(example?.error?.code).toBe("RATE_LIMITED");
     });
   });
 

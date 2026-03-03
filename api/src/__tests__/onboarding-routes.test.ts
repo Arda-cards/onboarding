@@ -397,6 +397,55 @@ describe("onboarding routes", () => {
     expect(readRes.body).toMatchObject({ error: { code: "NOT_FOUND" } });
   });
 
+  it("returns stable error shape { error.code, error.message, error.requestId } for unauthenticated requests", async () => {
+    const redis = new FakeRedis();
+    const config = makeConfig();
+    const store = new OnboardingSessionStore(redis as any, {
+      ttlSeconds: 60,
+      frontendOrigin: config.onboardingFrontendOrigin,
+    });
+
+    const accessTokenVerifier = { verify: vi.fn() };
+    const idTokenVerifier = { verify: vi.fn() };
+
+    const app = createApp({
+      auth: { accessTokenVerifier, idTokenVerifier, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
+      config,
+      kv: new FakeKv(),
+      sessionStore: store,
+      s3: {} as any,
+    });
+
+    // Each of these endpoints requires Cognito auth; hitting without headers yields 401.
+    const endpoints: Array<{ method: "get" | "post" | "patch"; path: string }> = [
+      { method: "post", path: "/api/onboarding/sessions" },
+      { method: "get",  path: "/api/onboarding/sessions/nonexistent" },
+      { method: "post", path: "/api/onboarding/complete" },
+      { method: "get",  path: "/api/onboarding/barcode/lookup?code=123" },
+      { method: "post", path: "/api/onboarding/images/upload" },
+    ];
+
+    for (const { method, path } of endpoints) {
+      const res = await (request(app)[method] as (url: string) => any)(path);
+      expect(res.status, `${method.toUpperCase()} ${path} should be 401`).toBe(401);
+      expect(
+        res.body,
+        `${method.toUpperCase()} ${path} must have stable error shape`,
+      ).toMatchObject({
+        error: {
+          code: expect.stringMatching(/^[A-Z][A-Z0-9_]+$/),
+          message: expect.any(String),
+          requestId: expect.any(String),
+        },
+      });
+      // details must not leak internal information when absent
+      if (res.body.error.details !== undefined) {
+        expect(typeof res.body.error.details === "object").toBe(true);
+      }
+    }
+  });
+
   it("uploads images server-side with stable success response", async () => {
     const redis = new FakeRedis();
     const config = makeConfig();
