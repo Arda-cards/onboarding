@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Onboarding API
-  version: 1.4.0
+  version: 1.5.0
   description: |
     Backend API for onboarding durable session storage and ingestion.
 
@@ -307,7 +307,308 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /sessions:
+    post:
+      operationId: createOnboardingSession
+      summary: Create a new onboarding session
+      description: |
+        Creates a new Redis-backed onboarding session for the authenticated user and tenant.
+        Returns the session ID plus deep-link URLs for mobile barcode and photo capture.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateSessionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /images/upload:
+    post:
+      operationId: uploadImage
+      summary: Server-side image upload to S3
+      description: |
+        Accepts a base64 data URL, validates the image, and stores it in S3.
+        Returns the public or CDN URL for the uploaded image.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImageUploadRequest"
+      responses:
+        "200":
+          description: Image uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageUploadResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /complete:
+    post:
+      operationId: completeOnboarding
+      summary: Mark onboarding as complete
+      description: |
+        Records that the authenticated user has completed onboarding.
+        Idempotent — calling multiple times is safe.
+      responses:
+        "200":
+          description: Onboarding marked complete
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                properties:
+                  ok:
+                    type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /scan-sessions/{sessionId}/barcodes:
+    get:
+      operationId: listBarcodes
+      summary: List scanned barcodes (mobile token)
+      description: |
+        Returns all barcodes recorded in this scan session.
+        Authenticated by short-lived `?token=` query parameter issued at session creation.
+        No Cognito headers are required for this endpoint.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+        - $ref: "#/components/parameters/MobileToken"
+      responses:
+        "200":
+          description: Barcode list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BarcodeListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: addBarcode
+      summary: Add a scanned barcode (mobile token)
+      description: |
+        Records a single barcode scan into the session.
+        Authenticated by short-lived `?token=` query parameter.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+        - $ref: "#/components/parameters/MobileToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddBarcodeRequest"
+      responses:
+        "200":
+          description: Barcode recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddBarcodeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /scan-sessions/{sessionId}/barcodes/{barcodeId}:
+    put:
+      operationId: updateBarcode
+      summary: Update a barcode record (mobile token)
+      description: |
+        Patches metadata on an existing barcode record in this session.
+        Authenticated by short-lived `?token=` query parameter.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+        - in: path
+          name: barcodeId
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/MobileToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBarcodeRequest"
+      responses:
+        "200":
+          description: Barcode updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddBarcodeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /photo-sessions/{sessionId}/photos:
+    get:
+      operationId: listPhotos
+      summary: List captured photos (mobile token)
+      description: |
+        Returns all photos recorded in this photo session.
+        Authenticated by short-lived `?token=` query parameter.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+        - $ref: "#/components/parameters/MobileToken"
+      responses:
+        "200":
+          description: Photo list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhotoListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: addPhoto
+      summary: Add a captured photo (mobile token)
+      description: |
+        Records a single photo into the session.
+        Authenticated by short-lived `?token=` query parameter.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+        - $ref: "#/components/parameters/MobileToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddPhotoRequest"
+      responses:
+        "200":
+          description: Photo recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddPhotoResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /photo-sessions/{sessionId}/photos/{photoId}:
+    get:
+      operationId: getPhoto
+      summary: Get a single photo (mobile token)
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+        - in: path
+          name: photoId
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/MobileToken"
+      responses:
+        "200":
+          description: Photo record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetPhotoResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /photo-sessions/{sessionId}/photos/{photoId}/metadata:
+    put:
+      operationId: updatePhotoMetadata
+      summary: Update photo metadata (mobile token)
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+        - in: path
+          name: photoId
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/MobileToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePhotoMetadataRequest"
+      responses:
+        "200":
+          description: Photo metadata updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddPhotoResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 components:
+  parameters:
+    SessionIdPath:
+      in: path
+      name: sessionId
+      required: true
+      schema:
+        type: string
+      description: Onboarding session ID (hex string).
+    MobileToken:
+      in: query
+      name: token
+      required: true
+      schema:
+        type: string
+      description: Short-lived mobile session token issued at session creation.
+
   securitySchemes:
     cognitoBearer:
       type: http
@@ -652,6 +953,198 @@ components:
             - active
             - completed
 
+    # ---------- Session Creation ----------
+
+    CreateSessionResponse:
+      type: object
+      required:
+        - sessionId
+        - mobileBarcodeUrl
+        - mobilePhotoUrl
+      properties:
+        sessionId:
+          type: string
+          description: Hex session ID used to access scan/photo endpoints.
+        mobileBarcodeUrl:
+          type: string
+          description: Deep-link URL (with token) for mobile barcode scanning.
+        mobilePhotoUrl:
+          type: string
+          description: Deep-link URL (with token) for mobile photo capture.
+
+    # ---------- Server-side Image Upload ----------
+
+    ImageUploadRequest:
+      type: object
+      required:
+        - imageData
+      additionalProperties: false
+      properties:
+        imageData:
+          type: string
+          description: Base64 data URL (data:image/...;base64,...) of the image.
+
+    ImageUploadResponse:
+      type: object
+      required:
+        - imageUrl
+      properties:
+        imageUrl:
+          type: string
+          format: uri
+          description: Public or CDN URL of the uploaded image.
+
+    # ---------- Scan Session (Mobile Token) ----------
+
+    ScannedBarcode:
+      type: object
+      required:
+        - id
+        - barcode
+        - scannedAt
+        - source
+      properties:
+        id:
+          type: string
+        barcode:
+          type: string
+        barcodeType:
+          type: string
+          nullable: true
+        scannedAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [mobile, desktop]
+        productName:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+
+    AddBarcodeRequest:
+      type: object
+      required:
+        - barcode
+      properties:
+        barcode:
+          $ref: "#/components/schemas/ScannedBarcode"
+
+    AddBarcodeResponse:
+      type: object
+      required:
+        - success
+        - barcode
+      properties:
+        success:
+          type: boolean
+        duplicate:
+          type: boolean
+        barcode:
+          $ref: "#/components/schemas/ScannedBarcode"
+
+    UpdateBarcodeRequest:
+      type: object
+      additionalProperties: true
+      description: Partial ScannedBarcode fields to merge.
+
+    BarcodeListResponse:
+      type: object
+      required:
+        - barcodes
+        - totalCount
+        - sessionCreatedAt
+      properties:
+        barcodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScannedBarcode"
+        totalCount:
+          type: integer
+        sessionCreatedAt:
+          type: string
+          format: date-time
+
+    # ---------- Photo Session (Mobile Token) ----------
+
+    CapturedPhoto:
+      type: object
+      required:
+        - id
+        - imageData
+        - capturedAt
+        - source
+      properties:
+        id:
+          type: string
+        imageData:
+          type: string
+          description: Base64 data URL of the captured image.
+        capturedAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [mobile, desktop]
+        suggestedName:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+
+    AddPhotoRequest:
+      type: object
+      required:
+        - photo
+      properties:
+        photo:
+          $ref: "#/components/schemas/CapturedPhoto"
+
+    AddPhotoResponse:
+      type: object
+      required:
+        - success
+        - photo
+      properties:
+        success:
+          type: boolean
+        photo:
+          $ref: "#/components/schemas/CapturedPhoto"
+
+    GetPhotoResponse:
+      type: object
+      required:
+        - photo
+      properties:
+        photo:
+          $ref: "#/components/schemas/CapturedPhoto"
+          nullable: true
+
+    PhotoListResponse:
+      type: object
+      required:
+        - photos
+        - totalCount
+        - sessionCreatedAt
+      properties:
+        photos:
+          type: array
+          items:
+            $ref: "#/components/schemas/CapturedPhoto"
+        totalCount:
+          type: integer
+        sessionCreatedAt:
+          type: string
+          format: date-time
+
+    UpdatePhotoMetadataRequest:
+      type: object
+      additionalProperties: true
+      description: Partial CapturedPhoto fields to merge.
+
     # ---------- Image Upload ----------
 
     ImageUploadUrlRequest:
@@ -746,6 +1239,18 @@ components:
             error:
               code: NOT_FOUND
               message: Session not found
+              requestId: 550e8400-e29b-41d4-a716-446655440000
+
+    Forbidden:
+      description: Access denied (invalid or mismatched session token)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INVALID_SESSION_TOKEN
+              message: Invalid session token. Please reopen the link from the desktop session.
               requestId: 550e8400-e29b-41d4-a716-446655440000
 
     InternalError:
