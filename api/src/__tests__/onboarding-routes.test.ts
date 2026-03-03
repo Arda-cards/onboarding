@@ -303,6 +303,100 @@ describe("onboarding routes", () => {
     });
   });
 
+  it("GET /sessions/:id returns session metadata for authenticated owner", async () => {
+    const redis = new FakeRedis();
+    const config = makeConfig();
+    const store = new OnboardingSessionStore(redis as any, {
+      ttlSeconds: 60,
+      frontendOrigin: config.onboardingFrontendOrigin,
+    });
+
+    const accessTokenVerifier = { verify: vi.fn().mockResolvedValue({ sub: "u1", token_use: "access" }) };
+    const idTokenVerifier = {
+      verify: vi.fn().mockResolvedValue({ sub: "u1", email: "u1@example.com", "custom:tenant": "t1" }),
+    };
+
+    const app = createApp({
+      auth: { accessTokenVerifier, idTokenVerifier, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
+      config,
+      kv: new FakeKv(),
+      sessionStore: store,
+      s3: {} as any,
+    });
+
+    // Create a session.
+    const createRes = await request(app)
+      .post("/api/onboarding/sessions")
+      .set("Authorization", "Bearer test-access")
+      .set("X-ID-Token", "test-id")
+      .send({});
+
+    expect(createRes.status).toBe(200);
+    const sessionId = createRes.body.sessionId as string;
+
+    // Read back session metadata.
+    const readRes = await request(app)
+      .get(`/api/onboarding/sessions/${encodeURIComponent(sessionId)}`)
+      .set("Authorization", "Bearer test-access")
+      .set("X-ID-Token", "test-id");
+
+    expect(readRes.status).toBe(200);
+    expect(readRes.body).toMatchObject({
+      sessionId,
+      tenantId: "t1",
+      userId: "u1",
+      createdAt: expect.any(String),
+      lastActivity: expect.any(String),
+      expiresAtMs: expect.any(Number),
+    });
+    // tokenHashHex must NOT be exposed.
+    expect(readRes.body.tokenHashHex).toBeUndefined();
+  });
+
+  it("GET /sessions/:id returns 404 for a session owned by a different user", async () => {
+    const redis = new FakeRedis();
+    const config = makeConfig();
+    const store = new OnboardingSessionStore(redis as any, {
+      ttlSeconds: 60,
+      frontendOrigin: config.onboardingFrontendOrigin,
+    });
+
+    // Session is created by u1/t1 but token verifier will return u2/t2.
+    const accessTokenVerifier = { verify: vi.fn().mockResolvedValue({ sub: "u1", token_use: "access" }) };
+    const idTokenVerifier = {
+      verify: vi.fn().mockResolvedValue({ sub: "u1", email: "u1@example.com", "custom:tenant": "t1" }),
+    };
+
+    const app = createApp({
+      auth: { accessTokenVerifier, idTokenVerifier, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
+      config,
+      kv: new FakeKv(),
+      sessionStore: store,
+      s3: {} as any,
+    });
+
+    const createRes = await request(app)
+      .post("/api/onboarding/sessions")
+      .set("Authorization", "Bearer test-access")
+      .set("X-ID-Token", "test-id")
+      .send({});
+
+    const sessionId = createRes.body.sessionId as string;
+
+    // Switch to a different user for the read.
+    idTokenVerifier.verify.mockResolvedValue({ sub: "u2", email: "u2@example.com", "custom:tenant": "t2" });
+
+    const readRes = await request(app)
+      .get(`/api/onboarding/sessions/${encodeURIComponent(sessionId)}`)
+      .set("Authorization", "Bearer test-access")
+      .set("X-ID-Token", "test-id");
+
+    expect(readRes.status).toBe(404);
+    expect(readRes.body).toMatchObject({ error: { code: "NOT_FOUND" } });
+  });
+
   it("uploads images server-side with stable success response", async () => {
     const redis = new FakeRedis();
     const config = makeConfig();

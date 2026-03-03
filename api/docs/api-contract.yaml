@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Onboarding API
-  version: 1.5.0
+  version: 1.6.0
   description: |
     Backend API for onboarding durable session storage and ingestion.
 
@@ -329,6 +329,30 @@ paths:
                 $ref: "#/components/schemas/CreateSessionResponse"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /sessions/{sessionId}:
+    get:
+      operationId: getOnboardingSession
+      summary: Read session metadata
+      description: |
+        Returns metadata for an existing onboarding session. Authenticated users can
+        only read sessions they own (tenantId + userId must match). Mobile token flow
+        is not supported on this endpoint — Cognito headers are required.
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+      responses:
+        "200":
+          description: Session metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionMetaResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -971,6 +995,39 @@ components:
         mobilePhotoUrl:
           type: string
           description: Deep-link URL (with token) for mobile photo capture.
+
+    # ---------- Session Meta ----------
+
+    SessionMetaResponse:
+      type: object
+      required:
+        - sessionId
+        - tenantId
+        - userId
+        - createdAt
+        - lastActivity
+        - expiresAtMs
+      properties:
+        sessionId:
+          type: string
+          description: Hex session ID.
+        tenantId:
+          type: string
+          description: Tenant owning this session.
+        userId:
+          type: string
+          description: Cognito sub of the user who created the session.
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO-8601 timestamp when the session was created.
+        lastActivity:
+          type: string
+          format: date-time
+          description: ISO-8601 timestamp of the most recent write.
+        expiresAtMs:
+          type: integer
+          description: Unix epoch milliseconds at which the session will expire.
 
     # ---------- Server-side Image Upload ----------
 

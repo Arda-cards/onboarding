@@ -192,6 +192,32 @@ export function createOnboardingRoutes(deps: {
     });
   });
 
+  router.get("/sessions/:sessionId", async (req, res: Response) => {
+    const sessionId = req.params.sessionId;
+    await requireSessionAccess({
+      req: req as MaybeAuthRequest,
+      store: deps.sessionStore,
+      sessionId,
+    });
+
+    const meta = await deps.sessionStore.getMeta(sessionId);
+    if (!meta) {
+      throw new ApiError(404, "NOT_FOUND", "Session not found");
+    }
+    deps.logger.info(
+      { sessionId, tenantId: meta.tenantId, userId: meta.userId },
+      "Onboarding session read",
+    );
+    res.json({
+      sessionId: meta.sessionId,
+      tenantId: meta.tenantId,
+      userId: meta.userId,
+      createdAt: meta.createdAt,
+      lastActivity: meta.lastActivity,
+      expiresAtMs: meta.expiresAtMs,
+    });
+  });
+
   router.post("/session/images/upload-url", async (req, res: Response) => {
     const auth = requireAuth(req as MaybeAuthRequest);
 
@@ -328,6 +354,10 @@ export function createOnboardingRoutes(deps: {
     }
 
     const result = await deps.sessionStore.addBarcode(sessionId, barcode);
+    deps.logger.info(
+      { sessionId, barcode: result.barcode.barcode, duplicate: result.duplicate },
+      "Barcode written to session",
+    );
     res.json({
       success: true,
       duplicate: result.duplicate || undefined,
@@ -382,6 +412,10 @@ export function createOnboardingRoutes(deps: {
     }
 
     const saved = await deps.sessionStore.addPhoto(sessionId, photo);
+    deps.logger.info(
+      { sessionId, photoId: saved.id, source: saved.source },
+      "Photo written to session",
+    );
     res.json({ success: true, photo: saved });
   });
 
