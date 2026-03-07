@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import request from "supertest";
 import { createApp } from "../app";
 import { OnboardingSessionStore } from "../lib/onboarding-session-store";
@@ -132,6 +132,28 @@ function tokenFromMobileUrl(url: string): string {
   return token;
 }
 
+function mockFetchOnce(params: {
+  ok: boolean;
+  status: number;
+  json: unknown;
+  headers?: Record<string, string>;
+}) {
+  const headers = new Map(
+    Object.entries(params.headers ?? {}).map(([key, value]) => [key.toLowerCase(), value]),
+  );
+
+  (globalThis.fetch as any).mockResolvedValueOnce({
+    ok: params.ok,
+    status: params.status,
+    headers: {
+      get(name: string) {
+        return headers.get(name.toLowerCase()) ?? null;
+      },
+    },
+    json: vi.fn().mockResolvedValue(params.json),
+  });
+}
+
 function makeConfig(): Config {
   return {
     cognitoUserPoolId: "us-east-1_TEST",
@@ -160,6 +182,14 @@ describe("onboarding routes", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-02-25T12:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    delete process.env.BARCODE_LOOKUP_API_KEY;
+    delete process.env.UPCITEMDB_USER_KEY;
+    delete process.env.UPCITEMDB_KEY_TYPE;
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   it("supports mobile token flow for barcode session writes/reads", async () => {
@@ -519,6 +549,203 @@ describe("onboarding routes", () => {
     expect(res.body).toMatchObject({ error: { code: "NOT_FOUND" } });
   });
 
+  it("POST /barcode/lookup returns an enriched product and logs telemetry", async () => {
+    process.env.BARCODE_LOOKUP_API_KEY = "test-key";
+    vi.stubGlobal("fetch", vi.fn());
+    mockFetchOnce({
+      ok: true,
+      status: 200,
+      json: {
+        products: [
+          {
+            title: "Sparkling Water",
+            brand: "ClearCo",
+            category: "Beverages",
+            images: ["https://example.com/water.jpg"],
+          },
+        ],
+      },
+    });
+
+    const redis = new FakeRedis();
+    const config = makeConfig();
+    const store = new OnboardingSessionStore(redis as any, {
+      ttlSeconds: 60,
+      frontendOrigin: config.onboardingFrontendOrigin,
+    });
+
+    const routeLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const accessTokenVerifier = { verify: vi.fn().mockResolvedValue({ sub: "u1", token_use: "access" }) };
+    const idTokenVerifier = {
+      verify: vi.fn().mockResolvedValue({ sub: "u1", email: "u1@example.com", "custom:tenant": "t1" }),
+    };
+
+    const app = createApp({
+      auth: { accessTokenVerifier, idTokenVerifier, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any },
+      logger: routeLogger as any,
+      config,
+      kv: new FakeKv(),
+      sessionStore: store,
+      s3: {} as any,
+    });
+
+    const res = await request(app)
+      .post("/api/onboarding/barcode/lookup")
+      .set("Authorization", "Bearer test-access")
+      .set("X-ID-Token", "test-id")
+      .send({ barcode: "012345678905" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      enriched: true,
+      resultState: "found",
+      normalizedBarcode: "012345678905",
+      product: {
+        name: "Sparkling Water",
+        source: "barcodelookup",
+      },
+    });
+    expect(routeLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: "t1",
+        userId: "u1",
+        normalizedBarcode: "012345678905",
+        resultState: "found",
+        cacheHit: false,
+        provider: "barcodelookup",
+        attempts: [{ provider: "barcodelookup", status: "found" }],
+        durationMs: expect.any(Number),
+      }),
+      "Barcode lookup completed",
+    );
+  });
+
+  it("POST /barcode/lookup returns provider_unavailable when providers fail", async () => {
+    process.env.BARCODE_LOOKUP_API_KEY = "test-key";
+    vi.stubGlobal("fetch", vi.fn());
+    mockFetchOnce({ ok: false, status: 500, json: {} });
+    mockFetchOnce({ ok: false, status: 503, json: {} });
+
+    const redis = new FakeRedis();
+    const config = makeConfig();
+    const store = new OnboardingSessionStore(redis as any, {
+      ttlSeconds: 60,
+      frontendOrigin: config.onboardingFrontendOrigin,
+    });
+
+    const accessTokenVerifier = { verify: vi.fn().mockResolvedValue({ sub: "u1", token_use: "access" }) };
+    const idTokenVerifier = {
+      verify: vi.fn().mockResolvedValue({ sub: "u1", email: "u1@example.com", "custom:tenant": "t1" }),
+    };
+
+    const app = createApp({
+      auth: { accessTokenVerifier, idTokenVerifier, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
+      config,
+      kv: new FakeKv(),
+      sessionStore: store,
+      s3: {} as any,
+    });
+
+    const res = await request(app)
+      .post("/api/onboarding/barcode/lookup")
+      .set("Authorization", "Bearer test-access")
+      .set("X-ID-Token", "test-id")
+      .send({ barcode: "012345678905" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      enriched: false,
+      resultState: "provider_unavailable",
+      normalizedBarcode: "012345678905",
+      product: null,
+    });
+  });
+
+  it("POST /barcode/lookup returns RATE_LIMITED when providers rate limit", async () => {
+    process.env.BARCODE_LOOKUP_API_KEY = "test-key";
+    vi.stubGlobal("fetch", vi.fn());
+    mockFetchOnce({
+      ok: false,
+      status: 429,
+      json: {},
+      headers: { "retry-after": "30" },
+    });
+    mockFetchOnce({
+      ok: false,
+      status: 429,
+      json: {},
+      headers: { "retry-after": "15" },
+    });
+
+    const redis = new FakeRedis();
+    const config = makeConfig();
+    const store = new OnboardingSessionStore(redis as any, {
+      ttlSeconds: 60,
+      frontendOrigin: config.onboardingFrontendOrigin,
+    });
+
+    const accessTokenVerifier = { verify: vi.fn().mockResolvedValue({ sub: "u1", token_use: "access" }) };
+    const idTokenVerifier = {
+      verify: vi.fn().mockResolvedValue({ sub: "u1", email: "u1@example.com", "custom:tenant": "t1" }),
+    };
+
+    const app = createApp({
+      auth: { accessTokenVerifier, idTokenVerifier, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
+      config,
+      kv: new FakeKv(),
+      sessionStore: store,
+      s3: {} as any,
+    });
+
+    const res = await request(app)
+      .post("/api/onboarding/barcode/lookup")
+      .set("Authorization", "Bearer test-access")
+      .set("X-ID-Token", "test-id")
+      .send({ barcode: "012345678905" });
+
+    expect(res.status).toBe(429);
+    expect(res.headers["retry-after"]).toBe("10");
+    expect(res.body).toMatchObject({
+      error: { code: "RATE_LIMITED" },
+    });
+  });
+
+  it("POST /barcode/lookup validates the request body", async () => {
+    const redis = new FakeRedis();
+    const config = makeConfig();
+    const store = new OnboardingSessionStore(redis as any, {
+      ttlSeconds: 60,
+      frontendOrigin: config.onboardingFrontendOrigin,
+    });
+
+    const accessTokenVerifier = { verify: vi.fn().mockResolvedValue({ sub: "u1", token_use: "access" }) };
+    const idTokenVerifier = {
+      verify: vi.fn().mockResolvedValue({ sub: "u1", email: "u1@example.com", "custom:tenant": "t1" }),
+    };
+
+    const app = createApp({
+      auth: { accessTokenVerifier, idTokenVerifier, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
+      config,
+      kv: new FakeKv(),
+      sessionStore: store,
+      s3: {} as any,
+    });
+
+    const res = await request(app)
+      .post("/api/onboarding/barcode/lookup")
+      .set("Authorization", "Bearer test-access")
+      .set("X-ID-Token", "test-id")
+      .send({});
+
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({
+      error: { code: "VALIDATION_ERROR", message: "barcode is required" },
+    });
+  });
+
   it("returns stable error shape { error.code, error.message, error.requestId } for unauthenticated requests", async () => {
     const redis = new FakeRedis();
     const config = makeConfig();
@@ -545,6 +772,7 @@ describe("onboarding routes", () => {
       { method: "get",  path: "/api/onboarding/sessions/nonexistent" },
       { method: "post", path: "/api/onboarding/complete" },
       { method: "get",  path: "/api/onboarding/barcode/lookup?code=123" },
+      { method: "post", path: "/api/onboarding/barcode/lookup" },
       { method: "post", path: "/api/onboarding/images/upload" },
     ];
 
