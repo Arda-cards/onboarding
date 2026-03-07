@@ -4,7 +4,12 @@ import type { KeyValueStore } from "./gmail-oauth-store";
 const CACHE_FOUND_TTL_SECONDS = 7 * 24 * 60 * 60; // 7 days
 const CACHE_NOT_FOUND_TTL_SECONDS = 60 * 60; // 1 hour
 
-export type BarcodeLookupSource = "barcodelookup" | "openfoodfacts" | "upcitemdb";
+export type BarcodeLookupSource = "barcodelookup" | "upcitemdb";
+export type BarcodeLookupResultState =
+  | "found"
+  | "not_found"
+  | "provider_unavailable"
+  | "rate_limited";
 
 export interface BarcodeProductInfo {
   name: string;
@@ -15,12 +20,27 @@ export interface BarcodeProductInfo {
   normalizedBarcode?: string;
 }
 
+export interface BarcodeLookupAttempt {
+  provider: BarcodeLookupSource;
+  status: "found" | "not_found" | "skipped" | "rate_limited" | "error";
+  retryAfterSeconds?: number;
+}
+
+export interface BarcodeLookupResolution {
+  resultState: BarcodeLookupResultState;
+  enriched: boolean;
+  normalizedBarcode: string | null;
+  product: BarcodeProductInfo | null;
+  cacheHit: boolean;
+  attempts: BarcodeLookupAttempt[];
+  retryAfterSeconds?: number;
+}
+
 type CachePayload = BarcodeProductInfo | { notFound: true };
 
 export interface BarcodeLookupOptions {
   timeoutMs?: number;
   kv?: KeyValueStore | null;
-  userAgent?: string | null;
 }
 
 function deadlineFromNow(timeoutMs: number): number {
@@ -58,6 +78,29 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+function parseRetryAfterSeconds(value: string | null | undefined): number | undefined {
+  if (!value) return undefined;
+
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric >= 0) {
+    return Math.ceil(numeric);
+  }
+
+  const atMs = Date.parse(value);
+  if (!Number.isFinite(atMs)) return undefined;
+
+  return Math.max(0, Math.ceil((atMs - Date.now()) / 1000));
+}
+
+function lowerRetryAfter(
+  current: number | undefined,
+  next: number | undefined,
+): number | undefined {
+  if (next === undefined) return current;
+  if (current === undefined) return next;
+  return Math.min(current, next);
 }
 
 function isAllDigits(s: string): boolean {
@@ -170,7 +213,11 @@ function getGtinCandidates(rawBarcode: string): string[] {
   return uniq.sort((a, b) => Number(isValidGtin(b)) - Number(isValidGtin(a)));
 }
 
-async function getCached(kv: KeyValueStore | null | undefined, code: string, maxWaitMs?: number): Promise<CachePayload | null> {
+async function getCached(
+  kv: KeyValueStore | null | undefined,
+  code: string,
+  maxWaitMs?: number,
+): Promise<CachePayload | null> {
   if (!kv) return null;
   if (Number.isFinite(maxWaitMs) && Number(maxWaitMs) <= 0) return null;
   try {
@@ -185,7 +232,13 @@ async function getCached(kv: KeyValueStore | null | undefined, code: string, max
   }
 }
 
-async function setCached(kv: KeyValueStore | null | undefined, code: string, payload: CachePayload, ttlSeconds: number, maxWaitMs?: number): Promise<void> {
+async function setCached(
+  kv: KeyValueStore | null | undefined,
+  code: string,
+  payload: CachePayload,
+  ttlSeconds: number,
+  maxWaitMs?: number,
+): Promise<void> {
   if (!kv) return;
   if (Number.isFinite(maxWaitMs) && Number(maxWaitMs) <= 0) return;
   try {
@@ -205,20 +258,44 @@ async function setCached(kv: KeyValueStore | null | undefined, code: string, pay
 }
 
 type LookupResult =
-  | { status: "found"; product: BarcodeProductInfo }
-  | { status: "not_found" }
-  | { status: "error" };
+  | { provider: BarcodeLookupSource; status: "found"; product: BarcodeProductInfo }
+  | { provider: BarcodeLookupSource; status: "not_found" }
+  | { provider: BarcodeLookupSource; status: "skipped" }
+  | { provider: BarcodeLookupSource; status: "rate_limited"; retryAfterSeconds?: number }
+  | { provider: BarcodeLookupSource; status: "error" };
+
+function responseRetryAfterSeconds(response: Response): number | undefined {
+  return parseRetryAfterSeconds(response.headers?.get("retry-after"));
+}
+
+function foundProduct(product: BarcodeProductInfo, code: string): BarcodeProductInfo {
+  return {
+    ...product,
+    normalizedBarcode: product.normalizedBarcode || code,
+  };
+}
 
 async function lookupFromBarcodeLookup(code: string, timeoutMs: number): Promise<LookupResult> {
   const apiKey = process.env.BARCODE_LOOKUP_API_KEY;
-  if (!apiKey) return { status: "not_found" };
+  if (!apiKey) {
+    return { provider: "barcodelookup", status: "skipped" };
+  }
 
   const url = `https://api.barcodelookup.com/v3/products?barcode=${encodeURIComponent(code)}&key=${encodeURIComponent(apiKey)}`;
   try {
     const response = await fetchWithTimeout(url, { headers: { Accept: "application/json" } }, timeoutMs);
     if (!response.ok) {
-      if (response.status === 404 || response.status === 400) return { status: "not_found" };
-      return { status: "error" };
+      if (response.status === 404 || response.status === 400) {
+        return { provider: "barcodelookup", status: "not_found" };
+      }
+      if (response.status === 429) {
+        return {
+          provider: "barcodelookup",
+          status: "rate_limited",
+          retryAfterSeconds: responseRetryAfterSeconds(response),
+        };
+      }
+      return { provider: "barcodelookup", status: "error" };
     }
 
     const data = await response.json() as {
@@ -226,9 +303,12 @@ async function lookupFromBarcodeLookup(code: string, timeoutMs: number): Promise
     };
     const first = data.products?.[0];
     const name = first?.title?.trim();
-    if (!name) return { status: "not_found" };
+    if (!name) {
+      return { provider: "barcodelookup", status: "not_found" };
+    }
 
     return {
+      provider: "barcodelookup",
       status: "found",
       product: {
         name,
@@ -240,55 +320,7 @@ async function lookupFromBarcodeLookup(code: string, timeoutMs: number): Promise
       },
     };
   } catch {
-    return { status: "error" };
-  }
-}
-
-async function lookupFromOpenFoodFacts(code: string, timeoutMs: number, userAgent: string): Promise<LookupResult> {
-  const url = `https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(code)}.json`;
-  try {
-    const response = await fetchWithTimeout(url, {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": userAgent,
-      },
-    }, timeoutMs);
-
-    if (!response.ok) {
-      if (response.status === 404) return { status: "not_found" };
-      return { status: "error" };
-    }
-
-    const data = await response.json() as {
-      status?: number;
-      product?: {
-        product_name?: string;
-        product_name_en?: string;
-        brands?: string;
-        image_url?: string;
-        image_front_url?: string;
-        categories?: string;
-      };
-    };
-
-    if (data.status !== 1 || !data.product) return { status: "not_found" };
-    const product = data.product;
-    const name = (product.product_name || product.product_name_en || "").trim();
-    if (!name) return { status: "not_found" };
-
-    return {
-      status: "found",
-      product: {
-        name,
-        brand: product.brands?.trim() || undefined,
-        imageUrl: product.image_url || product.image_front_url,
-        category: product.categories?.split(",")[0]?.trim() || undefined,
-        source: "openfoodfacts",
-        normalizedBarcode: code,
-      },
-    };
-  } catch {
-    return { status: "error" };
+    return { provider: "barcodelookup", status: "error" };
   }
 }
 
@@ -300,15 +332,24 @@ async function lookupFromUpcItemDb(code: string, timeoutMs: number): Promise<Loo
   const url = `https://api.upcitemdb.com/prod/${path}/lookup?upc=${encodeURIComponent(code)}`;
   const headers: Record<string, string> = { Accept: "application/json" };
   if (userKey) {
-    headers["user_key"] = userKey;
-    headers["key_type"] = keyType;
+    headers.user_key = userKey;
+    headers.key_type = keyType;
   }
 
   try {
     const response = await fetchWithTimeout(url, { headers }, timeoutMs);
     if (!response.ok) {
-      if (response.status === 404 || response.status === 400) return { status: "not_found" };
-      return { status: "error" };
+      if (response.status === 404 || response.status === 400) {
+        return { provider: "upcitemdb", status: "not_found" };
+      }
+      if (response.status === 429) {
+        return {
+          provider: "upcitemdb",
+          status: "rate_limited",
+          retryAfterSeconds: responseRetryAfterSeconds(response),
+        };
+      }
+      return { provider: "upcitemdb", status: "error" };
     }
 
     const data = await response.json() as {
@@ -316,9 +357,12 @@ async function lookupFromUpcItemDb(code: string, timeoutMs: number): Promise<Loo
     };
     const item = data.items?.[0];
     const name = item?.title?.trim();
-    if (!name) return { status: "not_found" };
+    if (!name) {
+      return { provider: "upcitemdb", status: "not_found" };
+    }
 
     return {
+      provider: "upcitemdb",
       status: "found",
       product: {
         name,
@@ -330,77 +374,210 @@ async function lookupFromUpcItemDb(code: string, timeoutMs: number): Promise<Loo
       },
     };
   } catch {
-    return { status: "error" };
+    return { provider: "upcitemdb", status: "error" };
   }
 }
 
-async function lookupAcrossProviders(code: string, deadlineMs: number, userAgent: string): Promise<{ product: BarcodeProductInfo | null; hadError: boolean }> {
-  let hadError = false;
-  const providers = [
-    (c: string, t: number) => lookupFromBarcodeLookup(c, t),
-    (c: string, t: number) => lookupFromOpenFoodFacts(c, t, userAgent),
-    (c: string, t: number) => lookupFromUpcItemDb(c, t),
-  ];
-
-  for (const provider of providers) {
-    const remainingMs = msUntil(deadlineMs);
-    if (remainingMs <= 0) return { product: null, hadError: true };
-    const result = await provider(code, remainingMs);
-    if (result.status === "found") return { product: result.product, hadError };
-    if (result.status === "error") hadError = true;
-  }
-
-  return { product: null, hadError };
+function resolutionForNotFound(
+  normalizedBarcode: string | null,
+  cacheHit: boolean,
+  attempts: BarcodeLookupAttempt[],
+): BarcodeLookupResolution {
+  return {
+    resultState: "not_found",
+    enriched: false,
+    normalizedBarcode,
+    product: null,
+    cacheHit,
+    attempts,
+  };
 }
 
-export async function lookupProductByBarcode(rawBarcode: string, options: BarcodeLookupOptions = {}): Promise<BarcodeProductInfo | null> {
+export async function lookupBarcode(
+  rawBarcode: string,
+  options: BarcodeLookupOptions = {},
+): Promise<BarcodeLookupResolution> {
   const timeoutMs = Number.isFinite(options.timeoutMs) ? Number(options.timeoutMs) : 5000;
   const deadlineMs = deadlineFromNow(timeoutMs);
   const candidates = getGtinCandidates(rawBarcode);
-  if (candidates.length === 0) return null;
+  if (candidates.length === 0) {
+    return resolutionForNotFound(null, false, []);
+  }
 
   const kv = options.kv ?? null;
-  const userAgent = options.userAgent || process.env.BARCODE_LOOKUP_USER_AGENT || "onboarding-api/1.0 (barcode lookup)";
+  let cachedNotFoundCount = 0;
+  let cachedNotFoundCode: string | null = null;
 
   for (const code of candidates) {
     const remainingMs = msUntil(deadlineMs);
-    if (remainingMs <= 0) return null;
+    if (remainingMs <= 0) {
+      return {
+        resultState: "provider_unavailable",
+        enriched: false,
+        normalizedBarcode: code,
+        product: null,
+        cacheHit: false,
+        attempts: [],
+      };
+    }
 
     const cached = await getCached(kv, code, remainingMs);
     if (!cached) continue;
-    if ("notFound" in cached) continue;
-    if (cached.name) return cached;
-  }
-
-  for (const code of candidates) {
-    const remainingMs = msUntil(deadlineMs);
-    if (remainingMs <= 0) return null;
-
-    const { product, hadError } = await lookupAcrossProviders(code, deadlineMs, userAgent);
-    if (product?.name) {
-      await setCached(kv, code, product, CACHE_FOUND_TTL_SECONDS, msUntil(deadlineMs));
-      return product;
+    if ("notFound" in cached) {
+      cachedNotFoundCount += 1;
+      cachedNotFoundCode ||= code;
+      continue;
     }
 
-    if (!hadError) {
+    const product = foundProduct(cached, code);
+    return {
+      resultState: "found",
+      enriched: true,
+      normalizedBarcode: product.normalizedBarcode || code,
+      product,
+      cacheHit: true,
+      attempts: [],
+    };
+  }
+
+  if (cachedNotFoundCount === candidates.length) {
+    return resolutionForNotFound(cachedNotFoundCode, true, []);
+  }
+
+  const allAttempts: BarcodeLookupAttempt[] = [];
+  let sawError = false;
+  let sawRateLimit = false;
+  let retryAfterSeconds: number | undefined;
+
+  for (const code of candidates) {
+    const candidateAttempts: BarcodeLookupAttempt[] = [];
+    let candidateHadIssue = false;
+
+    const providers = [
+      lookupFromBarcodeLookup,
+      lookupFromUpcItemDb,
+    ];
+
+    for (const provider of providers) {
+      const remainingMs = msUntil(deadlineMs);
+      if (remainingMs <= 0) {
+        sawError = true;
+        candidateHadIssue = true;
+        break;
+      }
+
+      const result = await provider(code, remainingMs);
+      const attempt: BarcodeLookupAttempt = {
+        provider: result.provider,
+        status: result.status,
+      };
+      if (result.status === "rate_limited" && result.retryAfterSeconds !== undefined) {
+        attempt.retryAfterSeconds = result.retryAfterSeconds;
+      }
+      candidateAttempts.push(attempt);
+
+      if (result.status === "found") {
+        const product = foundProduct(result.product, code);
+        allAttempts.push(...candidateAttempts);
+        await setCached(kv, code, product, CACHE_FOUND_TTL_SECONDS, msUntil(deadlineMs));
+        return {
+          resultState: "found",
+          enriched: true,
+          normalizedBarcode: product.normalizedBarcode || code,
+          product,
+          cacheHit: false,
+          attempts: allAttempts,
+        };
+      }
+
+      if (result.status === "rate_limited") {
+        candidateHadIssue = true;
+        sawRateLimit = true;
+        retryAfterSeconds = lowerRetryAfter(retryAfterSeconds, result.retryAfterSeconds);
+      } else if (result.status === "error") {
+        candidateHadIssue = true;
+        sawError = true;
+      }
+    }
+
+    allAttempts.push(...candidateAttempts);
+
+    if (!candidateHadIssue) {
       await setCached(kv, code, { notFound: true }, CACHE_NOT_FOUND_TTL_SECONDS, msUntil(deadlineMs));
     }
   }
 
-  return null;
+  const normalizedBarcode = candidates[0] ?? null;
+  if (sawRateLimit) {
+    return {
+      resultState: "rate_limited",
+      enriched: false,
+      normalizedBarcode,
+      product: null,
+      cacheHit: false,
+      attempts: allAttempts,
+      retryAfterSeconds,
+    };
+  }
+
+  if (sawError) {
+    return {
+      resultState: "provider_unavailable",
+      enriched: false,
+      normalizedBarcode,
+      product: null,
+      cacheHit: false,
+      attempts: allAttempts,
+    };
+  }
+
+  return resolutionForNotFound(normalizedBarcode, false, allAttempts);
 }
 
-export function validateBarcodeLookupCode(input: unknown): string {
+export async function lookupProductByBarcode(
+  rawBarcode: string,
+  options: BarcodeLookupOptions = {},
+): Promise<BarcodeProductInfo | null> {
+  const lookup = await lookupBarcode(rawBarcode, options);
+  return lookup.resultState === "found" ? lookup.product : null;
+}
+
+export function validateBarcodeLookupCode(
+  input: unknown,
+  params: { fieldName?: string; statusCode?: number } = {},
+): string {
+  const fieldName = params.fieldName || "code";
+  const statusCode = params.statusCode ?? 400;
+
   if (typeof input !== "string") {
-    throw new ApiError(422, "VALIDATION_ERROR", "code is required");
+    throw new ApiError(statusCode, "VALIDATION_ERROR", `${fieldName} is required`);
   }
+
   const trimmed = input.trim();
   if (!trimmed) {
-    throw new ApiError(422, "VALIDATION_ERROR", "code is required");
+    throw new ApiError(statusCode, "VALIDATION_ERROR", `${fieldName} is required`);
   }
+
   if (trimmed.length > 64) {
-    throw new ApiError(422, "VALIDATION_ERROR", "code is too long");
+    throw new ApiError(statusCode, "VALIDATION_ERROR", `${fieldName} is too long`);
   }
+
+  const digits = normalizeBarcodeForLookup(trimmed).replace(/\D/g, "");
+  if (!digits) {
+    throw new ApiError(
+      statusCode,
+      "VALIDATION_ERROR",
+      `${fieldName} must contain UPC/EAN/GTIN digits`,
+    );
+  }
+
+  if (![8, 12, 13, 14].includes(digits.length)) {
+    throw new ApiError(
+      statusCode,
+      "VALIDATION_ERROR",
+      `${fieldName} must be a valid UPC/EAN/GTIN`,
+    );
+  }
+
   return trimmed;
 }
-

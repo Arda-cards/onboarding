@@ -8,7 +8,11 @@ import { OnboardingSessionStore } from "../lib/onboarding-session-store";
 import { GmailOAuthStore, type KeyValueStore } from "../lib/gmail-oauth-store";
 import { buildGmailAuthUrl, refreshAccessToken } from "../lib/google-oauth";
 import { createImageUploadUrl, uploadImageDataUrl } from "../lib/image-upload";
-import { lookupProductByBarcode, validateBarcodeLookupCode } from "../lib/barcode-lookup";
+import {
+  lookupBarcode,
+  type BarcodeLookupResolution,
+  validateBarcodeLookupCode,
+} from "../lib/barcode-lookup";
 import { scrapeUrls } from "../lib/url-scraper";
 import { analyzePhoto } from "../lib/photo-analysis";
 
@@ -80,6 +84,45 @@ async function requireSessionAccess(params: {
     throw new ApiError(404, "NOT_FOUND", "Session not found");
   }
   return { createdAt: meta.createdAt };
+}
+
+function barcodeLookupPayload(lookup: BarcodeLookupResolution) {
+  return {
+    enriched: lookup.enriched,
+    resultState: lookup.resultState,
+    normalizedBarcode: lookup.normalizedBarcode,
+    product: lookup.product,
+  };
+}
+
+async function runBarcodeLookup(params: {
+  auth: AuthContext;
+  code: string;
+  kv: KeyValueStore;
+  logger: Logger;
+}): Promise<BarcodeLookupResolution> {
+  const startedAtMs = Date.now();
+  const lookup = await lookupBarcode(params.code, {
+    kv: params.kv,
+    timeoutMs: 5000,
+  });
+
+  params.logger.info(
+    {
+      tenantId: params.auth.tenantId,
+      userId: params.auth.sub,
+      normalizedBarcode: lookup.normalizedBarcode,
+      resultState: lookup.resultState,
+      cacheHit: lookup.cacheHit,
+      provider: lookup.product?.source || null,
+      retryAfterSeconds: lookup.retryAfterSeconds,
+      attempts: lookup.attempts,
+      durationMs: Date.now() - startedAtMs,
+    },
+    "Barcode lookup completed",
+  );
+
+  return lookup;
 }
 
 export function createOnboardingRoutes(deps: {
@@ -273,19 +316,48 @@ export function createOnboardingRoutes(deps: {
   });
 
   router.get("/barcode/lookup", async (req, res: Response) => {
-    requireAuth(req as MaybeAuthRequest);
-
-    const code = validateBarcodeLookupCode(req.query?.code);
-    const product = await lookupProductByBarcode(code, {
+    const auth = requireAuth(req as MaybeAuthRequest);
+    const code = validateBarcodeLookupCode(req.query?.code, {
+      fieldName: "code",
+      statusCode: 400,
+    });
+    const lookup = await runBarcodeLookup({
+      auth,
+      code,
       kv: deps.kv,
-      timeoutMs: 5000,
+      logger: deps.logger,
     });
 
-    if (!product) {
+    if (lookup.resultState === "rate_limited") {
+      throw new ApiError(429, "RATE_LIMITED", "Barcode lookup rate limit exceeded");
+    }
+    if (lookup.resultState === "not_found") {
       throw new ApiError(404, "NOT_FOUND", "Barcode not found");
     }
 
-    res.json({ product });
+    res.json(barcodeLookupPayload(lookup));
+  });
+
+  router.post("/barcode/lookup", async (req, res: Response) => {
+    const auth = requireAuth(req as MaybeAuthRequest);
+
+    const body = (req.body ?? null) as { barcode?: unknown } | null;
+    const barcode = validateBarcodeLookupCode(body?.barcode, {
+      fieldName: "barcode",
+      statusCode: 400,
+    });
+    const lookup = await runBarcodeLookup({
+      auth,
+      code: barcode,
+      kv: deps.kv,
+      logger: deps.logger,
+    });
+
+    if (lookup.resultState === "rate_limited") {
+      throw new ApiError(429, "RATE_LIMITED", "Barcode lookup rate limit exceeded");
+    }
+
+    res.json(barcodeLookupPayload(lookup));
   });
 
   router.post("/url/scrape", async (req, res: Response) => {

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Onboarding API
-  version: 1.8.0
+  version: 1.9.0
   description: |
     Backend API for onboarding durable session storage and ingestion.
 
@@ -222,9 +222,11 @@ paths:
   /barcode/lookup:
     get:
       operationId: lookupBarcode
-      summary: Barcode lookup
+      summary: Barcode lookup (query)
       description: |
-        Look up a barcode (UPC/EAN/GTIN) and return product metadata when available.
+        Legacy query-string barcode lookup. Returns product metadata when available.
+        When providers are temporarily unavailable, returns an unenriched response
+        with `resultState=provider_unavailable`.
       parameters:
         - in: query
           name: code
@@ -239,12 +241,42 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BarcodeLookupResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "404":
           $ref: "#/components/responses/NotFound"
-        "422":
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: lookupBarcodePost
+      summary: Barcode lookup
+      description: |
+        Look up a barcode from a request body payload. Returns an enriched product
+        when found, an empty result when not found, or an unenriched result when
+        upstream providers are temporarily unavailable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BarcodeLookupRequest"
+      responses:
+        "200":
+          description: Barcode lookup result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BarcodeLookupResponse"
+        "400":
           $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -801,33 +833,65 @@ components:
 
     # ---------- Barcode Lookup ----------
 
+    BarcodeLookupRequest:
+      type: object
+      required:
+        - barcode
+      additionalProperties: false
+      properties:
+        barcode:
+          type: string
+          description: UPC/EAN/GTIN string captured by scanner or manual entry.
+
+    BarcodeLookupProduct:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        brand:
+          type: string
+          nullable: true
+        imageUrl:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        source:
+          type: string
+          enum: [barcodelookup, upcitemdb]
+          nullable: true
+        normalizedBarcode:
+          type: string
+          nullable: true
+
     BarcodeLookupResponse:
       type: object
       required:
+        - enriched
+        - resultState
+        - normalizedBarcode
         - product
       properties:
+        enriched:
+          type: boolean
+          description: Whether provider enrichment succeeded.
+        resultState:
+          type: string
+          enum: [found, not_found, provider_unavailable]
+          description: |
+            `found` when a provider returned product data,
+            `not_found` when providers responded cleanly with no match,
+            `provider_unavailable` when providers errored or timed out.
+        normalizedBarcode:
+          type: string
+          nullable: true
+          description: Canonical barcode candidate used for provider lookups.
         product:
-          type: object
-          required:
-            - name
-          properties:
-            name:
-              type: string
-            brand:
-              type: string
-              nullable: true
-            imageUrl:
-              type: string
-              nullable: true
-            category:
-              type: string
-              nullable: true
-            source:
-              type: string
-              nullable: true
-            normalizedBarcode:
-              type: string
-              nullable: true
+          $ref: "#/components/schemas/BarcodeLookupProduct"
+          nullable: true
 
     # ---------- URL Scrape ----------
 

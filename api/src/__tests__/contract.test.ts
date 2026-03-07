@@ -127,6 +127,36 @@ describe("API contract", () => {
     });
   });
 
+  describe("barcode lookup contract", () => {
+    it("documents POST /barcode/lookup with a request body", () => {
+      const lookupPost = contract.paths["/barcode/lookup"].post;
+      expect(lookupPost).toBeDefined();
+      expect(lookupPost.requestBody.required).toBe(true);
+      expect(
+        lookupPost.requestBody.content["application/json"].schema.$ref,
+      ).toBe("#/components/schemas/BarcodeLookupRequest");
+    });
+
+    it("documents the enriched and resultState fields in barcode responses", () => {
+      const response = contract.components.schemas.BarcodeLookupResponse;
+      expect(response.required).toEqual(
+        expect.arrayContaining(["enriched", "resultState", "normalizedBarcode", "product"]),
+      );
+      expect(response.properties.resultState.enum).toEqual(
+        expect.arrayContaining(["found", "not_found", "provider_unavailable"]),
+      );
+      expect(response.properties.product.nullable).toBe(true);
+    });
+
+    it("documents validation and rate-limit responses for barcode lookup endpoints", () => {
+      const lookupPath = contract.paths["/barcode/lookup"];
+      expect(lookupPath.get.responses["400"]).toBeDefined();
+      expect(lookupPath.get.responses["429"]).toBeDefined();
+      expect(lookupPath.post.responses["400"]).toBeDefined();
+      expect(lookupPath.post.responses["429"]).toBeDefined();
+    });
+  });
+
   describe("response consistency", () => {
     const paths = contract.paths;
 

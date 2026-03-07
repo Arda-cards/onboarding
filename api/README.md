@@ -25,8 +25,7 @@ Backend service for onboarding durable session storage and ingestion/providers (
 
 ### Optional (feature-gated integrations)
 - `GEMINI_API_KEY`: Enables AI-assisted URL scraping fallback and photo analysis.
-- `BARCODE_LOOKUP_API_KEY`: Enables BarcodeLookup provider (when present) for barcode enrichment.
-- `BARCODE_LOOKUP_USER_AGENT`: User-Agent string for free providers (e.g. OpenFoodFacts).
+- `BARCODE_LOOKUP_API_KEY`: Enables the primary BarcodeLookup provider for barcode enrichment.
 - `UPCITEMDB_USER_KEY`: Enables authenticated UPCitemdb lookups (falls back to trial if absent).
 - `UPCITEMDB_KEY_TYPE`: UPCitemdb key type header value (defaults to `3scale`).
 
