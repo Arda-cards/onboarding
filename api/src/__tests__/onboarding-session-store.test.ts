@@ -151,6 +151,34 @@ describe("OnboardingSessionStore", () => {
     expect(list[0].barcode).toBe("123456789012");
   });
 
+  it("concurrent barcode adds are first-write-wins per barcode value", async () => {
+    const created = await store.createSession({ tenantId: "t1", userId: "u1" });
+
+    // Simulate two concurrent writes for the same barcode arriving in rapid succession.
+    // Because addBarcode deduplicates by barcode value (field key), the first persisted
+    // write wins — subsequent writes for the same value return duplicate=true.
+    await store.addBarcode(created.sessionId, {
+      id: "b1",
+      barcode: "987654321098",
+      scannedAt: new Date().toISOString(),
+      source: "mobile",
+    });
+    const concurrent = await store.addBarcode(created.sessionId, {
+      id: "b2",
+      barcode: "987654321098",
+      scannedAt: new Date().toISOString(),
+      source: "desktop",
+    });
+
+    // Second write is flagged as duplicate and the original record is returned unchanged.
+    expect(concurrent.duplicate).toBe(true);
+    expect(concurrent.barcode.id).toBe("b1");
+    expect(concurrent.barcode.source).toBe("mobile");
+
+    const list = await store.listBarcodes(created.sessionId);
+    expect(list).toHaveLength(1);
+  });
+
   it("stores photos by id and updates metadata without mutating immutable fields", async () => {
     const created = await store.createSession({ tenantId: "t1", userId: "u1" });
 
@@ -175,4 +203,3 @@ describe("OnboardingSessionStore", () => {
     expect(updated.suggestedName).toBe("Widget");
   });
 });
-

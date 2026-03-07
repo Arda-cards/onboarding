@@ -17,6 +17,7 @@ export type ErrorCode =
   | "AUTH_EXPIRED_TOKEN"
   | "SESSION_EXPIRED"
   | "INVALID_SESSION_TOKEN"
+  | "RATE_LIMITED"
   | "VALIDATION_ERROR"
   | "NOT_FOUND"
   | "INTERNAL_ERROR";
@@ -26,6 +27,7 @@ export interface ErrorBody {
     code: ErrorCode;
     message: string;
     requestId: string;
+    details?: Record<string, unknown> | string[];
   };
 }
 

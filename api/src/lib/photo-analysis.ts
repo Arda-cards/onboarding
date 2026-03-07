@@ -148,7 +148,7 @@ export async function analyzePhoto(params: {
   if (minIntervalMs > 0) {
     const elapsed = now() - lastGeminiCallAtMs;
     if (elapsed >= 0 && elapsed < minIntervalMs) {
-      throw new ApiError(429, "VALIDATION_ERROR", "Photo analysis rate limit exceeded");
+      throw new ApiError(429, "RATE_LIMITED", "Photo analysis rate limit exceeded");
     }
   }
 

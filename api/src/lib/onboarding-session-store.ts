@@ -174,7 +174,7 @@ export class OnboardingSessionStore {
     const max = this.opts.maxBarcodesPerSession ?? 500;
     const count = await this.redis.hLen(barcodesKey(sessionId));
     if (count >= max) {
-      throw new ApiError(429, "VALIDATION_ERROR", "Session barcode limit reached");
+      throw new ApiError(429, "RATE_LIMITED", "Session barcode limit reached");
     }
 
     const cleaned = barcode.barcode.trim();
@@ -268,7 +268,7 @@ export class OnboardingSessionStore {
     const max = this.opts.maxPhotosPerSession ?? 100;
     const count = await this.redis.hLen(photosKey(sessionId));
     if (count >= max) {
-      throw new ApiError(429, "VALIDATION_ERROR", "Session photo limit reached");
+      throw new ApiError(429, "RATE_LIMITED", "Session photo limit reached");
     }
 
     if (!photo.imageData || typeof photo.imageData !== "string") {

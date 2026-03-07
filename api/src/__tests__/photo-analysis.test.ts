@@ -74,7 +74,7 @@ describe("analyzePhoto", () => {
       expect.objectContaining({
         name: "ApiError",
         statusCode: 429,
-        code: "VALIDATION_ERROR",
+        code: "RATE_LIMITED",
       } satisfies Partial<ApiError>),
     );
   });

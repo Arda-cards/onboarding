@@ -2,7 +2,8 @@ export interface Config {
   cognitoUserPoolId: string;
   cognitoClientId: string;
   awsRegion: string;
-  redisUrl: string;
+  /** Null in non-production when REDIS_URL is absent — triggers in-memory fallback. */
+  redisUrl: string | null;
   onboardingApiOrigin: string;
   onboardingFrontendOrigin: string;
   onboardingSessionTtlSeconds: number;
@@ -80,7 +81,7 @@ export function loadConfig(): Config {
     cognitoUserPoolId: requireEnv("COGNITO_USER_POOL_ID"),
     cognitoClientId: requireEnv("COGNITO_CLIENT_ID"),
     awsRegion: process.env.AWS_REGION ?? "us-east-1",
-    redisUrl: requireEnv("REDIS_URL"),
+    redisUrl: optionalEnv("REDIS_URL"),
     onboardingApiOrigin: normalizeOrigin(requireEnv("ONBOARDING_API_ORIGIN")),
     onboardingFrontendOrigin: normalizeOrigin(requireEnv("ONBOARDING_FRONTEND_ORIGIN")),
     onboardingSessionTtlSeconds: ttlSeconds,
