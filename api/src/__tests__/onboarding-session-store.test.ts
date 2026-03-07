@@ -151,7 +151,7 @@ describe("OnboardingSessionStore", () => {
     expect(list[0].barcode).toBe("123456789012");
   });
 
-  it("concurrent barcode adds are last-write-wins per barcode value", async () => {
+  it("concurrent barcode adds are first-write-wins per barcode value", async () => {
     const created = await store.createSession({ tenantId: "t1", userId: "u1" });
 
     // Simulate two concurrent writes for the same barcode arriving in rapid succession.
@@ -203,4 +203,3 @@ describe("OnboardingSessionStore", () => {
     expect(updated.suggestedName).toBe("Widget");
   });
 });
-

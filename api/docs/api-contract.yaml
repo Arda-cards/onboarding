@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Onboarding API
-  version: 1.7.0
+  version: 1.8.0
   description: |
     Backend API for onboarding durable session storage and ingestion.
 
@@ -459,6 +459,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "422":
           $ref: "#/components/responses/ValidationError"
         "500":
@@ -497,6 +499,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -551,6 +555,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "422":
           $ref: "#/components/responses/ValidationError"
         "500":
@@ -580,6 +586,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -613,6 +621,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -1089,6 +1099,55 @@ components:
         productName:
           type: string
           nullable: true
+        brand:
+          type: string
+          nullable: true
+        imageUrl:
+          type: string
+          format: uri
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+
+    ScannedBarcodeInput:
+      type: object
+      required:
+        - barcode
+      description: |
+        Client-supplied barcode payload. The server fills `id`, `scannedAt`, and
+        `source` defaults when omitted.
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        barcode:
+          type: string
+        barcodeType:
+          type: string
+          nullable: true
+        scannedAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [mobile, desktop]
+        productName:
+          type: string
+          nullable: true
+        brand:
+          type: string
+          nullable: true
+        imageUrl:
+          type: string
+          format: uri
+          nullable: true
+        category:
+          type: string
+          nullable: true
         notes:
           type: string
           nullable: true
@@ -1099,7 +1158,7 @@ components:
         - barcode
       properties:
         barcode:
-          $ref: "#/components/schemas/ScannedBarcode"
+          $ref: "#/components/schemas/ScannedBarcodeInput"
 
     AddBarcodeResponse:
       type: object
@@ -1157,7 +1216,44 @@ components:
         source:
           type: string
           enum: [mobile, desktop]
+        analyzed:
+          type: boolean
         suggestedName:
+          type: string
+          nullable: true
+        suggestedSupplier:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+
+    CapturedPhotoInput:
+      type: object
+      required:
+        - imageData
+      description: |
+        Client-supplied photo payload. The server fills `id`, `capturedAt`,
+        `source`, and `analyzed` defaults when omitted.
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        imageData:
+          type: string
+          description: Base64 data URL of the captured image.
+        capturedAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [mobile, desktop]
+        analyzed:
+          type: boolean
+        suggestedName:
+          type: string
+          nullable: true
+        suggestedSupplier:
           type: string
           nullable: true
         notes:
@@ -1170,7 +1266,7 @@ components:
         - photo
       properties:
         photo:
-          $ref: "#/components/schemas/CapturedPhoto"
+          $ref: "#/components/schemas/CapturedPhotoInput"
 
     AddPhotoResponse:
       type: object
@@ -1190,7 +1286,6 @@ components:
       properties:
         photo:
           $ref: "#/components/schemas/CapturedPhoto"
-          nullable: true
 
     PhotoListResponse:
       type: object

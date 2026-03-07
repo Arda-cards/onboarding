@@ -194,14 +194,12 @@ export function createOnboardingRoutes(deps: {
 
   router.get("/sessions/:sessionId", async (req, res: Response) => {
     const sessionId = req.params.sessionId;
-    await requireSessionAccess({
-      req: req as MaybeAuthRequest,
-      store: deps.sessionStore,
-      sessionId,
-    });
-
+    const auth = requireAuth(req as MaybeAuthRequest);
     const meta = await deps.sessionStore.getMeta(sessionId);
     if (!meta) {
+      throw new ApiError(404, "NOT_FOUND", "Session not found");
+    }
+    if (meta.userId !== auth.sub || meta.tenantId !== auth.tenantId) {
       throw new ApiError(404, "NOT_FOUND", "Session not found");
     }
     deps.logger.info(

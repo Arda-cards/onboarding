@@ -103,6 +103,30 @@ describe("API contract", () => {
     });
   });
 
+  describe("mobile session schemas", () => {
+    it("barcode input only requires the barcode value", () => {
+      const barcodeInput = contract.components.schemas.ScannedBarcodeInput;
+      expect(barcodeInput.required).toEqual(["barcode"]);
+      expect(
+        contract.components.schemas.AddBarcodeRequest.properties.barcode.$ref,
+      ).toBe("#/components/schemas/ScannedBarcodeInput");
+    });
+
+    it("photo input only requires imageData", () => {
+      const photoInput = contract.components.schemas.CapturedPhotoInput;
+      expect(photoInput.required).toEqual(["imageData"]);
+      expect(
+        contract.components.schemas.AddPhotoRequest.properties.photo.$ref,
+      ).toBe("#/components/schemas/CapturedPhotoInput");
+    });
+
+    it("captured photo response documents analyzed without making it required", () => {
+      const capturedPhoto = contract.components.schemas.CapturedPhoto;
+      expect(capturedPhoto.properties.analyzed).toBeDefined();
+      expect(capturedPhoto.required).not.toContain("analyzed");
+    });
+  });
+
   describe("response consistency", () => {
     const paths = contract.paths;
 
@@ -152,6 +176,29 @@ describe("API contract", () => {
       const example =
         contract.components.responses.RateLimited.content?.["application/json"]?.example;
       expect(example?.error?.code).toBe("RATE_LIMITED");
+    });
+  });
+
+  describe("mobile session endpoint responses", () => {
+    it("documents 429 responses on capped barcode/photo creation endpoints", () => {
+      expect(
+        contract.paths["/scan-sessions/{sessionId}/barcodes"].post.responses["429"],
+      ).toBeDefined();
+      expect(
+        contract.paths["/photo-sessions/{sessionId}/photos"].post.responses["429"],
+      ).toBeDefined();
+    });
+
+    it("documents 404 responses on lookup/update endpoints for missing records", () => {
+      expect(
+        contract.paths["/scan-sessions/{sessionId}/barcodes/{barcodeId}"].put.responses["404"],
+      ).toBeDefined();
+      expect(
+        contract.paths["/photo-sessions/{sessionId}/photos/{photoId}"].get.responses["404"],
+      ).toBeDefined();
+      expect(
+        contract.paths["/photo-sessions/{sessionId}/photos/{photoId}/metadata"].put.responses["404"],
+      ).toBeDefined();
     });
   });
 
