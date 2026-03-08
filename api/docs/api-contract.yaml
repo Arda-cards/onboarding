@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Onboarding API
-  version: 1.9.0
+  version: 1.10.0
   description: |
     Backend API for onboarding durable session storage and ingestion.
 
@@ -306,15 +306,14 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
-  /photo/analyze:
+  /photos/analyze:
     post:
       operationId: analyzePhoto
       summary: Photo analysis (Gemini)
       description: |
-        Analyze a base64 image data URL and return suggested metadata.
-
-        This endpoint is feature-gated: when `GEMINI_API_KEY` is not configured,
-        it returns 503.
+        Analyze an uploaded onboarding image and return extracted product metadata.
+        When `GEMINI_API_KEY` is not configured, the endpoint degrades gracefully
+        and returns `analyzed: false` with `reason: gemini_unavailable`.
       requestBody:
         required: true
         content:
@@ -328,14 +327,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PhotoAnalyzeResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "422":
-          $ref: "#/components/responses/ValidationError"
         "429":
           $ref: "#/components/responses/RateLimited"
-        "503":
-          $ref: "#/components/responses/InternalError"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -1001,44 +998,46 @@ components:
     PhotoAnalyzeRequest:
       type: object
       required:
-        - imageData
+        - imageUrl
       additionalProperties: false
       properties:
-        imageData:
+        imageUrl:
           type: string
-          description: Base64 data URL (data:image/...;base64,...) to analyze.
+          description: Public onboarding image URL or onboarding object key to analyze.
 
-    PhotoAnalysis:
+    PhotoAnalyzeResponse:
       type: object
       required:
-        - suggestedName
-        - suggestedSupplier
+        - analyzed
+        - productName
+        - description
+        - estimatedCategory
+        - brand
         - confidence
-        - notes
       additionalProperties: false
       properties:
-        suggestedName:
+        analyzed:
+          type: boolean
+        reason:
+          type: string
+          enum: [gemini_unavailable]
+          nullable: true
+        productName:
           type: string
           nullable: true
-        suggestedSupplier:
+        description:
+          type: string
+          nullable: true
+        estimatedCategory:
+          type: string
+          nullable: true
+        brand:
           type: string
           nullable: true
         confidence:
           type: number
           minimum: 0
           maximum: 1
-        notes:
-          type: string
-          nullable: true
-
-    PhotoAnalyzeResponse:
-      type: object
-      required:
-        - analysis
-      additionalProperties: false
-      properties:
-        analysis:
-          $ref: "#/components/schemas/PhotoAnalysis"
 
     CreateSessionRequest:
       type: object

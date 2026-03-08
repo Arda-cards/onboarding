@@ -14,7 +14,7 @@ import {
   validateBarcodeLookupCode,
 } from "../lib/barcode-lookup";
 import { scrapeUrls } from "../lib/url-scraper";
-import { analyzePhoto } from "../lib/photo-analysis";
+import { analyzePhoto, resolvePhotoAnalysisImageUrl } from "../lib/photo-analysis";
 
 const TOKEN_EXPIRED_MESSAGE =
   "Session expired. Please reopen the link from the desktop session.";
@@ -93,6 +93,15 @@ function barcodeLookupPayload(lookup: BarcodeLookupResolution) {
     normalizedBarcode: lookup.normalizedBarcode,
     product: lookup.product,
   };
+}
+
+function imageHost(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
 }
 
 async function runBarcodeLookup(params: {
@@ -373,25 +382,63 @@ export function createOnboardingRoutes(deps: {
     res.json(response);
   });
 
-  router.post("/photo/analyze", async (req, res: Response) => {
-    requireAuth(req as MaybeAuthRequest);
+  const analyzePhotoHandler = async (req: Request, res: Response) => {
+    const auth = requireAuth(req as MaybeAuthRequest);
+    const startedAtMs = Date.now();
+    const requestId = (req as MaybeAuthRequest).requestId ?? "unknown";
+    let resolvedImageUrl: string | null = null;
 
-    const body = (req.body ?? null) as { imageData?: unknown; imageDataUrl?: unknown } | null;
-    const imageData =
-      (typeof body?.imageData === "string" ? body.imageData : "")
-      || (typeof body?.imageDataUrl === "string" ? body.imageDataUrl : "");
+    try {
+      const body = (req.body ?? null) as { imageUrl?: unknown } | null;
+      const imageUrl = typeof body?.imageUrl === "string" ? body.imageUrl : "";
 
-    if (!imageData) {
-      throw new ApiError(422, "VALIDATION_ERROR", "imageData is required");
+      resolvedImageUrl = resolvePhotoAnalysisImageUrl({
+        imageUrl,
+        bucket: deps.config.onboardingImageUploadBucket,
+        region: deps.config.awsRegion,
+        publicBaseUrl: deps.config.onboardingImagePublicBaseUrl,
+        prefix: deps.config.onboardingImageUploadPrefix,
+      });
+
+      const analysis = await analyzePhoto({
+        imageUrl: resolvedImageUrl,
+        geminiApiKey: deps.config.geminiApiKey,
+        maxImageBytes: deps.config.onboardingImageMaxBytes,
+      });
+
+      deps.logger.info(
+        {
+          requestId,
+          tenantId: auth.tenantId,
+          userId: auth.sub,
+          imageHost: imageHost(resolvedImageUrl),
+          analyzed: analysis.analyzed,
+          reason: analysis.analyzed ? null : analysis.reason,
+          durationMs: Date.now() - startedAtMs,
+        },
+        "Photo analysis completed",
+      );
+
+      res.json(analysis);
+    } catch (err) {
+      deps.logger.warn(
+        {
+          requestId,
+          tenantId: auth.tenantId,
+          userId: auth.sub,
+          imageHost: imageHost(resolvedImageUrl),
+          statusCode: err instanceof ApiError ? err.statusCode : 500,
+          code: err instanceof ApiError ? err.code : "INTERNAL_ERROR",
+          durationMs: Date.now() - startedAtMs,
+        },
+        "Photo analysis failed",
+      );
+      throw err;
     }
+  };
 
-    const analysis = await analyzePhoto({
-      imageData,
-      geminiApiKey: deps.config.geminiApiKey,
-    });
-
-    res.json({ analysis });
-  });
+  router.post("/photo/analyze", analyzePhotoHandler);
+  router.post("/photos/analyze", analyzePhotoHandler);
 
   router.get("/scan-sessions/:sessionId/barcodes", async (req, res: Response) => {
     const sessionId = req.params.sessionId;
