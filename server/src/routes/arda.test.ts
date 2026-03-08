@@ -66,7 +66,7 @@ async function startTestServer(sessionUserId?: string): Promise<{ server: Server
   });
   app.use('/api/arda', ardaRouter);
 
-  const server = app.listen(0);
+  const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
 
   const address = server.address() as AddressInfo;

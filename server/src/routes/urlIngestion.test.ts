@@ -26,7 +26,7 @@ async function startServer(sessionUserId?: string): Promise<{ server: Server; ba
   });
   app.use('/api/url-ingestion', urlIngestionRouter);
 
-  const server = app.listen(0);
+  const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   const address = server.address() as AddressInfo;
   return {

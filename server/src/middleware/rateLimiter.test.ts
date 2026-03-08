@@ -20,7 +20,7 @@ async function startServer(
     res.json({ ok: true });
   });
 
-  const server = app.listen(0);
+  const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   const address = server.address() as AddressInfo;
   return {
