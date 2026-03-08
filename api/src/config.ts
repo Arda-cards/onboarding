@@ -16,6 +16,8 @@ export interface Config {
   onboardingImageUploadUrlExpiresInSeconds: number;
   onboardingImageMaxBytes: number;
   onboardingImagePublicBaseUrl: string | null;
+  urlScrapeConcurrency: number;
+  urlScrapeTimeoutMs: number;
   port: number;
   logLevel: string;
   nodeEnv: string;
@@ -75,6 +77,16 @@ export function loadConfig(): Config {
     throw new Error("Invalid ONBOARDING_IMAGE_MAX_BYTES (must be a positive integer)");
   }
 
+  const urlScrapeConcurrency = parseInt(process.env.URL_SCRAPE_CONCURRENCY ?? "5", 10);
+  if (!Number.isFinite(urlScrapeConcurrency) || urlScrapeConcurrency <= 0) {
+    throw new Error("Invalid URL_SCRAPE_CONCURRENCY (must be a positive integer)");
+  }
+
+  const urlScrapeTimeoutMs = parseInt(process.env.URL_SCRAPE_TIMEOUT_MS ?? "30000", 10);
+  if (!Number.isFinite(urlScrapeTimeoutMs) || urlScrapeTimeoutMs <= 0) {
+    throw new Error("Invalid URL_SCRAPE_TIMEOUT_MS (must be a positive integer)");
+  }
+
   const encryptionKeyBase64 = optionalEnv("ONBOARDING_TOKEN_ENCRYPTION_KEY_BASE64");
 
   return {
@@ -97,6 +109,8 @@ export function loadConfig(): Config {
     onboardingImageUploadUrlExpiresInSeconds: uploadExpiresSeconds,
     onboardingImageMaxBytes: maxBytes,
     onboardingImagePublicBaseUrl: optionalEnv("ONBOARDING_IMAGE_PUBLIC_BASE_URL"),
+    urlScrapeConcurrency,
+    urlScrapeTimeoutMs,
     port: parseInt(process.env.PORT ?? "3001", 10),
     logLevel: process.env.LOG_LEVEL ?? "info",
     nodeEnv: process.env.NODE_ENV ?? "development",

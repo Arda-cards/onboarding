@@ -134,6 +134,43 @@ async function runBarcodeLookup(params: {
   return lookup;
 }
 
+async function runUrlScrape(params: {
+  auth: AuthContext;
+  urls: string[];
+  kv: KeyValueStore;
+  logger: Logger;
+  concurrency: number;
+  timeoutMs: number;
+}) {
+  const startedAtMs = Date.now();
+  const response = await scrapeUrls(params.urls, {
+    kv: params.kv,
+    concurrency: params.concurrency,
+    timeoutMs: params.timeoutMs,
+  });
+
+  params.logger.info(
+    {
+      tenantId: params.auth.tenantId,
+      userId: params.auth.sub,
+      requested: response.requested,
+      processed: response.processed,
+      successCount: response.results.filter((result) => result.status === "success").length,
+      partialCount: response.results.filter((result) => result.status === "partial").length,
+      failedCount: response.results.filter((result) => result.status === "failed").length,
+      results: response.results.map((result) => ({
+        sourceUrl: result.sourceUrl,
+        status: result.status,
+        extractionSource: result.extractionSource,
+      })),
+      durationMs: Date.now() - startedAtMs,
+    },
+    "URL scrape completed",
+  );
+
+  return response;
+}
+
 export function createOnboardingRoutes(deps: {
   logger: Logger;
   sessionStore: OnboardingSessionStore;
@@ -369,8 +406,8 @@ export function createOnboardingRoutes(deps: {
     res.json(barcodeLookupPayload(lookup));
   });
 
-  router.post("/url/scrape", async (req, res: Response) => {
-    requireAuth(req as MaybeAuthRequest);
+  const urlScrapeHandler = async (req: Request, res: Response) => {
+    const auth = requireAuth(req as MaybeAuthRequest);
 
     const body = (req.body ?? null) as { urls?: unknown } | null;
     const urls = body?.urls;
@@ -378,9 +415,20 @@ export function createOnboardingRoutes(deps: {
       throw new ApiError(422, "VALIDATION_ERROR", "urls must be an array of strings");
     }
 
-    const response = await scrapeUrls(urls as any);
+    const response = await runUrlScrape({
+      auth,
+      urls: urls as string[],
+      kv: deps.kv,
+      logger: deps.logger,
+      concurrency: deps.config.urlScrapeConcurrency,
+      timeoutMs: deps.config.urlScrapeTimeoutMs,
+    });
+
     res.json(response);
-  });
+  };
+
+  router.post("/url/scrape", urlScrapeHandler);
+  router.post("/urls/scrape", urlScrapeHandler);
 
   const analyzePhotoHandler = async (req: Request, res: Response) => {
     const auth = requireAuth(req as MaybeAuthRequest);

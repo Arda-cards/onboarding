@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Onboarding API
-  version: 1.10.0
+  version: 1.11.0
   description: |
     Backend API for onboarding durable session storage and ingestion.
 
@@ -280,12 +280,15 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
-  /url/scrape:
+  /urls/scrape:
     post:
       operationId: scrapeUrls
       summary: URL scrape
       description: |
         Scrape and normalize up to 50 URLs and return reviewable item metadata.
+        The backend attempts Playwright rendering first, then jsdom parsing, and
+        finally a Jina reader fallback when earlier providers fail or produce no
+        useful metadata.
       requestBody:
         required: true
         content:
@@ -920,6 +923,9 @@ components:
         imageUrl:
           type: string
           nullable: true
+        title:
+          type: string
+          nullable: true
         itemName:
           type: string
           nullable: true
@@ -942,6 +948,7 @@ components:
           type: boolean
         extractionSource:
           type: string
+          enum: [playwright, jsdom, jina, error]
         confidence:
           type: number
 
@@ -966,6 +973,7 @@ components:
           nullable: true
         extractionSource:
           type: string
+          enum: [playwright, jsdom, jina, error]
         item:
           $ref: "#/components/schemas/UrlScrapeItem"
 
@@ -992,6 +1000,7 @@ components:
         expiresAt:
           type: string
           format: date-time
+          description: Optional cache expiry time for reusable scrape results.
 
     # ---------- Photo Analysis ----------
 
