@@ -141,6 +141,11 @@ function requestMethod(options: RequestInit): string {
   return (options.method ?? 'GET').toUpperCase();
 }
 
+function shouldRetryAutomatically(method: string): boolean {
+  // Restrict retries to safe reads so transient upstream failures cannot duplicate mutations.
+  return method === 'GET';
+}
+
 function createRequestKey(endpoint: string, options: RequestInit): string {
   return `${requestMethod(options)} ${endpoint}`;
 }
@@ -303,6 +308,7 @@ async function applyRequestInterceptors(context: ApiRequestContext): Promise<Api
 async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const method = requestMethod(options);
   const requestKey = createRequestKey(endpoint, options);
+  const canRetryAutomatically = shouldRetryAutomatically(method);
 
   if (isCircuitOpen(requestKey)) {
     const cached = method === 'GET' ? readCachedResponse<T>(requestKey) : null;
@@ -342,7 +348,7 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
           throw new SessionExpiredError();
         }
 
-        if (isRetryableStatus(response.status) && attempt < MAX_RETRY_ATTEMPTS) {
+        if (canRetryAutomatically && isRetryableStatus(response.status) && attempt < MAX_RETRY_ATTEMPTS) {
           const retryAfterMs =
             parseRetryAfterMs(response.headers.get('Retry-After'))
             ?? RETRY_BACKOFF_MS[Math.min(attempt, RETRY_BACKOFF_MS.length - 1)];
@@ -385,7 +391,7 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
       const callerAborted = Boolean(context.options.signal?.aborted);
       const transientNetworkError = !callerAborted && isTransientNetworkError(error);
 
-      if (transientNetworkError && attempt < MAX_RETRY_ATTEMPTS) {
+      if (canRetryAutomatically && transientNetworkError && attempt < MAX_RETRY_ATTEMPTS) {
         const delayMs = RETRY_BACKOFF_MS[Math.min(attempt, RETRY_BACKOFF_MS.length - 1)];
         await sleep(delayMs);
         continue;

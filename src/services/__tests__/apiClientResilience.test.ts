@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ApiRequestError,
+  authApi,
   gmailApi,
   resetApiClientStateForTests,
 } from '../api';
@@ -92,5 +93,25 @@ describe('API client resilience', () => {
     const fetchCallsBeforeOpenCircuit = fetchMock.mock.calls.length;
     await expect(gmailApi.getStatus()).resolves.toEqual(cachedPayload);
     expect(fetchMock).toHaveBeenCalledTimes(fetchCallsBeforeOpenCircuit);
+  });
+
+  it('does not retry non-idempotent mutation requests', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      jsonResponse(
+        { error: 'Temporarily unavailable' },
+        {
+          status: 503,
+          headers: { 'Retry-After': '1' },
+        },
+      ),
+    );
+
+    const promise = expect(
+      authApi.login('user@example.com', 'password'),
+    ).rejects.toBeInstanceOf(ApiRequestError);
+    await vi.advanceTimersByTimeAsync(5_000);
+
+    await promise;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
