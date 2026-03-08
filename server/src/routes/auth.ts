@@ -1,8 +1,10 @@
+import { randomUUID } from 'node:crypto';
 import { Router, Request, Response } from 'express';
 import { google } from 'googleapis';
 import redisClient from '../utils/redisClient.js';
 import { requireRedis } from '../config.js';
 import bcrypt from 'bcryptjs';
+import { consumeAuthToken, generateAuthToken } from '../utils/authExchangeTokens.js';
 import {
   saveUser,
   getUserById,
@@ -17,62 +19,6 @@ const router = Router();
 
 // In-memory storage (for development without PostgreSQL)
 const users = new Map<string, StoredUser>(); // local cache for dev
-
-// Short-lived auth tokens for cross-origin authentication
-// Token -> { userId, expiresAt }
-const authTokens = new Map<string, { userId: string; expiresAt: Date }>();
-const AUTH_TOKEN_TTL_MS = 60_000; // 60 seconds
-const AUTH_TOKEN_TTL_SECONDS = 60;
-const AUTH_TOKEN_REDIS_PREFIX = 'auth:exchange:';
-
-async function generateAuthToken(userId: string): Promise<string> {
-  const token = Math.random().toString(36).substring(2) + Date.now().toString(36);
-  // Token expires in 60 seconds (just enough for the redirect)
-  authTokens.set(token, { userId, expiresAt: new Date(Date.now() + AUTH_TOKEN_TTL_MS) });
-
-  if (redisClient) {
-    try {
-      await redisClient.set(`${AUTH_TOKEN_REDIS_PREFIX}${token}`, userId, 'EX', AUTH_TOKEN_TTL_SECONDS);
-    } catch (error) {
-      console.warn('Failed to store auth exchange token in Redis:', error);
-    }
-  }
-  return token;
-}
-
-async function consumeAuthToken(token: string): Promise<string | null> {
-  if (redisClient) {
-    try {
-      const key = `${AUTH_TOKEN_REDIS_PREFIX}${token}`;
-      const lua = `
-        local v = redis.call('GET', KEYS[1])
-        if v then
-          redis.call('DEL', KEYS[1])
-        end
-        return v
-      `;
-      const value = await redisClient.eval(lua, 1, key);
-      const decoded =
-        typeof value === 'string'
-          ? value
-          : Buffer.isBuffer(value)
-            ? value.toString('utf8')
-            : '';
-      if (decoded.length > 0) {
-        authTokens.delete(token); // best-effort cleanup for same-instance tokens
-        return decoded;
-      }
-    } catch (error) {
-      console.warn('Failed to consume auth exchange token from Redis:', error);
-    }
-  }
-
-  const data = authTokens.get(token);
-  if (!data) return null;
-  authTokens.delete(token); // One-time use
-  if (data.expiresAt < new Date()) return null;
-  return data.userId;
-}
 
 export async function getUserEmail(userId: string): Promise<string | null> {
   return getUserEmailFromStore(userId);
@@ -280,7 +226,7 @@ router.post('/local/signup', async (req: Request, res: Response) => {
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
-    const userId = existingUser?.id || `local-${Math.random().toString(36).slice(2)}`;
+    const userId = existingUser?.id || `local-${randomUUID()}`;
 
     const userData: StoredUser = {
       id: userId,

@@ -84,6 +84,39 @@ export function isApiRequestError(error: unknown): error is ApiRequestError {
 }
 
 let hasNotifiedSessionExpired = false;
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRYABLE_STATUS_CODES = new Set([429, 502, 503]);
+const RETRY_BACKOFF_MS = [1000, 2000, 4000];
+const REQUEST_TIMEOUT_MS = 30_000;
+const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5;
+const CIRCUIT_BREAKER_OPEN_MS = 30_000;
+const isTestRuntime = import.meta.env.MODE === 'test';
+
+type CachedApiResponse = {
+  data: unknown;
+  cachedAtMs: number;
+};
+
+type CircuitState = {
+  consecutiveFailures: number;
+  openUntilMs: number | null;
+};
+
+interface ApiRequestContext {
+  endpoint: string;
+  url: string;
+  options: RequestInit;
+  correlationId: string;
+  requestKey: string;
+  attempt: number;
+}
+
+type ApiRequestInterceptor = (
+  context: ApiRequestContext,
+) => ApiRequestContext | Promise<ApiRequestContext>;
+
+const responseCache = new Map<string, CachedApiResponse>();
+const circuitBreakerState = new Map<string, CircuitState>();
 
 function notifySessionExpired(): void {
   if (hasNotifiedSessionExpired) return;
@@ -98,31 +131,281 @@ export function resetSessionExpiredSignalForTests(): void {
   hasNotifiedSessionExpired = false;
 }
 
-async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    ...options,
-    credentials: 'include', // Include cookies for session
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  });
+export function resetApiClientStateForTests(): void {
+  hasNotifiedSessionExpired = false;
+  responseCache.clear();
+  circuitBreakerState.clear();
+}
 
-  if (!response.ok) {
-    const error: ApiError = await response.json().catch(() => ({ error: 'Request failed' }));
-    if (response.status === 401) {
-      notifySessionExpired();
-      throw new SessionExpiredError();
+function requestMethod(options: RequestInit): string {
+  return (options.method ?? 'GET').toUpperCase();
+}
+
+function createRequestKey(endpoint: string, options: RequestInit): string {
+  return `${requestMethod(options)} ${endpoint}`;
+}
+
+function createCorrelationId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function buildRequestHeaders(headersInit: HeadersInit | undefined, correlationId: string): Headers {
+  const headers = new Headers(headersInit);
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  headers.set('X-Request-ID', correlationId);
+  return headers;
+}
+
+function createTimeoutSignal(
+  existingSignal: AbortSignal | null | undefined,
+  timeoutMs: number,
+): { signal: AbortSignal; cleanup: () => void } {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new DOMException('Request timed out', 'TimeoutError'));
+  }, timeoutMs);
+
+  const abortFromExistingSignal = () => {
+    controller.abort(existingSignal?.reason);
+  };
+
+  if (existingSignal) {
+    if (existingSignal.aborted) {
+      abortFromExistingSignal();
+    } else {
+      existingSignal.addEventListener('abort', abortFromExistingSignal, { once: true });
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timeoutId);
+      existingSignal?.removeEventListener('abort', abortFromExistingSignal);
+    },
+  };
+}
+
+function readCachedResponse<T>(requestKey: string): T | null {
+  const cached = responseCache.get(requestKey);
+  return (cached?.data as T | undefined) ?? null;
+}
+
+function isCircuitOpen(requestKey: string): boolean {
+  const state = circuitBreakerState.get(requestKey);
+  if (!state?.openUntilMs) {
+    return false;
+  }
+  if (state.openUntilMs <= Date.now()) {
+    circuitBreakerState.delete(requestKey);
+    return false;
+  }
+  return true;
+}
+
+function resetCircuitBreaker(requestKey: string): void {
+  circuitBreakerState.delete(requestKey);
+}
+
+function recordTransientFailure(requestKey: string): CircuitState {
+  const current = circuitBreakerState.get(requestKey) ?? {
+    consecutiveFailures: 0,
+    openUntilMs: null,
+  };
+
+  const consecutiveFailures = current.consecutiveFailures + 1;
+  const nextState: CircuitState = {
+    consecutiveFailures,
+    openUntilMs:
+      consecutiveFailures >= CIRCUIT_BREAKER_FAILURE_THRESHOLD
+        ? Date.now() + CIRCUIT_BREAKER_OPEN_MS
+        : null,
+  };
+
+  circuitBreakerState.set(requestKey, nextState);
+  return nextState;
+}
+
+function isRetryableStatus(status: number): boolean {
+  return RETRYABLE_STATUS_CODES.has(status);
+}
+
+function isTransientNetworkError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return error instanceof TypeError || error.name === 'AbortError' || error.name === 'TimeoutError';
+}
+
+function parseRetryAfterMs(value: string | null): number | null {
+  if (!value) return null;
+
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const absoluteTimeMs = Date.parse(value);
+  if (Number.isNaN(absoluteTimeMs)) {
+    return null;
+  }
+
+  return Math.max(0, absoluteTimeMs - Date.now());
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeApiError(error: unknown): ApiRequestError {
+  if (error instanceof ApiRequestError) {
+    return error;
+  }
+  if (error instanceof Error) {
+    return new ApiRequestError(error.message || 'Network request failed', 0, 'NETWORK_ERROR');
+  }
+  return new ApiRequestError('Network request failed', 0, 'NETWORK_ERROR');
+}
+
+const apiRequestInterceptors: ApiRequestInterceptor[] = [
+  (context) => ({
+    ...context,
+    options: {
+      ...context.options,
+      credentials: 'include',
+      headers: buildRequestHeaders(context.options.headers, context.correlationId),
+    },
+  }),
+  (context) => {
+    if (import.meta.env.DEV && !isTestRuntime) {
+      console.debug('[api]', requestMethod(context.options), context.endpoint, {
+        attempt: context.attempt + 1,
+        requestId: context.correlationId,
+      });
+    }
+    return context;
+  },
+];
+
+async function applyRequestInterceptors(context: ApiRequestContext): Promise<ApiRequestContext> {
+  let nextContext = context;
+  for (const interceptor of apiRequestInterceptors) {
+    nextContext = await interceptor(nextContext);
+  }
+  return nextContext;
+}
+
+async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  const method = requestMethod(options);
+  const requestKey = createRequestKey(endpoint, options);
+
+  if (isCircuitOpen(requestKey)) {
+    const cached = method === 'GET' ? readCachedResponse<T>(requestKey) : null;
+    if (cached !== null) {
+      return cached;
     }
     throw new ApiRequestError(
-      error.error || `HTTP ${response.status}`,
-      response.status,
-      error.code,
-      error.details
+      'Temporary upstream issue. Please retry shortly.',
+      503,
+      'CIRCUIT_OPEN',
     );
   }
 
-  return response.json();
+  const correlationId = createCorrelationId();
+
+  for (let attempt = 0; attempt <= MAX_RETRY_ATTEMPTS; attempt += 1) {
+    const context = await applyRequestInterceptors({
+      endpoint,
+      url: `${API_BASE_URL}${endpoint}`,
+      options,
+      correlationId,
+      requestKey,
+      attempt,
+    });
+    const { signal, cleanup } = createTimeoutSignal(context.options.signal, REQUEST_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(context.url, {
+        ...context.options,
+        signal,
+      });
+
+      if (!response.ok) {
+        const error: ApiError = await response.json().catch(() => ({ error: 'Request failed' }));
+        if (response.status === 401) {
+          notifySessionExpired();
+          throw new SessionExpiredError();
+        }
+
+        if (isRetryableStatus(response.status) && attempt < MAX_RETRY_ATTEMPTS) {
+          const retryAfterMs =
+            parseRetryAfterMs(response.headers.get('Retry-After'))
+            ?? RETRY_BACKOFF_MS[Math.min(attempt, RETRY_BACKOFF_MS.length - 1)];
+          await sleep(retryAfterMs);
+          continue;
+        }
+
+        if (isRetryableStatus(response.status)) {
+          const state = recordTransientFailure(requestKey);
+          const cached = method === 'GET' ? readCachedResponse<T>(requestKey) : null;
+          if (cached !== null && state.openUntilMs && state.openUntilMs > Date.now()) {
+            return cached;
+          }
+        }
+
+        throw new ApiRequestError(
+          error.error || `HTTP ${response.status}`,
+          response.status,
+          error.code,
+          error.details,
+        );
+      }
+
+      const data = (await response.json()) as T;
+      resetCircuitBreaker(requestKey);
+
+      if (method === 'GET') {
+        responseCache.set(requestKey, {
+          data,
+          cachedAtMs: Date.now(),
+        });
+      }
+
+      return data;
+    } catch (error) {
+      if (error instanceof SessionExpiredError) {
+        throw error;
+      }
+
+      const callerAborted = Boolean(context.options.signal?.aborted);
+      const transientNetworkError = !callerAborted && isTransientNetworkError(error);
+
+      if (transientNetworkError && attempt < MAX_RETRY_ATTEMPTS) {
+        const delayMs = RETRY_BACKOFF_MS[Math.min(attempt, RETRY_BACKOFF_MS.length - 1)];
+        await sleep(delayMs);
+        continue;
+      }
+
+      if (transientNetworkError) {
+        const state = recordTransientFailure(requestKey);
+        const cached = method === 'GET' ? readCachedResponse<T>(requestKey) : null;
+        if (cached !== null && state.openUntilMs && state.openUntilMs > Date.now()) {
+          return cached;
+        }
+      }
+
+      throw normalizeApiError(error);
+    } finally {
+      cleanup();
+    }
+  }
+
+  throw new ApiRequestError('Request failed', 0, 'NETWORK_ERROR');
 }
 
 // Auth API

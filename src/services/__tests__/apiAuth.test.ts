@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   authApi,
+  resetApiClientStateForTests,
   resetSessionExpiredSignalForTests,
   SESSION_EXPIRED_EVENT,
   SessionExpiredError,
@@ -8,10 +9,12 @@ import {
 
 describe('API auth error handling', () => {
   beforeEach(() => {
+    resetApiClientStateForTests();
     resetSessionExpiredSignalForTests();
   });
 
   afterEach(() => {
+    resetApiClientStateForTests();
     vi.restoreAllMocks();
   });
 
