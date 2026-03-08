@@ -7,7 +7,11 @@ import type { CapturedPhoto, ScannedBarcode } from "../lib/onboarding-session-st
 import { OnboardingSessionStore } from "../lib/onboarding-session-store";
 import { GmailOAuthStore, type KeyValueStore } from "../lib/gmail-oauth-store";
 import { buildGmailAuthUrl, refreshAccessToken } from "../lib/google-oauth";
-import { createImageUploadUrl, uploadImageDataUrl } from "../lib/image-upload";
+import {
+  createImageDownloadUrl,
+  createImageUploadUrl,
+  uploadImageDataUrl,
+} from "../lib/image-upload";
 import {
   lookupBarcode,
   type BarcodeLookupResolution,
@@ -305,22 +309,90 @@ export function createOnboardingRoutes(deps: {
     });
   });
 
-  router.post("/session/images/upload-url", async (req, res: Response) => {
+  const createUploadPresign = async (req: Request, res: Response, legacy: boolean) => {
     const auth = requireAuth(req as MaybeAuthRequest);
 
-    const body = (req.body ?? null) as { fileName?: unknown; contentType?: unknown } | null;
+    const body = (req.body ?? null) as {
+      sessionId?: unknown;
+      fileName?: unknown;
+      contentType?: unknown;
+      sizeBytes?: unknown;
+    } | null;
+    const sessionId = typeof body?.sessionId === "string" ? body.sessionId : "";
     const fileName = typeof body?.fileName === "string" ? body?.fileName : "";
     const contentType = typeof body?.contentType === "string" ? body?.contentType : "";
+    const sizeBytes = typeof body?.sizeBytes === "number"
+      ? body.sizeBytes
+      : legacy
+        ? deps.config.onboardingImageMaxBytes
+        : 0;
+
+    if (sessionId) {
+      const meta = await deps.sessionStore.getMeta(sessionId);
+      if (!meta || meta.tenantId !== auth.tenantId || meta.userId !== auth.sub) {
+        throw new ApiError(404, "NOT_FOUND", "Session not found");
+      }
+    }
 
     const result = await createImageUploadUrl({
       s3: deps.s3,
       bucket: deps.config.onboardingImageUploadBucket,
       prefix: deps.config.onboardingImageUploadPrefix,
       expiresInSeconds: deps.config.onboardingImageUploadUrlExpiresInSeconds,
+      maxBytes: deps.config.onboardingImageMaxBytes,
+      region: deps.config.awsRegion,
+      publicBaseUrl: deps.config.onboardingImagePublicBaseUrl,
       tenantId: auth.tenantId,
-      userId: auth.sub,
+      sessionId: sessionId || auth.sub,
       fileName,
       contentType,
+      sizeBytes,
+    });
+
+    deps.logger.info(
+      {
+        tenantId: auth.tenantId,
+        userId: auth.sub,
+        sessionId: sessionId || auth.sub,
+        contentType,
+        sizeBytes,
+      },
+      "Image upload URL created",
+    );
+
+    if (legacy) {
+      res.json({
+        data: {
+          uploadUrl: result.uploadUrl,
+          s3Key: result.objectKey,
+          expiresInSeconds: result.expiresInSeconds,
+        },
+      });
+      return;
+    }
+
+    res.json(result);
+  };
+
+  router.post("/session/images/upload-url", async (req, res: Response) => {
+    await createUploadPresign(req, res, true);
+  });
+
+  router.post("/uploads/presign", async (req, res: Response) => {
+    await createUploadPresign(req, res, false);
+  });
+
+  router.get(/^\/uploads\/(.+)$/, async (req, res: Response) => {
+    const auth = requireAuth(req as MaybeAuthRequest);
+    const objectKey = (req.params as Record<string, string | undefined>)["0"] ?? "";
+
+    const result = await createImageDownloadUrl({
+      s3: deps.s3,
+      bucket: deps.config.onboardingImageUploadBucket,
+      prefix: deps.config.onboardingImageUploadPrefix,
+      expiresInSeconds: deps.config.onboardingImageUploadUrlExpiresInSeconds,
+      tenantId: auth.tenantId,
+      objectKey,
     });
 
     res.json(result);

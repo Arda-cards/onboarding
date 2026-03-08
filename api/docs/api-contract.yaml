@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Onboarding API
-  version: 1.11.0
+  version: 1.12.0
   description: |
     Backend API for onboarding durable session storage and ingestion.
 
@@ -124,32 +124,66 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
-  /session/images/upload-url:
+  /uploads/presign:
     post:
       operationId: createImageUploadUrl
       summary: Get a presigned URL for image upload
       description: |
-        Returns a presigned S3 URL that the client uses to upload an image directly.
-        The server records the upload metadata (tenantId, sessionId, s3Key) for later retrieval.
+        Returns a presigned S3 PUT URL that the client uses to upload an image directly.
+        Object keys are session-scoped under the tenant prefix.
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/ImageUploadUrlRequest"
+              $ref: "#/components/schemas/ImageUploadPresignRequest"
       responses:
         "200":
           description: Presigned upload URL generated
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/ImageUploadUrlResponse"
+                $ref: "#/components/schemas/ImageUploadPresignResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
-        "422":
+        "413":
           $ref: "#/components/responses/ValidationError"
+        "503":
+          $ref: "#/components/responses/InternalError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /uploads/{key}:
+    get:
+      operationId: createImageDownloadUrl
+      summary: Get a presigned URL for image retrieval
+      description: |
+        Returns a short-lived presigned S3 GET URL for a tenant-owned upload object.
+        The `key` path parameter must be URL-encoded when it contains `/`.
+      parameters:
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+          description: URL-encoded S3 object key under the tenant upload prefix.
+      responses:
+        "200":
+          description: Presigned download URL generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageUploadDownloadResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/InternalError"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -1383,12 +1417,17 @@ components:
 
     # ---------- Image Upload ----------
 
-    ImageUploadUrlRequest:
+    ImageUploadPresignRequest:
       type: object
       required:
+        - sessionId
         - fileName
         - contentType
+        - sizeBytes
       properties:
+        sessionId:
+          type: string
+          description: Onboarding session that owns the uploaded asset.
         fileName:
           type: string
           description: Original file name (used for metadata, not the S3 key)
@@ -1399,29 +1438,51 @@ components:
             - image/png
             - image/webp
           description: MIME type of the image to upload
+        sizeBytes:
+          type: integer
+          format: int64
+          description: Expected file size in bytes, validated before presigning.
 
-    ImageUploadUrlResponse:
+    ImageUploadPresignResponse:
       type: object
       required:
-        - data
+        - uploadUrl
+        - objectKey
+        - imageUrl
+        - expiresInSeconds
       properties:
-        data:
-          type: object
-          required:
-            - uploadUrl
-            - s3Key
-            - expiresInSeconds
-          properties:
-            uploadUrl:
-              type: string
-              format: uri
-              description: Presigned S3 PUT URL
-            s3Key:
-              type: string
-              description: The object key that will be written to S3
-            expiresInSeconds:
-              type: integer
-              description: Seconds until the presigned URL expires
+        uploadUrl:
+          type: string
+          format: uri
+          description: Presigned S3 PUT URL
+        objectKey:
+          type: string
+          description: The object key that will be written to S3
+        imageUrl:
+          type: string
+          format: uri
+          description: Stable public or CDN URL for the object after upload
+        expiresInSeconds:
+          type: integer
+          description: Seconds until the presigned URL expires
+
+    ImageUploadDownloadResponse:
+      type: object
+      required:
+        - downloadUrl
+        - objectKey
+        - expiresInSeconds
+      properties:
+        downloadUrl:
+          type: string
+          format: uri
+          description: Presigned S3 GET URL
+        objectKey:
+          type: string
+          description: The tenant-owned object key being retrieved
+        expiresInSeconds:
+          type: integer
+          description: Seconds until the presigned URL expires
 
   responses:
     Unauthorized:

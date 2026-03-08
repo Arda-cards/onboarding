@@ -1,4 +1,4 @@
-import { PutObjectCommand, type S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, PutObjectCommand, type S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { randomUUID } from "node:crypto";
 import { ApiError } from "../types";
@@ -70,16 +70,76 @@ export interface CreateImageUploadUrlParams {
   bucket: string;
   prefix: string;
   expiresInSeconds: number;
+  maxBytes: number;
+  region: string;
+  publicBaseUrl?: string | null;
   tenantId: string;
-  userId: string;
+  sessionId: string;
   fileName: string;
   contentType: string;
+  sizeBytes: number;
 }
 
 export interface ImageUploadUrlResult {
   uploadUrl: string;
-  s3Key: string;
+  objectKey: string;
+  imageUrl: string;
   expiresInSeconds: number;
+}
+
+export interface CreateImageDownloadUrlParams {
+  s3: S3Client;
+  bucket: string;
+  prefix: string;
+  expiresInSeconds: number;
+  tenantId: string;
+  objectKey: string;
+}
+
+export interface ImageDownloadUrlResult {
+  downloadUrl: string;
+  objectKey: string;
+  expiresInSeconds: number;
+}
+
+function validateContentType(contentType: string): string {
+  if (!ALLOWED_CONTENT_TYPES.has(contentType)) {
+    throw new ApiError(
+      400,
+      "VALIDATION_ERROR",
+      "contentType must be one of: image/jpeg, image/png, image/webp",
+    );
+  }
+  return contentType;
+}
+
+function validateBucket(bucket: string) {
+  if (!bucket || bucket.trim().length === 0) {
+    throw new ApiError(503, "INTERNAL_ERROR", "Image upload is temporarily unavailable. Please retry.");
+  }
+}
+
+function validateSizeBytes(sizeBytes: number, maxBytes: number) {
+  if (!Number.isFinite(sizeBytes) || sizeBytes <= 0) {
+    throw new ApiError(400, "VALIDATION_ERROR", "sizeBytes must be a positive integer");
+  }
+  if (!Number.isFinite(maxBytes) || maxBytes <= 0) {
+    throw new ApiError(500, "INTERNAL_ERROR", "Invalid ONBOARDING_IMAGE_MAX_BYTES");
+  }
+  if (sizeBytes > maxBytes) {
+    throw new ApiError(413, "VALIDATION_ERROR", `File too large (max ${maxBytes} bytes)`);
+  }
+}
+
+function validateSessionId(sessionId: string): string {
+  const trimmed = sessionId.trim();
+  if (!trimmed) {
+    throw new ApiError(400, "VALIDATION_ERROR", "sessionId is required");
+  }
+  if (!/^[a-zA-Z0-9_-]+$/.test(trimmed)) {
+    throw new ApiError(400, "VALIDATION_ERROR", "sessionId is invalid");
+  }
+  return trimmed;
 }
 
 export async function createImageUploadUrl(
@@ -87,46 +147,93 @@ export async function createImageUploadUrl(
 ): Promise<ImageUploadUrlResult> {
   const fileName = params.fileName.trim();
   if (!fileName) {
-    throw new ApiError(422, "VALIDATION_ERROR", "fileName is required");
+    throw new ApiError(400, "VALIDATION_ERROR", "fileName is required");
   }
   if (fileName.length > 250) {
-    throw new ApiError(422, "VALIDATION_ERROR", "fileName is too long");
+    throw new ApiError(400, "VALIDATION_ERROR", "fileName is too long");
   }
 
-  if (!ALLOWED_CONTENT_TYPES.has(params.contentType)) {
-    throw new ApiError(
-      422,
-      "VALIDATION_ERROR",
-      "contentType must be one of: image/jpeg, image/png, image/webp",
-    );
-  }
-
-  if (!params.bucket || params.bucket.trim().length === 0) {
-    throw new ApiError(500, "INTERNAL_ERROR", "Image upload bucket is not configured");
-  }
+  const contentType = validateContentType(params.contentType);
+  validateBucket(params.bucket);
+  validateSizeBytes(params.sizeBytes, params.maxBytes);
+  const sessionId = validateSessionId(params.sessionId);
 
   const expiresInSeconds = Math.max(1, Math.min(params.expiresInSeconds, 3600));
   const prefix = normalizePrefix(params.prefix);
-  const ext = extForContentType(params.contentType);
+  const ext = extForContentType(contentType);
 
-  const s3Key = `${prefix}/${params.tenantId}/${params.userId}/${randomUUID()}.${ext}`;
+  const objectKey = `${prefix}/${params.tenantId}/${sessionId}/${randomUUID()}.${ext}`;
 
   const cmd = new PutObjectCommand({
     Bucket: params.bucket,
-    Key: s3Key,
-    ContentType: params.contentType,
+    Key: objectKey,
+    ContentType: contentType,
     Metadata: {
       tenant: params.tenantId,
-      user: params.userId,
+      session: sessionId,
       filename: fileName.slice(0, 200),
     },
   });
 
-  const uploadUrl = await getSignedUrl(params.s3 as any, cmd, {
-    expiresIn: expiresInSeconds,
+  let uploadUrl: string;
+  try {
+    uploadUrl = await getSignedUrl(params.s3 as any, cmd, {
+      expiresIn: expiresInSeconds,
+    });
+  } catch {
+    throw new ApiError(503, "INTERNAL_ERROR", "Image upload is temporarily unavailable. Please retry.");
+  }
+
+  const imageUrl = publicUrlForObject({
+    bucket: params.bucket,
+    region: params.region,
+    s3Key: objectKey,
+    publicBaseUrl: params.publicBaseUrl,
   });
 
-  return { uploadUrl, s3Key, expiresInSeconds };
+  return { uploadUrl, objectKey, imageUrl, expiresInSeconds };
+}
+
+export function validateObjectKeyForTenant(params: {
+  objectKey: string;
+  tenantId: string;
+  prefix: string;
+}): string {
+  const objectKey = decodeURIComponent(params.objectKey).replace(/^\/+/, "");
+  const prefix = normalizePrefix(params.prefix);
+  const expectedPrefix = `${prefix}/${params.tenantId}/`;
+  if (!objectKey.startsWith(expectedPrefix)) {
+    throw new ApiError(404, "NOT_FOUND", "Upload not found");
+  }
+  return objectKey;
+}
+
+export async function createImageDownloadUrl(
+  params: CreateImageDownloadUrlParams,
+): Promise<ImageDownloadUrlResult> {
+  validateBucket(params.bucket);
+  const objectKey = validateObjectKeyForTenant({
+    objectKey: params.objectKey,
+    tenantId: params.tenantId,
+    prefix: params.prefix,
+  });
+  const expiresInSeconds = Math.max(1, Math.min(params.expiresInSeconds, 3600));
+
+  const cmd = new GetObjectCommand({
+    Bucket: params.bucket,
+    Key: objectKey,
+  });
+
+  let downloadUrl: string;
+  try {
+    downloadUrl = await getSignedUrl(params.s3 as any, cmd, {
+      expiresIn: expiresInSeconds,
+    });
+  } catch {
+    throw new ApiError(503, "INTERNAL_ERROR", "Image upload is temporarily unavailable. Please retry.");
+  }
+
+  return { downloadUrl, objectKey, expiresInSeconds };
 }
 
 export interface S3Like {
