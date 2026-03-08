@@ -61,4 +61,24 @@ describe('health service', () => {
       },
     });
   });
+
+  it('returns degraded when optional redis is unavailable', async () => {
+    const report = await getReadinessReport({
+      checkDb: vi.fn().mockResolvedValue(undefined),
+      redisClient: {
+        ping: vi.fn().mockRejectedValue(new Error('redis offline')),
+      },
+      requireRedis: false,
+      geminiApiKey: 'test-key',
+    });
+
+    expect(report).toMatchObject({
+      status: 'degraded',
+      components: {
+        db: 'ok',
+        redis: 'down',
+        gemini: 'ok',
+      },
+    });
+  });
 });

@@ -58,9 +58,11 @@ export async function getReadinessReport(
   const geminiStatus: HealthComponentStatus = geminiConfigured ? 'ok' : 'disabled';
 
   const status: HealthStatus =
-    dbStatus === 'down' || redisStatus === 'down'
+    dbStatus === 'down' || (redisRequired && redisStatus === 'down')
       ? 'down'
-      : geminiStatus === 'disabled' || redisStatus === 'disabled'
+      : geminiStatus === 'disabled'
+        || redisStatus === 'disabled'
+        || (!redisRequired && redisStatus === 'down')
         ? 'degraded'
         : 'ok';
 
