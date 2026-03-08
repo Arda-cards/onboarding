@@ -5,6 +5,7 @@ import { OnboardingSessionStore } from "../lib/onboarding-session-store";
 import type { Config } from "../config";
 import type { KeyValueStore } from "../lib/gmail-oauth-store";
 import * as photoAnalysis from "../lib/photo-analysis";
+import * as urlScraper from "../lib/url-scraper";
 
 class FakeRedis {
   private strings = new Map<string, { value: string; expiresAtMs?: number }>();
@@ -173,6 +174,8 @@ function makeConfig(): Config {
     onboardingImageUploadUrlExpiresInSeconds: 900,
     onboardingImageMaxBytes: 5242880,
     onboardingImagePublicBaseUrl: null,
+    urlScrapeConcurrency: 5,
+    urlScrapeTimeoutMs: 30000,
     port: 3002,
     logLevel: "silent",
     nodeEnv: "test",
@@ -748,6 +751,102 @@ describe("onboarding routes", () => {
     });
   });
 
+  it("POST /urls/scrape logs telemetry and uses configured scrape settings", async () => {
+    const scrapeSpy = vi.spyOn(urlScraper, "scrapeUrls").mockResolvedValue({
+      requested: 1,
+      processed: 1,
+      results: [
+        {
+          sourceUrl: "https://example.com/p/1",
+          normalizedUrl: "https://example.com/p/1",
+          status: "success",
+          extractionSource: "jsdom",
+          item: {
+            sourceUrl: "https://example.com/p/1",
+            title: "Example Product",
+            itemName: "Example Product",
+            imageUrl: "https://example.com/p/1.png",
+            description: "Product description",
+            needsReview: false,
+            extractionSource: "jsdom",
+            confidence: 0.9,
+          },
+        },
+      ],
+      items: [
+        {
+          sourceUrl: "https://example.com/p/1",
+          title: "Example Product",
+          itemName: "Example Product",
+          imageUrl: "https://example.com/p/1.png",
+          description: "Product description",
+          needsReview: false,
+          extractionSource: "jsdom",
+          confidence: 0.9,
+        },
+      ],
+      expiresAt: "2026-02-26T12:00:00.000Z",
+    });
+
+    const redis = new FakeRedis();
+    const config = makeConfig();
+    const store = new OnboardingSessionStore(redis as any, {
+      ttlSeconds: 60,
+      frontendOrigin: config.onboardingFrontendOrigin,
+    });
+
+    const routeLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const accessTokenVerifier = { verify: vi.fn().mockResolvedValue({ sub: "u1", token_use: "access" }) };
+    const idTokenVerifier = {
+      verify: vi.fn().mockResolvedValue({ sub: "u1", email: "u1@example.com", "custom:tenant": "t1" }),
+    };
+
+    const app = createApp({
+      auth: { accessTokenVerifier, idTokenVerifier, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any },
+      logger: routeLogger as any,
+      config,
+      kv: new FakeKv(),
+      sessionStore: store,
+      s3: {} as any,
+    });
+
+    const res = await request(app)
+      .post("/api/onboarding/urls/scrape")
+      .set("Authorization", "Bearer test-access")
+      .set("X-ID-Token", "test-id")
+      .send({ urls: ["https://example.com/p/1"] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.processed).toBe(1);
+    expect(scrapeSpy).toHaveBeenCalledWith(
+      ["https://example.com/p/1"],
+      expect.objectContaining({
+        concurrency: 5,
+        timeoutMs: 30000,
+      }),
+    );
+    expect(routeLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: "t1",
+        userId: "u1",
+        requested: 1,
+        processed: 1,
+        successCount: 1,
+        partialCount: 0,
+        failedCount: 0,
+        results: [
+          {
+            sourceUrl: "https://example.com/p/1",
+            status: "success",
+            extractionSource: "jsdom",
+          },
+        ],
+        durationMs: expect.any(Number),
+      }),
+      "URL scrape completed",
+    );
+  });
+
   it("POST /photos/analyze returns gemini_unavailable when Gemini is not configured", async () => {
     const redis = new FakeRedis();
     const config = makeConfig();
@@ -943,6 +1042,7 @@ describe("onboarding routes", () => {
       { method: "post", path: "/api/onboarding/complete" },
       { method: "get",  path: "/api/onboarding/barcode/lookup?code=123" },
       { method: "post", path: "/api/onboarding/barcode/lookup" },
+      { method: "post", path: "/api/onboarding/urls/scrape" },
       { method: "post", path: "/api/onboarding/images/upload" },
     ];
 

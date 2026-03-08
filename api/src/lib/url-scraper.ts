@@ -1,17 +1,21 @@
 import { isIP } from "node:net";
+import { JSDOM } from "jsdom";
+import type { KeyValueStore } from "./gmail-oauth-store";
 import { ApiError } from "../types";
 
 const MAX_HTML_BYTES = 2_000_000;
-const FETCH_TIMEOUT_MS = 10_000;
-const CONCURRENCY_LIMIT = 5;
+const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_CONCURRENCY_LIMIT = 5;
 const MAX_REDIRECTS = 5;
+const CACHE_TTL_SECONDS = 24 * 60 * 60;
 
-export type UrlExtractionSource = "html-metadata" | "error";
+export type UrlExtractionSource = "playwright" | "jsdom" | "jina" | "error";
 
 export interface UrlScrapedItem {
   sourceUrl: string;
   productUrl?: string;
   imageUrl?: string;
+  title?: string;
   itemName?: string;
   supplier?: string;
   price?: number;
@@ -37,10 +41,50 @@ export interface UrlScrapeResponse {
   processed: number;
   results: UrlScrapeResult[];
   items: UrlScrapedItem[];
+  expiresAt?: string;
 }
 
 export interface UrlScraperDeps {
   fetchFn?: typeof fetch;
+  jinaFetchFn?: typeof fetch;
+  kv?: Pick<KeyValueStore, "get" | "set"> | null;
+  timeoutMs?: number;
+  concurrency?: number;
+  now?: () => number;
+  playwrightHtmlFn?: (
+    url: string,
+    timeoutMs: number,
+  ) => Promise<{ finalUrl?: string; html: string } | null>;
+}
+
+type AdapterSuccess = {
+  extractionSource: Exclude<UrlExtractionSource, "error">;
+  finalUrl: string;
+  item: UrlScrapedItem;
+};
+
+type CachedUrlScrapeResult = Omit<UrlScrapeResult, "sourceUrl"> & {
+  item: Omit<UrlScrapedItem, "sourceUrl">;
+};
+
+function normalizedTimeoutMs(value?: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_TIMEOUT_MS;
+  return Math.max(1_000, Math.min(parsed, 120_000));
+}
+
+function normalizedConcurrency(value?: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_CONCURRENCY_LIMIT;
+  return Math.max(1, Math.min(Math.floor(parsed), 20));
+}
+
+function deadlineFromNow(timeoutMs: number, now: () => number): number {
+  return now() + timeoutMs;
+}
+
+function msUntil(deadlineMs: number, now: () => number): number {
+  return Math.max(0, deadlineMs - now());
 }
 
 function timeoutSignal(ms: number): AbortSignal {
@@ -51,12 +95,10 @@ function timeoutSignal(ms: number): AbortSignal {
 }
 
 function isPrivateIpv4(ip: string): boolean {
-  const parts = ip.split(".").map((p) => Number(p));
-  if (parts.length !== 4 || parts.some((p) => !Number.isFinite(p))) return false;
+  const parts = ip.split(".").map((part) => Number(part));
+  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part))) return false;
   const [a, b] = parts;
-  if (a === 10) return true;
-  if (a === 127) return true;
-  if (a === 0) return true;
+  if (a === 10 || a === 127 || a === 0) return true;
   if (a === 169 && b === 254) return true;
   if (a === 192 && b === 168) return true;
   if (a === 172 && b >= 16 && b <= 31) return true;
@@ -66,9 +108,7 @@ function isPrivateIpv4(ip: string): boolean {
 function isPrivateIpv6(ip: string): boolean {
   const lower = ip.toLowerCase();
   if (lower === "::1") return true;
-  // Unique local addresses fc00::/7
   if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
-  // Link-local fe80::/10
   if (lower.startsWith("fe8") || lower.startsWith("fe9") || lower.startsWith("fea") || lower.startsWith("feb")) {
     return true;
   }
@@ -106,116 +146,44 @@ export function cleanUrlCandidate(input: string): string {
   }
 
   assertSafeUrl(url);
-
-  // Strip fragments (don’t affect fetch or product identity).
   url.hash = "";
   return url.toString();
 }
 
-function decodeHtmlEntities(value: string): string {
-  return value
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, "\"")
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'");
+function normalizeWhitespace(value: string | null | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.replace(/\s+/g, " ").trim();
+  return trimmed || undefined;
 }
 
-function stripHtmlTags(html: string): string {
-  return decodeHtmlEntities(
-    html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " "),
-  ).trim();
+function normalizeHeading(value: string | undefined): string | undefined {
+  return normalizeWhitespace(value?.replace(/^#+\s*/, "").replace(/^title:\s*/i, ""));
 }
 
-function extractTitle(html: string): string | undefined {
-  const match = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  if (!match?.[1]) return undefined;
-  return decodeHtmlEntities(match[1]).trim();
-}
-
-function extractH1(html: string): string | undefined {
-  const match = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-  if (!match?.[1]) return undefined;
-  return decodeHtmlEntities(match[1].replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
-}
-
-function readMetaContent(html: string, key: string): string | undefined {
-  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const patterns = [
-    new RegExp(`<meta[^>]*property=["']${escaped}["'][^>]*content=["']([^"']+)["'][^>]*>`, "i"),
-    new RegExp(`<meta[^>]*name=["']${escaped}["'][^>]*content=["']([^"']+)["'][^>]*>`, "i"),
-    new RegExp(`<meta[^>]*content=["']([^"']+)["'][^>]*(?:property|name)=["']${escaped}["'][^>]*>`, "i"),
-  ];
-
-  for (const pattern of patterns) {
-    const match = html.match(pattern);
-    if (match?.[1]) return decodeHtmlEntities(match[1]).trim();
-  }
-  return undefined;
-}
-
-function readCanonicalUrl(html: string): string | undefined {
-  const match = html.match(/<link[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["'][^>]*>/i)
-    || html.match(/<link[^>]*href=["']([^"']+)["'][^>]*rel=["']canonical["'][^>]*>/i);
-  if (!match?.[1]) return undefined;
+function resolveMaybeRelativeUrl(value: string | undefined, baseUrl: string): string | undefined {
+  if (!value) return undefined;
   try {
-    return cleanUrlCandidate(match[1]) || undefined;
+    const resolved = new URL(value, baseUrl);
+    if (resolved.protocol !== "http:" && resolved.protocol !== "https:") return undefined;
+    return resolved.toString();
   } catch {
     return undefined;
   }
-}
-
-function parseJson<T>(value: string): T | null {
-  try {
-    return JSON.parse(value) as T;
-  } catch {
-    return null;
-  }
-}
-
-function normalizeJsonLdNode(node: unknown): unknown[] {
-  if (!node) return [];
-  if (Array.isArray(node)) {
-    return node.flatMap((entry) => normalizeJsonLdNode(entry));
-  }
-  if (typeof node !== "object") return [];
-
-  const obj = node as Record<string, unknown>;
-  if (Array.isArray(obj["@graph"])) {
-    return normalizeJsonLdNode(obj["@graph"]);
-  }
-  return [obj];
-}
-
-function isProductNode(node: Record<string, unknown>): boolean {
-  const t = node["@type"];
-  if (typeof t === "string") return t.toLowerCase().includes("product");
-  if (Array.isArray(t)) {
-    return t.some((entry) => typeof entry === "string" && entry.toLowerCase().includes("product"));
-  }
-  return false;
 }
 
 function firstString(value: unknown): string | undefined {
   if (typeof value === "string" && value.trim()) return value.trim();
   if (Array.isArray(value)) {
     for (const entry of value) {
-      if (typeof entry === "string" && entry.trim()) return entry.trim();
-      if (entry && typeof entry === "object") {
-        const nested = firstString((entry as Record<string, unknown>).url);
-        if (nested) return nested;
-      }
+      const nested = firstString(entry);
+      if (nested) return nested;
     }
   }
   if (value && typeof value === "object") {
-    const obj = value as Record<string, unknown>;
-    const nested = firstString(obj.url) || firstString(obj.contentUrl);
+    const record = value as Record<string, unknown>;
+    const nested = firstString(record.url)
+      || firstString(record.contentUrl)
+      || firstString(record.name);
     if (nested) return nested;
   }
   return undefined;
@@ -234,8 +202,7 @@ function normalizeCurrency(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   if (!trimmed) return undefined;
-  if (trimmed.length <= 5) return trimmed.toUpperCase();
-  return trimmed;
+  return trimmed.length <= 5 ? trimmed.toUpperCase() : trimmed;
 }
 
 function extractPriceFromText(text: string): number | undefined {
@@ -260,17 +227,71 @@ function inferSupplierFromUrl(url: string): string | undefined {
   }
 }
 
-function extractJsonLdProduct(html: string): Partial<UrlScrapedItem> {
-  const scripts = Array.from(
-    html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi),
-  ).map((match) => match[1]?.trim()).filter(Boolean) as string[];
+function parseJson<T>(value: string): T | null {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeJsonLdNode(node: unknown): unknown[] {
+  if (!node) return [];
+  if (Array.isArray(node)) {
+    return node.flatMap((entry) => normalizeJsonLdNode(entry));
+  }
+  if (typeof node !== "object") return [];
+
+  const record = node as Record<string, unknown>;
+  if (Array.isArray(record["@graph"])) {
+    return normalizeJsonLdNode(record["@graph"]);
+  }
+  return [record];
+}
+
+function isProductNode(node: Record<string, unknown>): boolean {
+  const typeValue = node["@type"];
+  if (typeof typeValue === "string") return typeValue.toLowerCase().includes("product");
+  if (Array.isArray(typeValue)) {
+    return typeValue.some((entry) => typeof entry === "string" && entry.toLowerCase().includes("product"));
+  }
+  return false;
+}
+
+function readMetaContent(document: any, key: string): string | undefined {
+  const selectors = [
+    `meta[property="${key}"]`,
+    `meta[name="${key}"]`,
+  ];
+
+  for (const selector of selectors) {
+    const content = document.querySelector(selector)?.getAttribute("content");
+    const normalized = normalizeWhitespace(content);
+    if (normalized) return normalized;
+  }
+  return undefined;
+}
+
+function readCanonicalUrl(document: any, baseUrl: string): string | undefined {
+  const href = document.querySelector('link[rel="canonical"]')?.getAttribute("href");
+  return resolveMaybeRelativeUrl(normalizeWhitespace(href), baseUrl);
+}
+
+function extractJsonLdProduct(document: any, baseUrl: string): Partial<UrlScrapedItem> {
+  const scripts = Array.from<{ textContent?: string | null }>(
+    document.querySelectorAll('script[type="application/ld+json"]'),
+  )
+    .map((script) => script.textContent?.trim())
+    .filter(Boolean) as string[];
 
   for (const scriptContent of scripts) {
     const parsed = parseJson<unknown>(scriptContent);
     if (!parsed) continue;
 
     const nodes = normalizeJsonLdNode(parsed);
-    const productNode = nodes.find((node) => node && typeof node === "object" && isProductNode(node as any)) as Record<string, unknown> | undefined;
+    const productNode = nodes.find(
+      (node) => node && typeof node === "object" && isProductNode(node as Record<string, unknown>),
+    ) as Record<string, unknown> | undefined;
     if (!productNode) continue;
 
     const offersRaw = productNode.offers;
@@ -289,14 +310,19 @@ function extractJsonLdProduct(html: string): Partial<UrlScrapedItem> {
       || firstString(productNode.manufacturer)
       || firstString(productNode.seller)
       || firstString(productNode.vendor);
+    const title = normalizeWhitespace(firstString(productNode.name));
 
     return {
-      itemName: firstString(productNode.name),
-      description: firstString(productNode.description),
-      vendorSku: firstString(productNode.sku) || firstString(productNode.mpn) || firstString(productNode.productID),
-      supplier,
-      productUrl: firstString(productNode.url),
-      imageUrl: firstString(productNode.image),
+      title,
+      itemName: title,
+      description: normalizeWhitespace(firstString(productNode.description)),
+      vendorSku:
+        normalizeWhitespace(firstString(productNode.sku))
+        || normalizeWhitespace(firstString(productNode.mpn))
+        || normalizeWhitespace(firstString(productNode.productID)),
+      supplier: normalizeWhitespace(supplier),
+      productUrl: resolveMaybeRelativeUrl(firstString(productNode.url), baseUrl),
+      imageUrl: resolveMaybeRelativeUrl(firstString(productNode.image), baseUrl),
       price: normalizeAsNumber(offers?.price),
       currency: normalizeCurrency(offers?.priceCurrency),
     };
@@ -305,8 +331,8 @@ function extractJsonLdProduct(html: string): Partial<UrlScrapedItem> {
   return {};
 }
 
-async function readTextWithLimit(res: Response, maxBytes: number): Promise<string> {
-  const lengthHeader = res.headers.get("content-length");
+async function readTextWithLimit(response: Response, maxBytes: number): Promise<string> {
+  const lengthHeader = response.headers.get("content-length");
   if (lengthHeader) {
     const parsed = Number(lengthHeader);
     if (Number.isFinite(parsed) && parsed > maxBytes) {
@@ -314,9 +340,9 @@ async function readTextWithLimit(res: Response, maxBytes: number): Promise<strin
     }
   }
 
-  const reader = res.body?.getReader();
+  const reader = response.body?.getReader();
   if (!reader) {
-    return await res.text();
+    return await response.text();
   }
 
   const chunks: Uint8Array[] = [];
@@ -324,131 +350,444 @@ async function readTextWithLimit(res: Response, maxBytes: number): Promise<strin
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
-    if (value) {
-      total += value.length;
-      if (total > maxBytes) {
-        throw new ApiError(422, "VALIDATION_ERROR", "Response too large");
-      }
-      chunks.push(value);
+    if (!value) continue;
+
+    total += value.length;
+    if (total > maxBytes) {
+      throw new ApiError(422, "VALIDATION_ERROR", "Response too large");
     }
+    chunks.push(value);
   }
 
-  return Buffer.concat(chunks.map((c) => Buffer.from(c))).toString("utf8");
+  return Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))).toString("utf8");
 }
 
-async function fetchPage(url: string, deps: UrlScraperDeps): Promise<{ finalUrl: string; html: string; contentType: string }> {
-  const fetchFn = deps.fetchFn ?? fetch;
-  const signal = timeoutSignal(FETCH_TIMEOUT_MS);
-  const res = await fetchFn(url, {
+async function fetchText(url: string, fetchFn: typeof fetch, timeoutMs: number, accept: string): Promise<Response> {
+  return await fetchFn(url, {
     method: "GET",
     redirect: "follow",
-    signal,
+    signal: timeoutSignal(timeoutMs),
     headers: {
-      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      Accept: accept,
       "User-Agent": "onboarding-api/1.0 (url scrape)",
     },
   } as any);
+}
 
-  // Best-effort redirect bound: rely on Node fetch built-in policy; detect excessive redirects via header.
-  const redirectCount = Number(res.headers.get("x-fetch-redirect-count") || "0");
+async function fetchPage(url: string, fetchFn: typeof fetch, timeoutMs: number): Promise<{
+  finalUrl: string;
+  html: string;
+}> {
+  const response = await fetchText(
+    url,
+    fetchFn,
+    timeoutMs,
+    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+  );
+
+  const redirectCount = Number(response.headers.get("x-fetch-redirect-count") || "0");
   if (Number.isFinite(redirectCount) && redirectCount > MAX_REDIRECTS) {
     throw new ApiError(422, "VALIDATION_ERROR", "Too many redirects");
   }
 
-  if (!res.ok) {
-    throw new ApiError(422, "VALIDATION_ERROR", `Fetch failed (${res.status})`);
+  if (!response.ok) {
+    throw new ApiError(422, "VALIDATION_ERROR", `Fetch failed (${response.status})`);
   }
 
-  const contentType = res.headers.get("content-type") || "";
-  const html = await readTextWithLimit(res, MAX_HTML_BYTES);
-  return { finalUrl: res.url || url, html, contentType };
+  return {
+    finalUrl: response.url || url,
+    html: await readTextWithLimit(response, MAX_HTML_BYTES),
+  };
 }
 
-export function extractUrlMetadata(html: string, finalUrl: string): UrlScrapedItem {
-  const jsonLd = extractJsonLdProduct(html);
-  const ogTitle = readMetaContent(html, "og:title");
-  const ogDescription = readMetaContent(html, "og:description") || readMetaContent(html, "description");
-  const ogImage = readMetaContent(html, "og:image") || readMetaContent(html, "twitter:image");
-  const ogPrice = readMetaContent(html, "product:price:amount") || readMetaContent(html, "og:price:amount");
-  const ogCurrency = readMetaContent(html, "product:price:currency") || readMetaContent(html, "og:price:currency");
-  const title = extractTitle(html);
-  const h1 = extractH1(html);
-  const canonical = readCanonicalUrl(html);
+async function fetchJinaText(url: string, fetchFn: typeof fetch, timeoutMs: number): Promise<string> {
+  const response = await fetchText(
+    `https://r.jina.ai/${url}`,
+    fetchFn,
+    timeoutMs,
+    "text/plain,text/markdown;q=0.9,*/*;q=0.8",
+  );
 
+  if (!response.ok) {
+    throw new ApiError(422, "VALIDATION_ERROR", `Jina fetch failed (${response.status})`);
+  }
+
+  return await readTextWithLimit(response, MAX_HTML_BYTES);
+}
+
+function metadataSignalCount(item: Partial<UrlScrapedItem>): number {
+  return [
+    Boolean(item.title || item.itemName),
+    Boolean(item.description),
+    Boolean(item.imageUrl),
+    Boolean(item.price),
+    Boolean(item.supplier),
+  ].filter(Boolean).length;
+}
+
+function hasUsefulMetadata(item: Partial<UrlScrapedItem>): boolean {
+  return Boolean(
+    item.title
+    || item.itemName
+    || item.description
+    || item.imageUrl
+    || item.price,
+  );
+}
+
+function resultStatus(item: UrlScrapedItem): UrlScrapeResult["status"] {
+  return item.title || item.itemName || item.imageUrl ? "success" : "partial";
+}
+
+export function extractUrlMetadata(
+  html: string,
+  finalUrl: string,
+  extractionSource: UrlExtractionSource = "jsdom",
+): UrlScrapedItem {
+  const dom = new JSDOM(html, { url: finalUrl });
+  const { document } = dom.window;
+
+  const jsonLd = extractJsonLdProduct(document, finalUrl);
+  const ogTitle = readMetaContent(document, "og:title");
+  const ogDescription =
+    readMetaContent(document, "og:description")
+    || readMetaContent(document, "description");
+  const ogImage =
+    readMetaContent(document, "og:image")
+    || readMetaContent(document, "twitter:image");
+  const ogPrice =
+    readMetaContent(document, "product:price:amount")
+    || readMetaContent(document, "og:price:amount");
+  const ogCurrency =
+    readMetaContent(document, "product:price:currency")
+    || readMetaContent(document, "og:price:currency");
+  const pageTitle = normalizeWhitespace(document.querySelector("title")?.textContent);
+  const h1 = normalizeWhitespace(document.querySelector("h1")?.textContent);
+  const canonical = readCanonicalUrl(document, finalUrl);
+  const bodyText = normalizeWhitespace(document.body?.textContent) ?? "";
+
+  const title = jsonLd.title || ogTitle || h1 || pageTitle;
   const productUrl = canonical || jsonLd.productUrl || finalUrl;
-  const imageUrl = jsonLd.imageUrl || ogImage;
-  const itemName = jsonLd.itemName || ogTitle || h1 || title;
+  const imageUrl = resolveMaybeRelativeUrl(jsonLd.imageUrl || ogImage, finalUrl);
   const description = jsonLd.description || ogDescription;
-  const price = jsonLd.price ?? normalizeAsNumber(ogPrice) ?? extractPriceFromText(stripHtmlTags(html));
+  const price = jsonLd.price ?? normalizeAsNumber(ogPrice) ?? extractPriceFromText(bodyText);
   const currency = jsonLd.currency || normalizeCurrency(ogCurrency);
   const supplier = jsonLd.supplier || inferSupplierFromUrl(productUrl);
-
-  const signals = [
-    Boolean(itemName),
-    Boolean(imageUrl),
-    Boolean(price),
-    Boolean(supplier),
-    Boolean(description),
-  ].filter(Boolean).length;
-
+  const signals = metadataSignalCount({
+    title,
+    description,
+    imageUrl,
+    price,
+    supplier,
+  });
   const confidence = Math.min(1, 0.25 + signals * 0.15);
-  const needsReview = confidence < 0.75;
 
   return {
     sourceUrl: finalUrl,
     productUrl,
-    imageUrl: imageUrl || undefined,
-    itemName: itemName || undefined,
+    imageUrl,
+    title,
+    itemName: title,
     supplier,
     price,
     currency,
-    description: description || undefined,
-    vendorSku: jsonLd.vendorSku || undefined,
-    needsReview,
-    extractionSource: "html-metadata",
+    description,
+    vendorSku: jsonLd.vendorSku,
+    needsReview: confidence < 0.75,
+    extractionSource,
     confidence,
+  };
+}
+
+function stripMarkdown(value: string): string {
+  return value
+    .replace(/!\[[^\]]*]\(([^)]+)\)/g, "$1")
+    .replace(/\[([^\]]+)]\(([^)]+)\)/g, "$1")
+    .replace(/[*_`>#-]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeScrapeError(err: unknown): string {
+  if (err instanceof ApiError) return err.message;
+  if (err instanceof Error) {
+    if (err.name === "AbortError" || /abort|timed out/i.test(err.message)) {
+      return "Scrape timed out";
+    }
+    return err.message || "Unknown error";
+  }
+  return "Unknown error";
+}
+
+function firstMarkdownImage(text: string): string | undefined {
+  const imageMatch = text.match(/!\[[^\]]*]\((https?:\/\/[^\s)]+)\)/i);
+  if (imageMatch?.[1]) return imageMatch[1];
+
+  const plainMatch = text.match(/https?:\/\/\S+\.(?:png|jpe?g|webp)/i);
+  return plainMatch?.[0];
+}
+
+export function extractJinaMetadata(text: string, sourceUrl: string): UrlScrapedItem {
+  const trimmed = text.trim();
+  const paragraphs = trimmed
+    .split(/\n\s*\n/)
+    .map((paragraph) => stripMarkdown(paragraph))
+    .filter(Boolean);
+  const lines = trimmed
+    .split(/\r?\n/)
+    .map((line) => normalizeHeading(stripMarkdown(line)))
+    .filter(Boolean) as string[];
+
+  const title = lines[0];
+  const description = paragraphs.find((paragraph) => paragraph !== title);
+  const imageUrl = firstMarkdownImage(trimmed);
+  const price = extractPriceFromText(trimmed);
+  const supplier = inferSupplierFromUrl(sourceUrl);
+  const signals = metadataSignalCount({
+    title,
+    description,
+    imageUrl,
+    price,
+    supplier,
+  });
+  const confidence = Math.min(1, 0.2 + signals * 0.15);
+
+  return {
+    sourceUrl,
+    productUrl: sourceUrl,
+    imageUrl,
+    title,
+    itemName: title,
+    supplier,
+    price,
+    description,
+    needsReview: confidence < 0.75,
+    extractionSource: "jina",
+    confidence,
+  };
+}
+
+async function defaultPlaywrightHtmlFn(
+  url: string,
+  timeoutMs: number,
+): Promise<{ finalUrl?: string; html: string } | null> {
+  let playwright: any;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    playwright = require("playwright");
+  } catch {
+    return null;
+  }
+
+  const chromium = playwright?.chromium;
+  if (!chromium?.launch) return null;
+
+  let browser: any;
+  try {
+    browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.goto(url, { waitUntil: "networkidle", timeout: timeoutMs });
+    const html = await page.content();
+    return {
+      finalUrl: page.url(),
+      html,
+    };
+  } catch {
+    return null;
+  } finally {
+    if (browser) {
+      await browser.close().catch(() => undefined);
+    }
+  }
+}
+
+export async function scrapeWithPlaywright(
+  url: string,
+  deps: UrlScraperDeps = {},
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<AdapterSuccess | null> {
+  const playwrightHtmlFn = deps.playwrightHtmlFn ?? defaultPlaywrightHtmlFn;
+  const page = await playwrightHtmlFn(url, timeoutMs);
+  if (!page?.html) return null;
+
+  const finalUrl = page.finalUrl || url;
+  return {
+    extractionSource: "playwright",
+    finalUrl,
+    item: extractUrlMetadata(page.html, finalUrl, "playwright"),
+  };
+}
+
+export async function scrapeWithJsdom(
+  url: string,
+  deps: UrlScraperDeps = {},
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<AdapterSuccess> {
+  const page = await fetchPage(url, deps.fetchFn ?? fetch, timeoutMs);
+  return {
+    extractionSource: "jsdom",
+    finalUrl: page.finalUrl,
+    item: extractUrlMetadata(page.html, page.finalUrl, "jsdom"),
+  };
+}
+
+export async function scrapeWithJina(
+  url: string,
+  deps: UrlScraperDeps = {},
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<AdapterSuccess> {
+  const text = await fetchJinaText(url, deps.jinaFetchFn ?? deps.fetchFn ?? fetch, timeoutMs);
+  return {
+    extractionSource: "jina",
+    finalUrl: url,
+    item: extractJinaMetadata(text, url),
+  };
+}
+
+function cacheKey(normalizedUrl: string): string {
+  return `url:scrape:${normalizedUrl}`;
+}
+
+async function getCachedResult(
+  kv: Pick<KeyValueStore, "get" | "set"> | null | undefined,
+  normalizedUrl: string,
+  sourceUrl: string,
+): Promise<UrlScrapeResult | null> {
+  if (!kv) return null;
+
+  try {
+    const cached = await kv.get(cacheKey(normalizedUrl));
+    if (!cached) return null;
+
+    const parsed = JSON.parse(cached) as CachedUrlScrapeResult;
+    return {
+      ...parsed,
+      sourceUrl,
+      item: {
+        ...parsed.item,
+        sourceUrl,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function setCachedResult(
+  kv: Pick<KeyValueStore, "get" | "set"> | null | undefined,
+  normalizedUrl: string,
+  result: UrlScrapeResult,
+): Promise<void> {
+  if (!kv) return;
+
+  try {
+    const payload: CachedUrlScrapeResult = {
+      ...result,
+      item: {
+        ...result.item,
+      },
+    };
+    delete (payload as { sourceUrl?: string }).sourceUrl;
+    delete (payload.item as { sourceUrl?: string }).sourceUrl;
+    await kv.set(cacheKey(normalizedUrl), JSON.stringify(payload), { EX: CACHE_TTL_SECONDS });
+  } catch {
+    // Cache is best-effort only.
+  }
+}
+
+function selectBestAttempt(attempts: AdapterSuccess[]): AdapterSuccess | null {
+  if (attempts.length === 0) return null;
+  return attempts.reduce((best, current) => {
+    return metadataSignalCount(current.item) > metadataSignalCount(best.item) ? current : best;
+  });
+}
+
+function failedResult(sourceUrl: string, normalizedUrl: string | undefined, message: string): UrlScrapeResult {
+  const item: UrlScrapedItem = {
+    sourceUrl,
+    needsReview: true,
+    extractionSource: "error",
+    confidence: 0,
+  };
+
+  return {
+    sourceUrl,
+    normalizedUrl,
+    status: "failed",
+    message,
+    extractionSource: "error",
+    item,
+  };
+}
+
+function toResult(sourceUrl: string, normalizedUrl: string, attempt: AdapterSuccess): UrlScrapeResult {
+  const item: UrlScrapedItem = {
+    ...attempt.item,
+    sourceUrl,
+    extractionSource: attempt.extractionSource,
+  };
+  const status = resultStatus(item);
+
+  return {
+    sourceUrl,
+    normalizedUrl,
+    status,
+    message: status === "partial" ? "Missing key metadata; review required" : undefined,
+    extractionSource: attempt.extractionSource,
+    item,
   };
 }
 
 async function scrapeOne(sourceUrl: string, deps: UrlScraperDeps): Promise<UrlScrapeResult> {
   let normalizedUrl: string | undefined;
+
   try {
     normalizedUrl = cleanUrlCandidate(sourceUrl);
-    const page = await fetchPage(normalizedUrl, deps);
-    const item = extractUrlMetadata(page.html, page.finalUrl);
+    const cached = await getCachedResult(deps.kv, normalizedUrl, sourceUrl);
+    if (cached) return cached;
 
-    const status: UrlScrapeResult["status"] = item.itemName || item.imageUrl ? "success" : "partial";
-    const message = status === "partial" ? "Missing key metadata; review required" : undefined;
+    const now = deps.now ?? (() => Date.now());
+    const deadlineMs = deadlineFromNow(normalizedTimeoutMs(deps.timeoutMs), now);
+    const attempts: AdapterSuccess[] = [];
+    const errors: string[] = [];
 
-    return {
+    const adapters = [scrapeWithPlaywright, scrapeWithJsdom, scrapeWithJina] as const;
+    for (const adapter of adapters) {
+      const remainingMs = msUntil(deadlineMs, now);
+      if (remainingMs <= 0) {
+        errors.push("Scrape timed out");
+        break;
+      }
+
+      try {
+        const attempt = await adapter(normalizedUrl, deps, remainingMs);
+        if (!attempt) continue;
+        attempts.push(attempt);
+        if (hasUsefulMetadata(attempt.item)) {
+          const result = toResult(sourceUrl, normalizedUrl, attempt);
+          await setCachedResult(deps.kv, normalizedUrl, result);
+          return result;
+        }
+      } catch (err) {
+        errors.push(normalizeScrapeError(err));
+      }
+    }
+
+    const bestAttempt = selectBestAttempt(attempts);
+    if (bestAttempt) {
+      const result = toResult(sourceUrl, normalizedUrl, bestAttempt);
+      await setCachedResult(deps.kv, normalizedUrl, result);
+      return result;
+    }
+
+    return failedResult(
       sourceUrl,
       normalizedUrl,
-      status,
-      message,
-      extractionSource: item.extractionSource,
-      item: { ...item, sourceUrl },
-    };
+      errors.at(-1) || "All scrape providers failed",
+    );
   } catch (err) {
-    const message =
-      err instanceof ApiError
-        ? err.message
-        : err instanceof Error
-          ? err.message
-          : "Unknown error";
-    const item: UrlScrapedItem = {
-      sourceUrl,
-      needsReview: true,
-      extractionSource: "error",
-      confidence: 0,
-    };
-    return {
-      sourceUrl,
-      normalizedUrl,
-      status: "failed",
-      message,
-      extractionSource: "error",
-      item,
-    };
+    const message = normalizeScrapeError(err);
+    return failedResult(sourceUrl, normalizedUrl, message);
   }
 }
 
@@ -471,8 +810,8 @@ async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promis
 
 export async function scrapeUrls(urls: string[], deps: UrlScraperDeps = {}): Promise<UrlScrapeResponse> {
   const cleaned = urls
-    .filter((u): u is string => typeof u === "string")
-    .map((u) => u.trim())
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
     .filter(Boolean);
 
   const deduped = Array.from(new Set(cleaned));
@@ -483,16 +822,19 @@ export async function scrapeUrls(urls: string[], deps: UrlScraperDeps = {}): Pro
     throw new ApiError(422, "VALIDATION_ERROR", "Maximum 50 URLs are allowed per request");
   }
 
-  const results = await mapLimit(deduped, CONCURRENCY_LIMIT, (u) => scrapeOne(u, deps));
-  const items = results
-    .filter((r) => r.status !== "failed")
-    .map((r) => r.item);
+  const results = await mapLimit(
+    deduped,
+    normalizedConcurrency(deps.concurrency),
+    (url) => scrapeOne(url, deps),
+  );
+  const items = results.filter((result) => result.status !== "failed").map((result) => result.item);
+  const now = deps.now ?? (() => Date.now());
 
   return {
     requested: urls.length,
     processed: results.length,
     results,
     items,
+    expiresAt: new Date(now() + CACHE_TTL_SECONDS * 1000).toISOString(),
   };
 }
-

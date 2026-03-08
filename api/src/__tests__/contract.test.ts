@@ -157,6 +157,28 @@ describe("API contract", () => {
     });
   });
 
+  describe("url scrape contract", () => {
+    it("documents POST /urls/scrape with the batch request body", () => {
+      const scrapePost = contract.paths["/urls/scrape"].post;
+      expect(scrapePost).toBeDefined();
+      expect(scrapePost.requestBody.required).toBe(true);
+      expect(
+        scrapePost.requestBody.content["application/json"].schema.$ref,
+      ).toBe("#/components/schemas/UrlScrapeRequest");
+    });
+
+    it("documents scrape providers and the title field in URL scrape responses", () => {
+      const item = contract.components.schemas.UrlScrapeItem;
+      expect(item.properties.title).toBeDefined();
+      expect(item.properties.extractionSource.enum).toEqual(
+        expect.arrayContaining(["playwright", "jsdom", "jina", "error"]),
+      );
+      expect(contract.components.schemas.UrlScrapeResult.properties.extractionSource.enum).toEqual(
+        expect.arrayContaining(["playwright", "jsdom", "jina", "error"]),
+      );
+    });
+  });
+
   describe("photo analysis contract", () => {
     it("documents POST /photos/analyze with an imageUrl request body", () => {
       const analyzePost = contract.paths["/photos/analyze"].post;
