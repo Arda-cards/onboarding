@@ -157,6 +157,38 @@ describe("API contract", () => {
     });
   });
 
+  describe("photo analysis contract", () => {
+    it("documents POST /photos/analyze with an imageUrl request body", () => {
+      const analyzePost = contract.paths["/photos/analyze"].post;
+      expect(analyzePost).toBeDefined();
+      expect(analyzePost.requestBody.required).toBe(true);
+      expect(
+        analyzePost.requestBody.content["application/json"].schema.$ref,
+      ).toBe("#/components/schemas/PhotoAnalyzeRequest");
+    });
+
+    it("documents graceful degradation and metadata fields in photo analysis responses", () => {
+      const response = contract.components.schemas.PhotoAnalyzeResponse;
+      expect(response.required).toEqual(
+        expect.arrayContaining([
+          "analyzed",
+          "productName",
+          "description",
+          "estimatedCategory",
+          "brand",
+          "confidence",
+        ]),
+      );
+      expect(response.properties.reason.enum).toEqual(["gemini_unavailable"]);
+    });
+
+    it("documents validation and rate-limit responses for photo analysis", () => {
+      const analyzePost = contract.paths["/photos/analyze"].post;
+      expect(analyzePost.responses["400"]).toBeDefined();
+      expect(analyzePost.responses["429"]).toBeDefined();
+    });
+  });
+
   describe("response consistency", () => {
     const paths = contract.paths;
 

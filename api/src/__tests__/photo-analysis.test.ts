@@ -1,14 +1,34 @@
 import { describe, it, expect } from "vitest";
 import { ApiError } from "../types";
-import { analyzePhoto, extractFirstJsonObject, parseImageDataUrl } from "../lib/photo-analysis";
-
-const TINY_PNG_DATA_URL = "data:image/png;base64,YQ==";
+import {
+  analyzePhoto,
+  extractFirstJsonObject,
+  resolvePhotoAnalysisImageUrl,
+} from "../lib/photo-analysis";
 
 describe("photo analysis helpers", () => {
-  it("validates image data URLs", () => {
-    expect(() => parseImageDataUrl("not-a-data-url")).toThrow(ApiError);
-    expect(() => parseImageDataUrl("data:image/gif;base64,YQ==")).toThrow(ApiError);
-    expect(() => parseImageDataUrl(TINY_PNG_DATA_URL)).not.toThrow();
+  it("resolves onboarding image keys to public URLs", () => {
+    expect(
+      resolvePhotoAnalysisImageUrl({
+        imageUrl: "onboarding/t1/u1/example.png",
+        bucket: "bucket",
+        region: "us-east-1",
+        publicBaseUrl: null,
+        prefix: "onboarding",
+      }),
+    ).toBe("https://bucket.s3.amazonaws.com/onboarding/t1/u1/example.png");
+  });
+
+  it("rejects non-onboarding image URLs", () => {
+    expect(() =>
+      resolvePhotoAnalysisImageUrl({
+        imageUrl: "https://example.com/photo.png",
+        bucket: "bucket",
+        region: "us-east-1",
+        publicBaseUrl: null,
+        prefix: "onboarding",
+      }),
+    ).toThrow(ApiError);
   });
 
   it("extracts JSON objects from fenced output", () => {
@@ -18,57 +38,155 @@ describe("photo analysis helpers", () => {
 });
 
 describe("analyzePhoto", () => {
-  it("throws 503 when GEMINI_API_KEY is missing", async () => {
+  it("returns gemini_unavailable when GEMINI_API_KEY is missing", async () => {
+    const fetchFn = async () => {
+      throw new Error("fetch should not be called");
+    };
+
     await expect(
       analyzePhoto({
-        imageData: TINY_PNG_DATA_URL,
+        imageUrl: "https://bucket.s3.amazonaws.com/onboarding/t1/u1/example.png",
         geminiApiKey: null,
+        maxImageBytes: 1024,
         minIntervalMs: 0,
+        fetchFn,
       }),
-    ).rejects.toEqual(
-      expect.objectContaining({
-        name: "ApiError",
-        statusCode: 503,
-        code: "INTERNAL_ERROR",
-      } satisfies Partial<ApiError>),
-    );
+    ).resolves.toEqual({
+      analyzed: false,
+      reason: "gemini_unavailable",
+      productName: null,
+      description: null,
+      estimatedCategory: null,
+      brand: null,
+      confidence: 0,
+    });
   });
 
   it("sanitizes model output to stable fields", async () => {
     const analysis = await analyzePhoto({
-      imageData: TINY_PNG_DATA_URL,
+      imageUrl: "https://bucket.s3.amazonaws.com/onboarding/t1/u1/example.png",
       geminiApiKey: "test-key",
+      maxImageBytes: 1024,
       minIntervalMs: 0,
+      fetchFn: async () =>
+        ({
+          ok: true,
+          headers: {
+            get(name: string) {
+              if (name.toLowerCase() === "content-type") return "image/png";
+              return null;
+            },
+          },
+          arrayBuffer: async () => Buffer.from("png-bytes"),
+        } as Response),
       generateTextFn: async () =>
-        "```json\n{\n  \"suggestedName\": \"  Foo\\nBar  \",\n  \"suggestedSupplier\": 123,\n  \"confidence\": \"0.7\",\n  \"notes\": \"ok\",\n  \"extra\": true\n}\n```",
+        "```json\n{\n  \"productName\": \"  Foo\\nBar  \",\n  \"description\": \"  Tasty snack  \",\n  \"estimatedCategory\": \" Pantry \",\n  \"brand\": 123,\n  \"confidence\": \"0.7\",\n  \"extra\": true\n}\n```",
     });
 
     expect(analysis).toEqual({
-      suggestedName: "Foo Bar",
-      suggestedSupplier: null,
+      analyzed: true,
+      productName: "Foo Bar",
+      description: "Tasty snack",
+      estimatedCategory: "Pantry",
+      brand: null,
       confidence: 0.7,
-      notes: "ok",
     });
   });
 
   it("rate-limits repeated calls when configured", async () => {
-    const generateTextFn = async () => "{\"suggestedName\":null,\"suggestedSupplier\":null,\"confidence\":0,\"notes\":null}";
+    const generateTextFn = async () =>
+      "{\"productName\":null,\"description\":null,\"estimatedCategory\":null,\"brand\":null,\"confidence\":0}";
+    const fetchFn = async () =>
+      ({
+        ok: true,
+        headers: {
+          get(name: string) {
+            if (name.toLowerCase() === "content-type") return "image/png";
+            return null;
+          },
+        },
+        arrayBuffer: async () => Buffer.from("png-bytes"),
+      } as Response);
 
     await analyzePhoto({
-      imageData: TINY_PNG_DATA_URL,
+      imageUrl: "https://bucket.s3.amazonaws.com/onboarding/t1/u1/example.png",
       geminiApiKey: "k",
+      maxImageBytes: 1024,
       now: () => 1000,
       minIntervalMs: 1000,
+      fetchFn,
       generateTextFn,
     });
 
     await expect(
       analyzePhoto({
-        imageData: TINY_PNG_DATA_URL,
+        imageUrl: "https://bucket.s3.amazonaws.com/onboarding/t1/u1/example.png",
         geminiApiKey: "k",
+        maxImageBytes: 1024,
         now: () => 1500,
         minIntervalMs: 1000,
+        fetchFn,
         generateTextFn,
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        name: "ApiError",
+        statusCode: 429,
+        code: "RATE_LIMITED",
+      } satisfies Partial<ApiError>),
+    );
+  });
+
+  it("rejects unsupported fetched image formats", async () => {
+    await expect(
+      analyzePhoto({
+        imageUrl: "https://bucket.s3.amazonaws.com/onboarding/t1/u1/example.gif",
+        geminiApiKey: "k",
+        maxImageBytes: 1024,
+        minIntervalMs: 0,
+        fetchFn: async () =>
+          ({
+            ok: true,
+            headers: {
+              get(name: string) {
+                if (name.toLowerCase() === "content-type") return "image/gif";
+                return null;
+              },
+            },
+            arrayBuffer: async () => Buffer.from("gif-bytes"),
+          } as Response),
+        generateTextFn: async () => "{}",
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        name: "ApiError",
+        statusCode: 400,
+        code: "VALIDATION_ERROR",
+      } satisfies Partial<ApiError>),
+    );
+  });
+
+  it("maps Gemini rate limiting errors to RATE_LIMITED", async () => {
+    await expect(
+      analyzePhoto({
+        imageUrl: "https://bucket.s3.amazonaws.com/onboarding/t1/u1/example.png",
+        geminiApiKey: "k",
+        maxImageBytes: 1024,
+        minIntervalMs: 0,
+        fetchFn: async () =>
+          ({
+            ok: true,
+            headers: {
+              get(name: string) {
+                if (name.toLowerCase() === "content-type") return "image/png";
+                return null;
+              },
+            },
+            arrayBuffer: async () => Buffer.from("png-bytes"),
+          } as Response),
+        generateTextFn: async () => {
+          throw new Error("429 RESOURCE_EXHAUSTED");
+        },
       }),
     ).rejects.toEqual(
       expect.objectContaining({

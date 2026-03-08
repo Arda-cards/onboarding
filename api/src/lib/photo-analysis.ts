@@ -1,20 +1,41 @@
+import { publicUrlForObject } from "./image-upload";
 import { ApiError } from "../types";
 
-export type PhotoAnalysisResult = {
-  suggestedName: string | null;
-  suggestedSupplier: string | null;
-  confidence: number;
-  notes: string | null;
-};
+type SupportedImageMimeType = "image/jpeg" | "image/png" | "image/webp";
+
+export type PhotoAnalysisUnavailableReason = "gemini_unavailable";
+
+export type PhotoAnalysisResult =
+  | {
+    analyzed: true;
+    productName: string | null;
+    description: string | null;
+    estimatedCategory: string | null;
+    brand: string | null;
+    confidence: number;
+  }
+  | {
+    analyzed: false;
+    reason: PhotoAnalysisUnavailableReason;
+    productName: null;
+    description: null;
+    estimatedCategory: null;
+    brand: null;
+    confidence: 0;
+  };
 
 type GeminiGenerateTextFn = (params: {
   prompt: string;
   base64Data: string;
-  mimeType: string;
+  mimeType: SupportedImageMimeType;
 }) => Promise<string>;
 
 const DEFAULT_MODEL = "gemini-1.5-flash";
-const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
+const SUPPORTED_IMAGE_MIME_TYPES = new Set<SupportedImageMimeType>([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+]);
 
 let lastGeminiCallAtMs = 0;
 
@@ -30,42 +51,106 @@ function sanitizeText(value: unknown, maxLen: number): string | null {
   return trimmed.length > maxLen ? `${trimmed.slice(0, maxLen - 1)}…` : trimmed;
 }
 
-export function parseImageDataUrl(imageData: string): {
-  mimeType: "image/jpeg" | "image/png" | "image/webp";
-  base64Data: string;
-} {
-  const trimmed = imageData.trim();
-  const match = /^data:([^;]+);base64,([a-zA-Z0-9+/=]+)$/.exec(trimmed);
-  if (!match) {
-    throw new ApiError(422, "VALIDATION_ERROR", "imageData must be a base64 data URL");
+function normalizeImageMimeType(value: string | null): SupportedImageMimeType | null {
+  if (!value) return null;
+  const mimeType = value.split(";")[0]?.trim().toLowerCase() ?? "";
+  return SUPPORTED_IMAGE_MIME_TYPES.has(mimeType as SupportedImageMimeType)
+    ? (mimeType as SupportedImageMimeType)
+    : null;
+}
+
+function normalizePrefix(prefix: string): string {
+  return prefix.trim().replace(/^\/+/, "").replace(/\/+$/, "");
+}
+
+function defaultS3BaseUrls(params: { bucket: string; region: string }): string[] {
+  return [
+    `https://${params.bucket}.s3.amazonaws.com`,
+    `https://${params.bucket}.s3.${params.region}.amazonaws.com`,
+  ];
+}
+
+function encodedPathPrefix(prefix: string): string {
+  const normalized = normalizePrefix(prefix);
+  if (!normalized) return "";
+  return normalized.split("/").map(encodeURIComponent).join("/");
+}
+
+function unavailablePhotoAnalysis(): PhotoAnalysisResult {
+  return {
+    analyzed: false,
+    reason: "gemini_unavailable",
+    productName: null,
+    description: null,
+    estimatedCategory: null,
+    brand: null,
+    confidence: 0,
+  };
+}
+
+export function resolvePhotoAnalysisImageUrl(params: {
+  imageUrl: string;
+  bucket: string;
+  region: string;
+  publicBaseUrl?: string | null;
+  prefix: string;
+}): string {
+  const rawImageUrl = params.imageUrl.trim();
+  if (!rawImageUrl) {
+    throw new ApiError(400, "VALIDATION_ERROR", "imageUrl is required");
   }
 
-  const mimeType = match[1] ?? "";
-  if (mimeType !== "image/jpeg" && mimeType !== "image/png" && mimeType !== "image/webp") {
+  const normalizedPrefix = normalizePrefix(params.prefix);
+  const allowedUrlPrefix = encodedPathPrefix(normalizedPrefix);
+
+  try {
+    const parsed = new URL(rawImageUrl);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new ApiError(
+        400,
+        "VALIDATION_ERROR",
+        "imageUrl must be an http(s) onboarding image URL or storage key",
+      );
+    }
+
+    const publicBaseUrl = params.publicBaseUrl?.trim().replace(/\/+$/, "") ?? null;
+    const matchesPublicBaseUrl =
+      publicBaseUrl !== null && parsed.toString().startsWith(`${publicBaseUrl}/`);
+    const matchesS3BaseUrl = defaultS3BaseUrls(params).some((baseUrl) => {
+      if (!parsed.toString().startsWith(`${baseUrl}/`)) return false;
+      if (!allowedUrlPrefix) return true;
+      return parsed.pathname === `/${allowedUrlPrefix}`
+        || parsed.pathname.startsWith(`/${allowedUrlPrefix}/`);
+    });
+
+    if (!matchesPublicBaseUrl && !matchesS3BaseUrl) {
+      throw new ApiError(
+        400,
+        "VALIDATION_ERROR",
+        "imageUrl must reference an onboarding image URL or storage key",
+      );
+    }
+
+    return parsed.toString();
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+  }
+
+  const s3Key = rawImageUrl.replace(/^\/+/, "");
+  if (normalizedPrefix && s3Key !== normalizedPrefix && !s3Key.startsWith(`${normalizedPrefix}/`)) {
     throw new ApiError(
-      422,
+      400,
       "VALIDATION_ERROR",
-      "imageData must be one of: image/jpeg, image/png, image/webp",
+      "imageUrl must reference an onboarding image URL or storage key",
     );
   }
 
-  const base64Data = match[2] ?? "";
-  let buf: Buffer;
-  try {
-    buf = Buffer.from(base64Data, "base64");
-  } catch {
-    throw new ApiError(422, "VALIDATION_ERROR", "imageData base64 is invalid");
-  }
-
-  if (buf.length <= 0) {
-    throw new ApiError(422, "VALIDATION_ERROR", "imageData base64 is invalid");
-  }
-
-  if (buf.length > MAX_IMAGE_BYTES) {
-    throw new ApiError(422, "VALIDATION_ERROR", "imageData is too large");
-  }
-
-  return { mimeType, base64Data };
+  return publicUrlForObject({
+    bucket: params.bucket,
+    region: params.region,
+    s3Key,
+    publicBaseUrl: params.publicBaseUrl,
+  });
 }
 
 export function extractFirstJsonObject(text: string): unknown {
@@ -92,10 +177,11 @@ function promptForPhotoAnalysis(): string {
     "You are helping a business user capture a supplier item from a photo.",
     "Return ONLY a single JSON object with this exact schema:",
     "{",
-    '  "suggestedName": string | null,',
-    '  "suggestedSupplier": string | null,',
-    '  "confidence": number,',
-    '  "notes": string | null',
+    '  "productName": string | null,',
+    '  "description": string | null,',
+    '  "estimatedCategory": string | null,',
+    '  "brand": string | null,',
+    '  "confidence": number',
     "}",
     "",
     "Rules:",
@@ -110,7 +196,7 @@ async function defaultGeminiGenerateText(params: {
   model?: string;
   prompt: string;
   base64Data: string;
-  mimeType: string;
+  mimeType: SupportedImageMimeType;
 }): Promise<string> {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { GoogleGenerativeAI } = require("@google/generative-ai") as typeof import("@google/generative-ai");
@@ -131,16 +217,105 @@ async function defaultGeminiGenerateText(params: {
   return result.response.text();
 }
 
+async function fetchPhotoAnalysisImage(params: {
+  imageUrl: string;
+  maxImageBytes: number;
+  fetchFn?: typeof fetch;
+}): Promise<{ mimeType: SupportedImageMimeType; base64Data: string }> {
+  if (!Number.isFinite(params.maxImageBytes) || params.maxImageBytes <= 0) {
+    throw new ApiError(500, "INTERNAL_ERROR", "Invalid ONBOARDING_IMAGE_MAX_BYTES");
+  }
+
+  const fetchFn = params.fetchFn ?? fetch;
+
+  let response: Response;
+  try {
+    response = await fetchFn(params.imageUrl);
+  } catch {
+    throw new ApiError(400, "VALIDATION_ERROR", "imageUrl could not be fetched");
+  }
+
+  if (!response.ok) {
+    throw new ApiError(400, "VALIDATION_ERROR", "imageUrl could not be fetched");
+  }
+
+  const mimeType = normalizeImageMimeType(response.headers.get("content-type"));
+  if (!mimeType) {
+    throw new ApiError(
+      400,
+      "VALIDATION_ERROR",
+      "imageUrl contentType must be one of: image/jpeg, image/png, image/webp",
+    );
+  }
+
+  const contentLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > params.maxImageBytes) {
+    throw new ApiError(
+      400,
+      "VALIDATION_ERROR",
+      `imageUrl is too large (max ${params.maxImageBytes} bytes)`,
+    );
+  }
+
+  let bytes: Buffer;
+  try {
+    bytes = Buffer.from(await response.arrayBuffer());
+  } catch {
+    throw new ApiError(400, "VALIDATION_ERROR", "imageUrl could not be read");
+  }
+
+  if (bytes.length === 0) {
+    throw new ApiError(400, "VALIDATION_ERROR", "imageUrl is empty");
+  }
+  if (bytes.length > params.maxImageBytes) {
+    throw new ApiError(
+      400,
+      "VALIDATION_ERROR",
+      `imageUrl is too large (max ${params.maxImageBytes} bytes)`,
+    );
+  }
+
+  return {
+    mimeType,
+    base64Data: bytes.toString("base64"),
+  };
+}
+
+function isGeminiRateLimitedError(err: unknown): boolean {
+  if (err instanceof ApiError) {
+    return err.statusCode === 429 || err.code === "RATE_LIMITED";
+  }
+  if (!err || typeof err !== "object") return false;
+
+  const record = err as Record<string, unknown>;
+  if (Number(record.status) === 429 || Number(record.statusCode) === 429) {
+    return true;
+  }
+
+  const code = typeof record.code === "string" ? record.code.toLowerCase() : "";
+  if (code.includes("rate") || code.includes("resource_exhausted")) {
+    return true;
+  }
+
+  const message = typeof record.message === "string" ? record.message.toLowerCase() : "";
+  return message.includes("429")
+    || message.includes("rate limit")
+    || message.includes("resource exhausted")
+    || message.includes("quota");
+}
+
 export async function analyzePhoto(params: {
-  imageData: string;
+  imageUrl: string;
   geminiApiKey: string | null;
+  maxImageBytes: number;
   model?: string;
   minIntervalMs?: number;
   now?: () => number;
+  fetchFn?: typeof fetch;
   generateTextFn?: GeminiGenerateTextFn;
 }): Promise<PhotoAnalysisResult> {
   if (!params.geminiApiKey && !params.generateTextFn) {
-    throw new ApiError(503, "INTERNAL_ERROR", "Photo analysis is not configured");
+    return unavailablePhotoAnalysis();
   }
 
   const now = params.now ?? (() => Date.now());
@@ -152,12 +327,16 @@ export async function analyzePhoto(params: {
     }
   }
 
-  const { mimeType, base64Data } = parseImageDataUrl(params.imageData);
+  const { mimeType, base64Data } = await fetchPhotoAnalysisImage({
+    imageUrl: params.imageUrl,
+    maxImageBytes: params.maxImageBytes,
+    fetchFn: params.fetchFn,
+  });
 
   const prompt = promptForPhotoAnalysis();
   const generateText =
     params.generateTextFn
-    ?? ((p: { prompt: string; base64Data: string; mimeType: string }) => {
+    ?? ((p: { prompt: string; base64Data: string; mimeType: SupportedImageMimeType }) => {
       if (!params.geminiApiKey) {
         throw new ApiError(503, "INTERNAL_ERROR", "Photo analysis is not configured");
       }
@@ -175,16 +354,19 @@ export async function analyzePhoto(params: {
     text = await generateText({ prompt, base64Data, mimeType });
   } catch (err) {
     if (err instanceof ApiError) throw err;
+    if (isGeminiRateLimitedError(err)) {
+      throw new ApiError(429, "RATE_LIMITED", "Photo analysis is temporarily rate limited");
+    }
     throw new ApiError(502, "INTERNAL_ERROR", "Gemini request failed");
   }
 
   const json = extractFirstJsonObject(text);
   const obj = (json && typeof json === "object") ? (json as Record<string, unknown>) : {};
 
-  const suggestedName = sanitizeText(obj.suggestedName, 120);
-  const suggestedSupplier = sanitizeText(obj.suggestedSupplier, 120);
-  const notes = sanitizeText(obj.notes, 280);
-
+  const productName = sanitizeText(obj.productName, 140);
+  const description = sanitizeText(obj.description, 500);
+  const estimatedCategory = sanitizeText(obj.estimatedCategory, 120);
+  const brand = sanitizeText(obj.brand, 120);
   const confidence = clamp01(
     typeof obj.confidence === "number"
       ? obj.confidence
@@ -194,9 +376,11 @@ export async function analyzePhoto(params: {
   );
 
   return {
-    suggestedName,
-    suggestedSupplier,
-    notes,
+    analyzed: true,
+    productName,
+    description,
+    estimatedCategory,
+    brand,
     confidence,
   };
 }

@@ -31,7 +31,7 @@ function encodeS3KeyForUrl(key: string): string {
   return key.split("/").map(encodeURIComponent).join("/");
 }
 
-function publicUrlForObject(params: {
+export function publicUrlForObject(params: {
   bucket: string;
   region: string;
   s3Key: string;

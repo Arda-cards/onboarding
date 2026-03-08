@@ -4,6 +4,7 @@ import { createApp } from "../app";
 import { OnboardingSessionStore } from "../lib/onboarding-session-store";
 import type { Config } from "../config";
 import type { KeyValueStore } from "../lib/gmail-oauth-store";
+import * as photoAnalysis from "../lib/photo-analysis";
 
 class FakeRedis {
   private strings = new Map<string, { value: string; expiresAtMs?: number }>();
@@ -188,6 +189,7 @@ describe("onboarding routes", () => {
     delete process.env.BARCODE_LOOKUP_API_KEY;
     delete process.env.UPCITEMDB_USER_KEY;
     delete process.env.UPCITEMDB_KEY_TYPE;
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
@@ -744,6 +746,174 @@ describe("onboarding routes", () => {
     expect(res.body).toMatchObject({
       error: { code: "VALIDATION_ERROR", message: "barcode is required" },
     });
+  });
+
+  it("POST /photos/analyze returns gemini_unavailable when Gemini is not configured", async () => {
+    const redis = new FakeRedis();
+    const config = makeConfig();
+    const store = new OnboardingSessionStore(redis as any, {
+      ttlSeconds: 60,
+      frontendOrigin: config.onboardingFrontendOrigin,
+    });
+
+    const routeLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const accessTokenVerifier = { verify: vi.fn().mockResolvedValue({ sub: "u1", token_use: "access" }) };
+    const idTokenVerifier = {
+      verify: vi.fn().mockResolvedValue({ sub: "u1", email: "u1@example.com", "custom:tenant": "t1" }),
+    };
+
+    const app = createApp({
+      auth: { accessTokenVerifier, idTokenVerifier, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any },
+      logger: routeLogger as any,
+      config,
+      kv: new FakeKv(),
+      sessionStore: store,
+      s3: {} as any,
+    });
+
+    const res = await request(app)
+      .post("/api/onboarding/photos/analyze")
+      .set("Authorization", "Bearer test-access")
+      .set("X-ID-Token", "test-id")
+      .send({ imageUrl: "onboarding/t1/u1/example.png" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      analyzed: false,
+      reason: "gemini_unavailable",
+      productName: null,
+      description: null,
+      estimatedCategory: null,
+      brand: null,
+      confidence: 0,
+    });
+    expect(routeLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: "t1",
+        userId: "u1",
+        imageHost: "bucket.s3.amazonaws.com",
+        analyzed: false,
+        reason: "gemini_unavailable",
+        durationMs: expect.any(Number),
+      }),
+      "Photo analysis completed",
+    );
+  });
+
+  it("POST /photos/analyze returns structured metadata when analysis succeeds", async () => {
+    const analyzeSpy = vi.spyOn(photoAnalysis, "analyzePhoto").mockResolvedValue({
+      analyzed: true,
+      productName: "Sparkling Water",
+      description: "12-pack sparkling water cans",
+      estimatedCategory: "Beverages",
+      brand: "ClearCo",
+      confidence: 0.92,
+    });
+
+    const redis = new FakeRedis();
+    const config = {
+      ...makeConfig(),
+      geminiApiKey: "test-gemini-key",
+    };
+    const store = new OnboardingSessionStore(redis as any, {
+      ttlSeconds: 60,
+      frontendOrigin: config.onboardingFrontendOrigin,
+    });
+
+    const routeLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const accessTokenVerifier = { verify: vi.fn().mockResolvedValue({ sub: "u1", token_use: "access" }) };
+    const idTokenVerifier = {
+      verify: vi.fn().mockResolvedValue({ sub: "u1", email: "u1@example.com", "custom:tenant": "t1" }),
+    };
+
+    const app = createApp({
+      auth: { accessTokenVerifier, idTokenVerifier, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any },
+      logger: routeLogger as any,
+      config,
+      kv: new FakeKv(),
+      sessionStore: store,
+      s3: {} as any,
+    });
+
+    const res = await request(app)
+      .post("/api/onboarding/photos/analyze")
+      .set("Authorization", "Bearer test-access")
+      .set("X-ID-Token", "test-id")
+      .send({ imageUrl: "https://bucket.s3.amazonaws.com/onboarding/t1/u1/example.png" });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      analyzed: true,
+      productName: "Sparkling Water",
+      description: "12-pack sparkling water cans",
+      estimatedCategory: "Beverages",
+      brand: "ClearCo",
+      confidence: 0.92,
+    });
+    expect(analyzeSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        imageUrl: "https://bucket.s3.amazonaws.com/onboarding/t1/u1/example.png",
+        geminiApiKey: "test-gemini-key",
+        maxImageBytes: 5242880,
+      }),
+    );
+    expect(routeLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: "t1",
+        userId: "u1",
+        imageHost: "bucket.s3.amazonaws.com",
+        analyzed: true,
+        reason: null,
+        durationMs: expect.any(Number),
+      }),
+      "Photo analysis completed",
+    );
+  });
+
+  it("POST /photos/analyze validates onboarding image URLs and logs failures", async () => {
+    const redis = new FakeRedis();
+    const config = makeConfig();
+    const store = new OnboardingSessionStore(redis as any, {
+      ttlSeconds: 60,
+      frontendOrigin: config.onboardingFrontendOrigin,
+    });
+
+    const routeLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const accessTokenVerifier = { verify: vi.fn().mockResolvedValue({ sub: "u1", token_use: "access" }) };
+    const idTokenVerifier = {
+      verify: vi.fn().mockResolvedValue({ sub: "u1", email: "u1@example.com", "custom:tenant": "t1" }),
+    };
+
+    const app = createApp({
+      auth: { accessTokenVerifier, idTokenVerifier, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any },
+      logger: routeLogger as any,
+      config,
+      kv: new FakeKv(),
+      sessionStore: store,
+      s3: {} as any,
+    });
+
+    const res = await request(app)
+      .post("/api/onboarding/photos/analyze")
+      .set("Authorization", "Bearer test-access")
+      .set("X-ID-Token", "test-id")
+      .send({ imageUrl: "https://example.com/photo.png" });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({
+      error: { code: "VALIDATION_ERROR" },
+    });
+    expect(routeLogger.warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: "t1",
+        userId: "u1",
+        imageHost: null,
+        statusCode: 400,
+        code: "VALIDATION_ERROR",
+        durationMs: expect.any(Number),
+      }),
+      "Photo analysis failed",
+    );
   });
 
   it("returns stable error shape { error.code, error.message, error.requestId } for unauthenticated requests", async () => {
