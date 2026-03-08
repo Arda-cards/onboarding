@@ -112,6 +112,7 @@ export default defineConfig([
 - Store the Redis URL and Postgres `DATABASE_URL` in the platform secrets; both are required before deploying.
 - If accounting connectors are enabled, configure QuickBooks webhook delivery to `POST /api/integrations/webhooks/quickbooks`.
 - Ensure `ENABLE_COGNITO_SYNC` is `true` on the instance that should perform the nightly sync and that Redis is reachable so the distributed lock works.
+- Prefer `/health/ready` for platform readiness checks. It verifies Postgres, Redis availability, and Gemini configuration status, while `/health` remains a shallow liveness probe.
 - Keep Vercel rewrites for `/auth/*` and `/api/*` enabled so browser requests stay first-party.
 - Runbook: if users hit onboarding errors like `Not authenticated`, first verify `VITE_API_URL` was not set to the Railway URL in Vercel.
 

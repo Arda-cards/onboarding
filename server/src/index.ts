@@ -25,6 +25,7 @@ import { startCognitoSyncScheduler, stopCognitoSyncScheduler } from './services/
 import inboundEmailRouter from './routes/inboundEmail.js';
 import { startInboundReceiptWorker, stopInboundReceiptWorker } from './services/inboundReceiptWorker.js';
 import { startProviderSyncScheduler, stopProviderSyncScheduler } from './services/integrations/syncScheduler.js';
+import { getLivenessReport, getReadinessReport } from './services/health.js';
 import { appLogger, requestLogger } from './middleware/requestLogger.js';
 import { securityHeaders } from './middleware/securityHeaders.js';
 import { defaultLimiter, authLimiter } from './middleware/rateLimiter.js';
@@ -122,7 +123,16 @@ app.use(session({
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json(getLivenessReport());
+});
+
+app.get('/health/ready', async (_req, res) => {
+  const report = await getReadinessReport({
+    redisClient,
+    geminiApiKey: process.env.GEMINI_API_KEY ?? null,
+  });
+
+  res.status(report.status === 'down' ? 503 : 200).json(report);
 });
 
 // API routes (rate-limited where appropriate)
