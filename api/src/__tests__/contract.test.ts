@@ -179,6 +179,32 @@ describe("API contract", () => {
     });
   });
 
+  describe("image upload contract", () => {
+    it("documents POST /uploads/presign with session-scoped upload fields", () => {
+      const presignPost = contract.paths["/uploads/presign"].post;
+      expect(presignPost).toBeDefined();
+      expect(presignPost.requestBody.required).toBe(true);
+      expect(
+        presignPost.requestBody.content["application/json"].schema.$ref,
+      ).toBe("#/components/schemas/ImageUploadPresignRequest");
+      expect(contract.components.schemas.ImageUploadPresignRequest.required).toEqual(
+        expect.arrayContaining(["sessionId", "fileName", "contentType", "sizeBytes"]),
+      );
+    });
+
+    it("documents GET /uploads/{key} and the objectKey/imageUrl fields", () => {
+      const presignResponse = contract.components.schemas.ImageUploadPresignResponse;
+      expect(presignResponse.required).toEqual(
+        expect.arrayContaining(["uploadUrl", "objectKey", "imageUrl", "expiresInSeconds"]),
+      );
+      const downloadGet = contract.paths["/uploads/{key}"].get;
+      expect(downloadGet).toBeDefined();
+      expect(
+        downloadGet.responses["200"].content["application/json"].schema.$ref,
+      ).toBe("#/components/schemas/ImageUploadDownloadResponse");
+    });
+  });
+
   describe("photo analysis contract", () => {
     it("documents POST /photos/analyze with an imageUrl request body", () => {
       const analyzePost = contract.paths["/photos/analyze"].post;

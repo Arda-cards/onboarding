@@ -4,6 +4,7 @@ import { createApp } from "../app";
 import { OnboardingSessionStore } from "../lib/onboarding-session-store";
 import type { Config } from "../config";
 import type { KeyValueStore } from "../lib/gmail-oauth-store";
+import * as imageUpload from "../lib/image-upload";
 import * as photoAnalysis from "../lib/photo-analysis";
 import * as urlScraper from "../lib/url-scraper";
 
@@ -847,6 +848,134 @@ describe("onboarding routes", () => {
     );
   });
 
+  it("POST /uploads/presign returns a presigned PUT URL and logs telemetry", async () => {
+    const uploadSpy = vi.spyOn(imageUpload, "createImageUploadUrl").mockResolvedValue({
+      uploadUrl: "https://signed.example/upload",
+      objectKey: "onboarding/t1/session123/file.png",
+      imageUrl: "https://bucket.s3.amazonaws.com/onboarding/t1/session123/file.png",
+      expiresInSeconds: 900,
+    });
+
+    const redis = new FakeRedis();
+    const config = {
+      ...makeConfig(),
+      onboardingImageMaxBytes: 10 * 1024 * 1024,
+    };
+    const store = new OnboardingSessionStore(redis as any, {
+      ttlSeconds: 60,
+      frontendOrigin: config.onboardingFrontendOrigin,
+    });
+
+    const routeLogger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    const accessTokenVerifier = { verify: vi.fn().mockResolvedValue({ sub: "u1", token_use: "access" }) };
+    const idTokenVerifier = {
+      verify: vi.fn().mockResolvedValue({ sub: "u1", email: "u1@example.com", "custom:tenant": "t1" }),
+    };
+
+    const app = createApp({
+      auth: { accessTokenVerifier, idTokenVerifier, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any },
+      logger: routeLogger as any,
+      config,
+      kv: new FakeKv(),
+      sessionStore: store,
+      s3: {} as any,
+    });
+
+    const sessionRes = await request(app)
+      .post("/api/onboarding/sessions")
+      .set("Authorization", "Bearer test-access")
+      .set("X-ID-Token", "test-id")
+      .send({});
+
+    const sessionId = sessionRes.body.sessionId as string;
+
+    const res = await request(app)
+      .post("/api/onboarding/uploads/presign")
+      .set("Authorization", "Bearer test-access")
+      .set("X-ID-Token", "test-id")
+      .send({
+        sessionId,
+        fileName: "photo.png",
+        contentType: "image/png",
+        sizeBytes: 2048,
+      });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      uploadUrl: "https://signed.example/upload",
+      objectKey: "onboarding/t1/session123/file.png",
+      imageUrl: "https://bucket.s3.amazonaws.com/onboarding/t1/session123/file.png",
+      expiresInSeconds: 900,
+    });
+    expect(uploadSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: "t1",
+        sessionId,
+        contentType: "image/png",
+        sizeBytes: 2048,
+        maxBytes: 10 * 1024 * 1024,
+      }),
+    );
+    expect(routeLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: "t1",
+        userId: "u1",
+        sessionId,
+        contentType: "image/png",
+        sizeBytes: 2048,
+      }),
+      "Image upload URL created",
+    );
+  });
+
+  it("GET /uploads/:key returns a presigned download URL", async () => {
+    const downloadSpy = vi.spyOn(imageUpload, "createImageDownloadUrl").mockResolvedValue({
+      downloadUrl: "https://signed.example/download",
+      objectKey: "onboarding/t1/session123/file.png",
+      expiresInSeconds: 900,
+    });
+
+    const redis = new FakeRedis();
+    const config = makeConfig();
+    const store = new OnboardingSessionStore(redis as any, {
+      ttlSeconds: 60,
+      frontendOrigin: config.onboardingFrontendOrigin,
+    });
+
+    const accessTokenVerifier = { verify: vi.fn().mockResolvedValue({ sub: "u1", token_use: "access" }) };
+    const idTokenVerifier = {
+      verify: vi.fn().mockResolvedValue({ sub: "u1", email: "u1@example.com", "custom:tenant": "t1" }),
+    };
+
+    const app = createApp({
+      auth: { accessTokenVerifier, idTokenVerifier, logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any },
+      logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } as any,
+      config,
+      kv: new FakeKv(),
+      sessionStore: store,
+      s3: {} as any,
+    });
+
+    const objectKey = "onboarding/t1/session123/file.png";
+    const res = await request(app)
+      .get(`/api/onboarding/uploads/${encodeURIComponent(objectKey)}`)
+      .set("Authorization", "Bearer test-access")
+      .set("X-ID-Token", "test-id");
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      downloadUrl: "https://signed.example/download",
+      objectKey,
+      expiresInSeconds: 900,
+    });
+    expect(downloadSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: "t1",
+        objectKey,
+      }),
+    );
+  });
+
   it("POST /photos/analyze returns gemini_unavailable when Gemini is not configured", async () => {
     const redis = new FakeRedis();
     const config = makeConfig();
@@ -1042,6 +1171,7 @@ describe("onboarding routes", () => {
       { method: "post", path: "/api/onboarding/complete" },
       { method: "get",  path: "/api/onboarding/barcode/lookup?code=123" },
       { method: "post", path: "/api/onboarding/barcode/lookup" },
+      { method: "post", path: "/api/onboarding/uploads/presign" },
       { method: "post", path: "/api/onboarding/urls/scrape" },
       { method: "post", path: "/api/onboarding/images/upload" },
     ];

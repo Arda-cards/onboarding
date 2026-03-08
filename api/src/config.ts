@@ -72,7 +72,7 @@ export function loadConfig(): Config {
     );
   }
 
-  const maxBytes = parseInt(process.env.ONBOARDING_IMAGE_MAX_BYTES ?? "5242880", 10);
+  const maxBytes = parseInt(process.env.ONBOARDING_IMAGE_MAX_BYTES ?? "10485760", 10);
   if (!Number.isFinite(maxBytes) || maxBytes <= 0) {
     throw new Error("Invalid ONBOARDING_IMAGE_MAX_BYTES (must be a positive integer)");
   }
