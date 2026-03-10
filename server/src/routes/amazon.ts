@@ -1,6 +1,7 @@
 // Amazon Product Advertising API Routes
 import { Router, Request, Response } from 'express';
 import { amazonService } from '../services/amazon.js';
+import { amazonLimiter } from '../middleware/rateLimiter.js';
 
 const router = Router();
 
@@ -22,7 +23,7 @@ router.get('/health', (req: Request, res: Response) => {
 });
 
 // Enrich a single ASIN
-router.get('/item/:asin', requireAuth, async (req: Request, res: Response) => {
+router.get('/item/:asin', requireAuth, amazonLimiter, async (req: Request, res: Response) => {
   try {
     const { asin } = req.params;
     
@@ -45,7 +46,7 @@ router.get('/item/:asin', requireAuth, async (req: Request, res: Response) => {
 });
 
 // Batch enrich multiple ASINs
-router.post('/items', requireAuth, async (req: Request, res: Response) => {
+router.post('/items', requireAuth, amazonLimiter, async (req: Request, res: Response) => {
   try {
     const { asins } = req.body;
     

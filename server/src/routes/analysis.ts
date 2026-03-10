@@ -5,6 +5,7 @@ import {
   delay,
   EmailExtractionInput,
 } from '../services/emailExtraction.js';
+import { geminiLimiter } from '../middleware/rateLimiter.js';
 
 const router = Router();
 
@@ -17,7 +18,7 @@ function requireAuth(req: Request, res: Response, next: Function) {
 }
 
 // Analyze email with Gemini AI
-router.post('/', requireAuth, async (req: Request, res: Response) => {
+router.post('/', requireAuth, geminiLimiter, async (req: Request, res: Response) => {
   try {
     const { emails } = req.body;
 

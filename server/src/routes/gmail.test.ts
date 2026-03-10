@@ -26,7 +26,7 @@ async function startServer(session: Record<string, unknown>): Promise<{ server: 
   });
   app.use('/api/gmail', gmailRouter);
 
-  const server = app.listen(0);
+  const server = app.listen(0, '127.0.0.1');
   await new Promise<void>((resolve) => server.once('listening', resolve));
   const address = server.address() as AddressInfo;
 
@@ -134,4 +134,3 @@ describe('gmail status route', () => {
     expect(payload.code).toBe('GMAIL_AUTH_REQUIRED');
   });
 });
-

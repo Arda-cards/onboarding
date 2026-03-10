@@ -3,6 +3,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import redisClient from '../utils/redisClient.js';
 import { requireRedis } from '../config.js';
 import { appLogger } from '../middleware/requestLogger.js';
+import { geminiLimiter } from '../middleware/rateLimiter.js';
 
 const router = Router();
 
@@ -399,7 +400,7 @@ router.put('/session/:sessionId/photo/:photoId', validateSessionId, async (req: 
  * POST /api/photo/analyze
  * Analyze an image to extract text, barcodes, and suggest product info
  */
-router.post('/analyze', async (req: Request, res: Response) => {
+router.post('/analyze', geminiLimiter, async (req: Request, res: Response) => {
   const { imageData } = req.body;
   
   // Validate image data

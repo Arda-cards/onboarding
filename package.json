@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "lint": "eslint .",
     "preview": "vite preview",
     "worktree:status": "git status --short --branch",

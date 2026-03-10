@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import redisClient from '../utils/redisClient.js';
 import { requireRedis } from '../config.js';
 import { appLogger } from '../middleware/requestLogger.js';
+import { barcodeLookupLimiter } from '../middleware/rateLimiter.js';
 import { lookupProductByBarcode } from '../services/barcodeLookup.js';
 
 const router = Router();
@@ -301,7 +302,7 @@ router.put('/session/:sessionId/barcode/:barcodeId', validateSessionId, async (r
  * GET /api/barcode/lookup
  * Look up product information from a barcode
  */
-router.get('/lookup', async (req: Request, res: Response) => {
+router.get('/lookup', barcodeLookupLimiter, async (req: Request, res: Response) => {
   const { code } = req.query;
   
   if (!code || typeof code !== 'string') {
