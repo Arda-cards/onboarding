@@ -23,7 +23,7 @@
     "test-exclude": "^8.0.0"
   },
   "dependencies": {
-    "@google/genai": "^1.0.0",
+    "@google/genai": "^1.44.0",
     "@zxing/browser": "^0.1.5",
     "@zxing/library": "^0.21.3",
     "ag-grid-community": "^35.1.0",
