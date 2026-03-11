@@ -98,8 +98,7 @@ export const ItemsGrid: React.FC<ItemsGridProps> = ({
         maxWidth: 100,
         cellRenderer: SourceBadgeRenderer,
         editable: false,
-        enableRowGroup: true,
-        filter: 'agSetColumnFilter',
+        filter: 'agTextColumnFilter',
       },
       {
         headerName: 'Img',
@@ -128,7 +127,6 @@ export const ItemsGrid: React.FC<ItemsGridProps> = ({
         flex: 1,
         editable: true,
         filter: 'agTextColumnFilter',
-        enableRowGroup: true,
       },
       {
         headerName: 'Order Method',
@@ -314,9 +312,6 @@ export const ItemsGrid: React.FC<ItemsGridProps> = ({
           // Editing
           singleClickEdit
           stopEditingWhenCellsLoseFocus
-          // Enterprise features
-          enableRangeSelection
-          enableFillHandle
           undoRedoCellEditing
           undoRedoCellEditingLimit={20}
           // Row drag

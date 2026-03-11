@@ -215,7 +215,7 @@ router.get('/connections', requireAuth, async (req: Request, res: Response) => {
   try {
     const connections = await listProviderConnectionsForUser(req.session.userId!);
     res.json({ connections });
-  } catch (error) {
+  } catch {
     res.status(500).json({ error: 'Failed to load integration connections' });
   }
 });
@@ -255,7 +255,7 @@ router.delete('/connections/:connectionId', requireAuth, async (req: Request, re
       return res.status(404).json({ error: 'Connection not found' });
     }
     res.json({ success: true });
-  } catch (error) {
+  } catch {
     res.status(500).json({ error: 'Failed to disconnect provider' });
   }
 });
@@ -279,7 +279,7 @@ router.get('/connections/:connectionId/runs', requireAuth, async (req: Request, 
   try {
     const runs = await listProviderSyncRunsForConnection(req.params.connectionId, req.session.userId!);
     res.json({ runs });
-  } catch (error) {
+  } catch {
     res.status(500).json({ error: 'Failed to load sync runs' });
   }
 });

@@ -406,6 +406,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     }
     
     let amazonRetryTimeout: ReturnType<typeof setTimeout> | null = null;
+    let priorityRetryTimeout: ReturnType<typeof setTimeout> | null = null;
     
     // Start Amazon with retry logic
     const startAmazon = async (retryCount = 0) => {
@@ -444,7 +445,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         if (retryCount < 3 && (errorMessage.includes('rate') || errorMessage.includes('429') || errorMessage.includes('Too many'))) {
           const retryDelay = (retryCount + 1) * 4000; // 4s, 8s, 12s
           console.log(`⏳ Rate limited, retrying priority suppliers in ${retryDelay / 1000}s...`);
-          setTimeout(() => startPrioritySuppliers(retryCount + 1), retryDelay);
+          priorityRetryTimeout = setTimeout(() => startPrioritySuppliers(retryCount + 1), retryDelay);
         } else {
           setPriorityError(errorMessage);
         }
@@ -460,8 +461,9 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     // Cleanup on unmount
     return () => {
       if (amazonRetryTimeout) clearTimeout(amazonRetryTimeout);
+      if (priorityRetryTimeout) clearTimeout(priorityRetryTimeout);
     };
-  }, [hasRestoredState, isGmailConnected]);
+  }, [getErrorMessage, hasRestoredState, isGmailConnected]);
 
   // Discover suppliers - memoized to allow proper dependency tracking
   // Uses module-level caching to handle StrictMode remounts
@@ -561,18 +563,19 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
   useEffect(() => {
     if (amazonJobId && !isAmazonComplete) {
-      amazonPollAbortRef.current.cancelled = false;
+      const pollState = amazonPollAbortRef.current;
+      pollState.cancelled = false;
       const pollWithBackoff = async (delayMs: number) => {
-        if (amazonPollAbortRef.current.cancelled) return;
+        if (pollState.cancelled) return;
         await pollAmazonStatus();
-        if (!amazonPollAbortRef.current.cancelled) {
+        if (!pollState.cancelled) {
           const nextDelay = Math.min(Math.floor(delayMs * 1.35), 1800);
           setTimeout(() => pollWithBackoff(nextDelay), nextDelay);
         }
       };
       pollWithBackoff(700);
       return () => {
-        amazonPollAbortRef.current.cancelled = true;
+        pollState.cancelled = true;
       };
     }
   }, [amazonJobId, isAmazonComplete, pollAmazonStatus]);
@@ -613,18 +616,19 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
   useEffect(() => {
     if (priorityJobId && !isPriorityComplete) {
-      priorityPollAbortRef.current.cancelled = false;
+      const pollState = priorityPollAbortRef.current;
+      pollState.cancelled = false;
       const pollWithBackoff = async (delayMs: number) => {
-        if (priorityPollAbortRef.current.cancelled) return;
+        if (pollState.cancelled) return;
         await pollPriorityStatus();
-        if (!priorityPollAbortRef.current.cancelled) {
+        if (!pollState.cancelled) {
           const nextDelay = Math.min(Math.floor(delayMs * 1.35), 1800);
           setTimeout(() => pollWithBackoff(nextDelay), nextDelay);
         }
       };
       pollWithBackoff(700);
       return () => {
-        priorityPollAbortRef.current.cancelled = true;
+        pollState.cancelled = true;
       };
     }
   }, [priorityJobId, isPriorityComplete, pollPriorityStatus]);
@@ -701,18 +705,19 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
   useEffect(() => {
     if (currentJobId && isScanning) {
-      otherPollAbortRef.current.cancelled = false;
+      const pollState = otherPollAbortRef.current;
+      pollState.cancelled = false;
       const pollWithBackoff = async (delayMs: number) => {
-        if (otherPollAbortRef.current.cancelled) return;
+        if (pollState.cancelled) return;
         await pollJobStatus();
-        if (!otherPollAbortRef.current.cancelled) {
+        if (!pollState.cancelled) {
           const nextDelay = Math.min(Math.floor(delayMs * 1.35), 2000);
           setTimeout(() => pollWithBackoff(nextDelay), nextDelay);
         }
       };
       pollWithBackoff(650);
       return () => {
-        otherPollAbortRef.current.cancelled = true;
+        pollState.cancelled = true;
       };
     }
   }, [currentJobId, isScanning, pollJobStatus]);

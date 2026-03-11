@@ -99,8 +99,7 @@ export default defineConfig([
 | `COGNITO_SYNC_HOUR` | Optional hour (UTC) at which the scheduled sync should run (default `2`). |
 
 ### Frontend environment
-- `VITE_API_URL`: optional API base URL override. Leave unset in production so the app uses same-origin `/auth` and `/api` rewrites.
-- `VITE_AG_GRID_LICENSE_KEY`: AG Grid Enterprise license key. Required to avoid trial warnings/watermarks in production.
+- `VITE_API_URL`: optional API base URL override. Leave unset in production so the app uses same-origin `/auth` and `/api` rewrites. No other frontend production env vars are required by default.
 
 ### Build & release
 1. `npm run build` (frontend) – this runs `tsc -b` and `vite build`. Manual chunking is configured via `vite.config.ts` to keep the bundle sizes small.

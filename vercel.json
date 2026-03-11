@@ -1,12 +1,23 @@
 {
   "version": 2,
-  "builds": [
-    { "src": "package.json", "use": "@vercel/static-build", "config": { "distDir": "dist" } }
-  ],
   "buildCommand": "npm run build",
   "installCommand": "npm ci",
   "outputDirectory": "dist",
   "framework": "vite",
+  "headers": [
+    {
+      "source": "/assets/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/vite.svg",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=86400, stale-while-revalidate=604800" }
+      ]
+    }
+  ],
   "rewrites": [
     { "source": "/auth/:path*", "destination": "https://order-pulse-api-production.up.railway.app/auth/:path*" },
     { "source": "/api/:path*", "destination": "https://order-pulse-api-production.up.railway.app/api/:path*" },

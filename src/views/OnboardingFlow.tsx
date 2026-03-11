@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icons } from '../components/Icons';
 import { ExtractedOrder } from '../types';
 import { buildVelocityProfiles, normalizeItemName } from '../utils/inventoryLogic';
@@ -8,7 +8,6 @@ import { BarcodeScanStep } from './BarcodeScanStep';
 import { PhotoCaptureStep } from './PhotoCaptureStep';
 import { CSVUploadStep, CSVItem, CSVFooterState } from './CSVUploadStep';
 import { MasterListStep } from './MasterListStep';
-import { ItemsGrid } from '../components/ItemsTable';
 import type { MasterListItem, MasterListFooterState } from '../components/ItemsTable/types';
 import { buildMasterListItems } from '../utils/masterListItems';
 import { useSyncToArda } from '../hooks/useSyncToArda';
@@ -151,6 +150,11 @@ const ONBOARDING_STEPS: StepConfig[] = [
     icon: 'ListChecks',
   },
 ];
+
+const ItemsGrid = lazy(async () => {
+  const module = await import('../components/ItemsTable/ItemsGrid');
+  return { default: module.ItemsGrid };
+});
 
 const buildEmailItemsFromOrders = (orders: ExtractedOrder[]): EmailItem[] => {
   if (orders.length === 0) return [];
@@ -355,6 +359,18 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   const { syncStateById, setSyncStateById, syncSingleItem, syncSelectedItems, isBulkSyncing } = useSyncToArda(masterItems);
 
   const isPanelVisible = masterItems.length > 0;
+
+  const renderGridFallback = (mode: 'panel' | 'fullpage') => (
+    <div
+      className={
+        mode === 'panel'
+          ? 'flex h-full min-h-[420px] items-center justify-center bg-slate-50/70 text-sm text-slate-500'
+          : 'flex min-h-[60vh] items-center justify-center bg-slate-50/70 text-sm text-slate-500'
+      }
+    >
+      Loading inventory grid...
+    </div>
+  );
 
   const updateItem = useCallback((id: string, field: keyof MasterListItem, value: unknown) => {
     setMasterItemEditsById(prev => {
@@ -988,28 +1004,32 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
           {/* AG Grid — right side panel (visible on non-masterlist steps) */}
           {isPanelVisible && currentStep !== 'masterlist' && (
             <div className="flex-1 min-w-0 lg:sticky lg:top-14 lg:self-start lg:h-[calc(100vh-10rem)] lg:max-h-[calc(100vh-10rem)] overflow-hidden rounded-xl border border-arda-border bg-white shadow-sm">
-              <ItemsGrid
-                items={masterItems}
-                onUpdateItem={updateItem}
-                onRemoveItem={removeItem}
-                syncStateById={syncStateById}
-                onSyncSingle={syncSingleItem}
-                mode="panel"
-              />
+              <Suspense fallback={renderGridFallback('panel')}>
+                <ItemsGrid
+                  items={masterItems}
+                  onUpdateItem={updateItem}
+                  onRemoveItem={removeItem}
+                  syncStateById={syncStateById}
+                  onSyncSingle={syncSingleItem}
+                  mode="panel"
+                />
+              </Suspense>
             </div>
           )}
 
           {/* Review step — grid is full-width (rendered by MasterListStep) */}
           {currentStep === 'masterlist' && (
             <div className="w-full rounded-xl border border-arda-border bg-white shadow-sm overflow-hidden mt-4">
-              <ItemsGrid
-                items={masterItems}
-                onUpdateItem={updateItem}
-                onRemoveItem={removeItem}
-                syncStateById={syncStateById}
-                onSyncSingle={syncSingleItem}
-                mode="fullpage"
-              />
+              <Suspense fallback={renderGridFallback('fullpage')}>
+                <ItemsGrid
+                  items={masterItems}
+                  onUpdateItem={updateItem}
+                  onRemoveItem={removeItem}
+                  syncStateById={syncStateById}
+                  onSyncSingle={syncSingleItem}
+                  mode="fullpage"
+                />
+              </Suspense>
             </div>
           )}
         </div>

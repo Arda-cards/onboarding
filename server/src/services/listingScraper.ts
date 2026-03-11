@@ -166,7 +166,7 @@ export async function scrapeListingUrl(
       body = fallback.body;
       status = fallback.status;
     }
-  } catch (err) {
+  } catch {
     try {
       usedJina = true;
       const fallback = await fetchText(fetchFn, buildJinaUrl(normalizedUrl));

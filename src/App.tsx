@@ -25,16 +25,6 @@ export default function App() {
   const [importedItemCount, setImportedItemCount] = useState(0);
   const [syncedTenant, setSyncedTenant] = useState<ArdaSyncedTenantContext | null>(null);
 
-  const loadSyncedTenant = async () => {
-    try {
-      const status = await ardaApi.getSyncStatus();
-      setSyncedTenant(getLastSuccessfulSyncTenant(status));
-    } catch {
-      // Keep completion UX resilient when sync-status can't be fetched.
-      setSyncedTenant(null);
-    }
-  };
-
   useEffect(() => {
     const handleSessionExpired = () => {
       setUserProfile(null);
@@ -54,8 +44,28 @@ export default function App() {
       setSyncedTenant(null);
       return;
     }
+
+    let isCancelled = false;
+
+    const loadSyncedTenant = async () => {
+      try {
+        const status = await ardaApi.getSyncStatus();
+        if (!isCancelled) {
+          setSyncedTenant(getLastSuccessfulSyncTenant(status));
+        }
+      } catch {
+        // Keep completion UX resilient when sync-status can't be fetched.
+        if (!isCancelled) {
+          setSyncedTenant(null);
+        }
+      }
+    };
+
     void loadSyncedTenant();
-  }, [userProfile?.id]);
+    return () => {
+      isCancelled = true;
+    };
+  }, [userProfile]);
 
   // Check auth on mount
   useEffect(() => {
@@ -126,7 +136,14 @@ export default function App() {
     setImportedItemCount(items.length);
     setHasCompletedOnboarding(true);
     localStorage.setItem('orderPulse_onboardingComplete', 'true');
-    void loadSyncedTenant();
+    void (async () => {
+      try {
+        const status = await ardaApi.getSyncStatus();
+        setSyncedTenant(getLastSuccessfulSyncTenant(status));
+      } catch {
+        setSyncedTenant(null);
+      }
+    })();
   };
 
   const handleStartOver = () => {

@@ -1,12 +1,28 @@
-import { AllEnterpriseModule, LicenseManager, ModuleRegistry } from 'ag-grid-enterprise';
+import {
+  CellStyleModule,
+  ClientSideRowModelModule,
+  ColumnAutoSizeModule,
+  CustomEditorModule,
+  ModuleRegistry,
+  NumberEditorModule,
+  NumberFilterModule,
+  RowSelectionModule,
+  SelectEditorModule,
+  TextEditorModule,
+  TextFilterModule,
+  ValidationModule,
+} from 'ag-grid-community';
 
-ModuleRegistry.registerModules([AllEnterpriseModule]);
-
-const agGridLicenseKey = (import.meta.env.VITE_AG_GRID_LICENSE_KEY as string | undefined)?.trim();
-const isTestRuntime = import.meta.env.MODE === 'test';
-
-if (agGridLicenseKey) {
-  LicenseManager.setLicenseKey(agGridLicenseKey);
-} else if (!isTestRuntime) {
-  console.warn('AG Grid Enterprise license key missing. Set VITE_AG_GRID_LICENSE_KEY to remove trial watermarks.');
-}
+ModuleRegistry.registerModules([
+  ClientSideRowModelModule,
+  ColumnAutoSizeModule,
+  RowSelectionModule,
+  TextFilterModule,
+  NumberFilterModule,
+  TextEditorModule,
+  NumberEditorModule,
+  SelectEditorModule,
+  CustomEditorModule,
+  CellStyleModule,
+  ValidationModule,
+]);
