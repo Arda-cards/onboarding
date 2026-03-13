@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import time
+import urllib.parse
 import urllib.request
 import urllib.error
 from datetime import datetime
@@ -51,7 +52,7 @@ STAGE_ORDER = [
 def hubspot_get(endpoint, params=None):
     url = f"{BASE_URL}{endpoint}"
     if params:
-        query = "&".join(f"{k}={v}" for k, v in params.items())
+        query = urllib.parse.urlencode({k: str(v) for k, v in params.items()})
         url = f"{url}?{query}"
     req = urllib.request.Request(url)
     req.add_header("Authorization", f"Bearer {API_TOKEN}")
@@ -555,4 +556,7 @@ def main():
 
 
 if __name__ == "__main__":
+    if not API_TOKEN:
+        print("ERROR: Set HUBSPOT_API_TOKEN environment variable", file=sys.stderr)
+        sys.exit(1)
     main()

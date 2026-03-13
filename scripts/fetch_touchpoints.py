@@ -14,6 +14,7 @@ import json
 import os
 import sys
 import time
+import urllib.parse
 import urllib.request
 import urllib.error
 from datetime import datetime
@@ -59,7 +60,7 @@ ENGAGEMENT_TYPES = {
 def hubspot_get(endpoint, params=None):
     url = f"{BASE_URL}{endpoint}"
     if params:
-        query = "&".join(f"{k}={urllib.request.quote(str(v))}" for k, v in params.items())
+        query = urllib.parse.urlencode({k: str(v) for k, v in params.items()})
         url = f"{url}?{query}"
     req = urllib.request.Request(url)
     req.add_header("Authorization", f"Bearer {API_TOKEN}")
