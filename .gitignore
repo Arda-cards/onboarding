@@ -28,3 +28,5 @@ server/.env
 .vercel
 .claude/
 .claude-octopus/
+customer_journeys.json
+customer_touchpoints.json
