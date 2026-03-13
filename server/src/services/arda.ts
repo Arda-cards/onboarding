@@ -18,7 +18,7 @@ export interface ItemSupplyValue {
   supplier: string;
   name?: string;
   sku?: string;
-  orderMethod?: 'EMAIL' | 'MANUAL' | 'AUTO' | 'FAX' | 'PHONE' | 'WEB' | 'EDI';
+  orderMethod?: 'EMAIL' | 'PHONE' | 'ONLINE';
   url?: string;
   orderQuantity?: QuantityValue;
   unitCost?: { value: number; currency: string };
@@ -50,6 +50,7 @@ export interface ArdaItemEntity {
 // Our simplified input that gets mapped to Arda format
 export interface ItemInput {
   name: string;
+  description?: string;
   primarySupplier: string;
   orderMechanism?: string;
   location?: string;
@@ -108,6 +109,18 @@ export interface EntityRecord {
   metadata: unknown;
   previous?: string;
   retired: boolean;
+}
+
+export interface ArdaActor {
+  author: string;
+  email?: string;
+  tenantId?: string;
+}
+
+interface ProvisionAttemptError {
+  endpoint: string;
+  status: number;
+  message: string;
 }
 
 // PageResult interface available for paginated API calls
@@ -177,6 +190,157 @@ async function ardaFetch<T>(
   return data;
 }
 
+function findFirstMatchingString(
+  source: unknown,
+  keys: Set<string>
+): string | null {
+  if (!source || typeof source !== 'object') return null;
+
+  const queue: unknown[] = [source];
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || typeof current !== 'object') continue;
+
+    for (const [key, value] of Object.entries(current as Record<string, unknown>)) {
+      const normalizedKey = key.toLowerCase();
+      if (typeof value === 'string' && keys.has(normalizedKey) && value.trim()) {
+        return value.trim();
+      }
+      if (value && typeof value === 'object') {
+        queue.push(value);
+      }
+    }
+  }
+
+  return null;
+}
+
+function getProvisionEndpoints(): string[] {
+  const configured = process.env.ARDA_USER_PROVISION_ENDPOINTS;
+  if (configured) {
+    return configured
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean);
+  }
+
+  return [
+    '/v1/account/user-account',
+    '/v1/account/account-user',
+    '/v1/user/user-account',
+  ];
+}
+
+function getProvisionPayloads(email: string): Array<Record<string, unknown>> {
+  const displayName = email.split('@')[0] || 'OrderPulse User';
+
+  return [
+    {
+      email,
+      name: displayName,
+    },
+    {
+      payload: {
+        email,
+        name: displayName,
+      },
+    },
+    {
+      user: {
+        email,
+        name: displayName,
+      },
+    },
+  ];
+}
+
+// Attempt to create an Arda account for the given email and return resolved actor credentials.
+export async function provisionUserForEmail(email: string): Promise<ArdaActor | null> {
+  if (!ARDA_API_KEY) {
+    console.warn('⚠️ Skipping auto-provision: ARDA_API_KEY is not configured');
+    return null;
+  }
+
+  const endpoints = getProvisionEndpoints();
+  const payloads = getProvisionPayloads(email);
+  const attemptErrors: ProvisionAttemptError[] = [];
+  const systemAuthor = process.env.ARDA_SYSTEM_AUTHOR || 'orderpulse-system';
+
+  for (const endpoint of endpoints) {
+    const url = `${ARDA_BASE_URL}${endpoint}`;
+
+    for (const payload of payloads) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${ARDA_API_KEY}`,
+            'X-Author': systemAuthor,
+            'X-Request-ID': uuidv4(),
+          },
+          body: JSON.stringify(payload),
+        });
+
+        // Treat 409 as success when account already exists.
+        if (!response.ok && response.status !== 409) {
+          let message = `HTTP ${response.status}`;
+          try {
+            const parsed = await response.json() as { message?: string; responseMessage?: string };
+            message = parsed.responseMessage || parsed.message || message;
+          } catch {
+            // keep fallback
+          }
+          attemptErrors.push({ endpoint, status: response.status, message });
+          continue;
+        }
+
+        let data: unknown = null;
+        try {
+          data = await response.json();
+        } catch {
+          data = null;
+        }
+
+        const tenantId = findFirstMatchingString(
+          data,
+          new Set(['tenantid', 'tenant_id', 'tenantguid', 'tenant_guid'])
+        );
+        const author = findFirstMatchingString(
+          data,
+          new Set(['author', 'sub', 'usersub', 'user_sub', 'cognitosub', 'cognito_sub'])
+        );
+
+        if (tenantId) {
+          return {
+            author: author || email,
+            email,
+            tenantId,
+          };
+        }
+
+        // Successful response but no tenant details - continue trying other formats/endpoints.
+      } catch (error) {
+        attemptErrors.push({
+          endpoint,
+          status: 0,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  if (attemptErrors.length > 0) {
+    const sample = attemptErrors
+      .slice(0, 3)
+      .map((entry) => `${entry.endpoint} (${entry.status}): ${entry.message}`)
+      .join('; ');
+    console.warn(`⚠️ Auto-provision failed for ${email}. Attempts: ${sample}`);
+  }
+
+  return null;
+}
+
 // Look up tenant ID from user email via Cognito user cache
 // Now uses the local Cognito users file synced from GitHub workflow
 import { cognitoService } from './cognito.js';
@@ -191,34 +355,62 @@ export async function getTenantByEmail(email: string): Promise<string | null> {
   return null;
 }
 
-// Get tenant ID - from env, or look up from Cognito cache
-async function resolveTenantId(author: string): Promise<string> {
-  // First priority: environment variable
-  if (ARDA_TENANT_ID && ARDA_TENANT_ID !== 'your_tenant_uuid_here') {
+// Resolve tenant using actor context:
+// 1) explicit actor tenant, 2) email->Cognito mapping, 3) legacy env fallback.
+async function resolveTenantId(actor: ArdaActor): Promise<string> {
+  if (actor.tenantId) {
+    return actor.tenantId;
+  }
+
+  if (actor.email) {
+    const cognitoTenant = await getTenantByEmail(actor.email);
+    if (cognitoTenant) {
+      return cognitoTenant;
+    }
+
+    throw new Error(
+      `No tenant mapping found for authenticated email ${actor.email}. ` +
+      'Ensure this Google account is present in Cognito sync data.'
+    );
+  }
+
+  if (ARDA_TENANT_ID && !isPlaceholderTenantId(ARDA_TENANT_ID)) {
     return ARDA_TENANT_ID;
   }
 
-  // Second: try Cognito lookup
-  const cognitoTenant = await getTenantByEmail(author);
-  if (cognitoTenant) {
-    return cognitoTenant;
-  }
-
-  // Check if we're in mock mode
-  if (process.env.ARDA_MOCK_MODE === 'true') {
-    return 'mock-tenant-id';
-  }
-
   throw new Error(
-    `ARDA_TENANT_ID not configured and no tenant found for ${author}. ` +
-    'Please set ARDA_TENANT_ID in .env or ensure user is in Cognito.'
+    'Unable to resolve tenant ID: authenticated email mapping or explicit actor tenantId is required.'
   );
+}
+
+function isPlaceholderTenantId(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return true;
+
+  if (
+    normalized === 'your_tenant_uuid_here' ||
+    normalized === 'your-tenant-uuid-here' ||
+    normalized === 'your-arda-tenant-id' ||
+    normalized === 'your_arda_tenant_id'
+  ) {
+    return true;
+  }
+
+  // Generic heuristic: common placeholder patterns seen in example env files.
+  if (normalized.includes('your') && normalized.includes('tenant')) {
+    return true;
+  }
+
+  return false;
 }
 
 // Check if mock mode is enabled
 export function isMockMode(): boolean {
-  return process.env.ARDA_MOCK_MODE === 'true' || 
-         (!ARDA_API_KEY || !ARDA_TENANT_ID || ARDA_TENANT_ID === 'your_tenant_uuid_here');
+  return (
+    process.env.ARDA_MOCK_MODE === 'true' ||
+    !ARDA_API_KEY ||
+    (Boolean(ARDA_TENANT_ID) && isPlaceholderTenantId(ARDA_TENANT_ID!))
+  );
 }
 
 // Map color string to Arda ItemColor enum
@@ -241,30 +433,39 @@ function mapToArdaColor(color?: string): ItemColor | undefined {
 // Map order mechanism to Arda OrderMethod enum
 function mapToArdaOrderMethod(mechanism?: string): ItemSupplyValue['orderMethod'] {
   if (!mechanism) return 'EMAIL';
-  const methodMap: Record<string, ItemSupplyValue['orderMethod']> = {
-    'email': 'EMAIL',
-    'manual': 'MANUAL',
-    'auto': 'AUTO',
-    'fax': 'FAX',
-    'phone': 'PHONE',
-    'web': 'WEB',
-    'edi': 'EDI',
-  };
-  return methodMap[mechanism.toLowerCase()] || 'EMAIL';
+  const normalized = mechanism.trim().toLowerCase();
+  if (normalized === 'phone' || normalized === 'call') {
+    return 'PHONE';
+  }
+  if (['web', 'url', 'website', 'online', 'shopping'].includes(normalized)) {
+    return 'ONLINE';
+  }
+  return 'EMAIL';
+}
+
+function normalizeUnit(unit?: string): string {
+  const raw = unit?.trim();
+  if (!raw) return 'EA';
+  const normalized = raw.toLowerCase();
+  if (['each', 'ea', 'unit', 'units', 'piece', 'pieces', 'pcs'].includes(normalized)) {
+    return 'EA';
+  }
+  return raw.toUpperCase();
 }
 
 // Create an item in Arda's Item Data Authority
 // Maps our simplified ItemInput to Arda's Item.Entity schema
 export async function createItem(
   item: ItemInput,
-  author: string
+  actor: ArdaActor
 ): Promise<EntityRecord> {
-  const tenantId = await resolveTenantId(author);
+  const tenantId = await resolveTenantId(actor);
 
   // Build Arda Item.Entity structure
   const ardaItem: ArdaItemEntity = {
     eId: uuidv4(),
     name: item.name,
+    description: item.description || undefined,
     imageUrl: item.imageUrl || undefined,
     internalSKU: item.sku || undefined,
     itemColor: mapToArdaColor(item.color),
@@ -274,7 +475,7 @@ export async function createItem(
   if (item.minQty) {
     ardaItem.minQuantity = {
       amount: item.minQty,
-      unit: item.minQtyUnit || 'each',
+      unit: normalizeUnit(item.minQtyUnit),
     };
   }
 
@@ -297,7 +498,7 @@ export async function createItem(
   if (item.orderQty) {
     ardaItem.primarySupply.orderQuantity = {
       amount: item.orderQty,
-      unit: item.orderQtyUnit || item.minQtyUnit || 'each',
+      unit: normalizeUnit(item.orderQtyUnit || item.minQtyUnit),
     };
   }
 
@@ -306,7 +507,7 @@ export async function createItem(
   return ardaFetch<EntityRecord>('/v1/item/item', {
     method: 'POST',
     body: ardaItem,
-    author,
+    author: actor.author,
     tenantId,
   });
 }
@@ -314,14 +515,14 @@ export async function createItem(
 // Create a Kanban card in Arda
 export async function createKanbanCard(
   card: KanbanCardInput,
-  author: string
+  actor: ArdaActor
 ): Promise<EntityRecord> {
-  const tenantId = await resolveTenantId(author);
+  const tenantId = await resolveTenantId(actor);
 
   return ardaFetch<EntityRecord>('/v1/kanban/kanban-card', {
     method: 'POST',
     body: card,
-    author,
+    author: actor.author,
     tenantId,
   });
 }
@@ -329,14 +530,14 @@ export async function createKanbanCard(
 // Create an order in Arda
 export async function createOrder(
   order: OrderHeaderInput,
-  author: string
+  actor: ArdaActor
 ): Promise<EntityRecord> {
-  const tenantId = await resolveTenantId(author);
+  const tenantId = await resolveTenantId(actor);
 
   return ardaFetch<EntityRecord>('/v1/order/order', {
     method: 'POST',
     body: order,
-    author,
+    author: actor.author,
     tenantId,
   });
 }
@@ -367,7 +568,7 @@ export interface VelocitySyncResult {
 // Calculates kanban parameters and sets order mechanism based on velocity
 export async function createItemFromVelocity(
   profile: ItemVelocityProfileInput,
-  author: string
+  actor: ArdaActor
 ): Promise<EntityRecord> {
   // Calculate kanban parameters
   const minQty = profile.recommendedMin;
@@ -391,7 +592,7 @@ export async function createItemFromVelocity(
       primarySupplierLink: profile.primarySupplierLink,
       imageUrl: profile.imageUrl,
     },
-    author
+    actor
   );
 }
 
@@ -399,13 +600,13 @@ export async function createItemFromVelocity(
 // Creates items for each profile and returns results with success/failure status
 export async function syncVelocityToArda(
   profiles: ItemVelocityProfileInput[],
-  author: string
+  actor: ArdaActor
 ): Promise<VelocitySyncResult[]> {
   const results: VelocitySyncResult[] = [];
 
   for (const profile of profiles) {
     try {
-      const result = await createItemFromVelocity(profile, author);
+      const result = await createItemFromVelocity(profile, actor);
       
       // Extract item ID from the result (assuming it's in the payload)
       const itemId = (result.payload as { itemId?: string })?.itemId || result.rId;
@@ -432,8 +633,9 @@ export const ardaService = {
   createKanbanCard,
   createOrder,
   getTenantByEmail,
+  provisionUserForEmail,
   isMockMode,
   createItemFromVelocity,
   syncVelocityToArda,
-  isConfigured: () => Boolean(ARDA_API_KEY && ARDA_TENANT_ID && ARDA_TENANT_ID !== 'your_tenant_uuid_here'),
+  isConfigured: () => Boolean(ARDA_API_KEY) && Boolean(ARDA_TENANT_ID) && !isPlaceholderTenantId(ARDA_TENANT_ID!),
 };

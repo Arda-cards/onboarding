@@ -1,7 +1,7 @@
 // Amazon Product Advertising API Integration
-// Uses the official Amazon PAAPI 5.0 SDK
+// Uses direct AWS SigV4-signed PAAPI 5.0 requests.
 
-import amazonPaapi from 'amazon-paapi';
+import { createHash, createHmac } from 'node:crypto';
 
 interface AmazonItemResponse {
   ASIN: string;
@@ -16,6 +16,50 @@ interface AmazonItemResponse {
   UPC?: string;
 }
 
+interface AmazonPaapiItem {
+  ASIN: string;
+  DetailPageURL?: string;
+  Images?: {
+    Primary?: {
+      Large?: {
+        URL?: string;
+      };
+    };
+  };
+  ItemInfo?: {
+    Title?: {
+      DisplayValue?: string;
+    };
+    ProductInfo?: {
+      UnitCount?: {
+        DisplayValue?: number;
+      };
+    };
+    ExternalIds?: {
+      UPCs?: {
+        DisplayValues?: string[];
+      };
+    };
+  };
+  Offers?: {
+    Listings?: Array<{
+      Price?: {
+        DisplayAmount?: string;
+      };
+    }>;
+  };
+}
+
+interface AmazonPaapiGetItemsResponse {
+  ItemsResult?: {
+    Items?: AmazonPaapiItem[];
+  };
+  Errors?: Array<{
+    Code?: string;
+    Message?: string;
+  }>;
+}
+
 // API Configuration - loaded from environment variables
 const AMAZON_API_CONFIG = {
   accessKey: process.env.AMAZON_ACCESS_KEY || '',
@@ -23,7 +67,12 @@ const AMAZON_API_CONFIG = {
   partnerTag: process.env.AMAZON_PARTNER_TAG || 'arda06-20',
   partnerType: 'Associates' as const,
   marketplace: 'www.amazon.com' as const,
+  region: 'us-east-1' as const,
 };
+
+const AMAZON_PAAPI_PATH = '/paapi5/getitems';
+const AMAZON_PAAPI_TARGET = 'com.amazon.paapi5.v1.ProductAdvertisingAPIv1.GetItems';
+const AMAZON_PAAPI_SERVICE = 'ProductAdvertisingAPI';
 
 // ASIN pattern: B followed by 9 alphanumeric, or 10 digits
 // const ASIN_PATTERN = /\b(B0[A-Z0-9]{8}|[0-9]{10})\b/gi;
@@ -197,7 +246,7 @@ export async function getAmazonItemDetails(asins: string[]): Promise<Map<string,
           ],
         };
         
-        const response = await amazonPaapi.GetItems(commonParameters, requestParameters);
+        const response = await fetchAmazonItems(commonParameters, requestParameters);
         
         if (response.ItemsResult?.Items) {
           for (const item of response.ItemsResult.Items) {
@@ -291,3 +340,134 @@ export const amazonService = {
   createAffiliateUrl,
   ensureAffiliateTag,
 };
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function hmac(key: Buffer | string, value: string): Buffer {
+  return createHmac('sha256', key).update(value, 'utf8').digest();
+}
+
+function getAmzDate(date = new Date()): string {
+  return date.toISOString().replace(/[:\-]|\.\d{3}/g, '');
+}
+
+function getDateStamp(amzDate: string): string {
+  return amzDate.slice(0, 8);
+}
+
+function getSigningKey(secretKey: string, dateStamp: string, region: string, service: string): Buffer {
+  const dateKey = hmac(`AWS4${secretKey}`, dateStamp);
+  const regionKey = hmac(dateKey, region);
+  const serviceKey = hmac(regionKey, service);
+  return hmac(serviceKey, 'aws4_request');
+}
+
+function createAuthorizationHeader({
+  accessKey,
+  secretKey,
+  region,
+  host,
+  amzDate,
+  payload,
+}: {
+  accessKey: string;
+  secretKey: string;
+  region: string;
+  host: string;
+  amzDate: string;
+  payload: string;
+}): string {
+  const requestHeaders: Record<string, string> = {
+    'content-encoding': 'amz-1.0',
+    'content-type': 'application/json; charset=utf-8',
+    host,
+    'x-amz-date': amzDate,
+    'x-amz-target': AMAZON_PAAPI_TARGET,
+  };
+  const canonicalHeaders = Object.entries(requestHeaders)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, value]) => `${name}:${value.trim()}\n`)
+    .join('');
+  const signedHeaders = Object.keys(requestHeaders)
+    .sort()
+    .join(';');
+  const canonicalRequest = [
+    'POST',
+    AMAZON_PAAPI_PATH,
+    '',
+    canonicalHeaders,
+    signedHeaders,
+    sha256Hex(payload),
+  ].join('\n');
+  const dateStamp = getDateStamp(amzDate);
+  const credentialScope = `${dateStamp}/${region}/${AMAZON_PAAPI_SERVICE}/aws4_request`;
+  const stringToSign = [
+    'AWS4-HMAC-SHA256',
+    amzDate,
+    credentialScope,
+    sha256Hex(canonicalRequest),
+  ].join('\n');
+  const signingKey = getSigningKey(secretKey, dateStamp, region, AMAZON_PAAPI_SERVICE);
+  const signature = createHmac('sha256', signingKey).update(stringToSign, 'utf8').digest('hex');
+
+  return [
+    'AWS4-HMAC-SHA256',
+    `Credential=${accessKey}/${credentialScope},`,
+    `SignedHeaders=${signedHeaders},`,
+    `Signature=${signature}`,
+  ].join(' ');
+}
+
+async function fetchAmazonItems(
+  commonParameters: {
+    AccessKey: string;
+    SecretKey: string;
+    PartnerTag: string;
+    PartnerType: 'Associates';
+    Marketplace: string;
+  },
+  requestParameters: {
+    ItemIds: string[];
+    ItemIdType: 'ASIN';
+    Condition: 'New';
+    Resources: string[];
+  },
+): Promise<AmazonPaapiGetItemsResponse> {
+  const payload = JSON.stringify({
+    PartnerTag: commonParameters.PartnerTag,
+    PartnerType: commonParameters.PartnerType,
+    ...requestParameters,
+  });
+  const host = commonParameters.Marketplace;
+  const amzDate = getAmzDate();
+  const authorization = createAuthorizationHeader({
+    accessKey: commonParameters.AccessKey,
+    secretKey: commonParameters.SecretKey,
+    region: AMAZON_API_CONFIG.region,
+    host,
+    amzDate,
+    payload,
+  });
+  const response = await fetch(`https://${host}${AMAZON_PAAPI_PATH}`, {
+    method: 'POST',
+    headers: {
+      Authorization: authorization,
+      'content-encoding': 'amz-1.0',
+      'content-type': 'application/json; charset=utf-8',
+      'x-amz-date': amzDate,
+      'x-amz-target': AMAZON_PAAPI_TARGET,
+    },
+    body: payload,
+  });
+  const text = await response.text();
+  const parsed = text ? (JSON.parse(text) as AmazonPaapiGetItemsResponse) : {};
+
+  if (!response.ok) {
+    const message = parsed.Errors?.map((error) => `${error.Code || 'UNKNOWN'}: ${error.Message || 'Unknown error'}`).join('; ');
+    throw new Error(message || `Amazon PAAPI request failed with status ${response.status}`);
+  }
+
+  return parsed;
+}

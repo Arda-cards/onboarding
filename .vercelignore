@@ -1,0 +1,11 @@
+.git
+.claude
+.codex
+.next
+.vercel
+coverage
+dist
+node_modules
+server
+api
+scripts

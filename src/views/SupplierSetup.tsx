@@ -1,15 +1,26 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Icons } from '../components/Icons';
 import { ExtractedOrder } from '../types';
-import { discoverApi, jobsApi, JobStatus, DiscoveredSupplier } from '../services/api';
+import {
+  discoverApi,
+  jobsApi,
+  JobStatus,
+  DiscoveredSupplier,
+  isSessionExpiredError,
+  gmailApi,
+  ApiRequestError,
+} from '../services/api';
 import { mergeSuppliers } from '../utils/supplierUtils';
 import {
   buildSupplierGridItems,
+  canonicalizePrioritySupplierDomain,
   calculateProgressPercent,
+  getPrioritySummaryText,
   getMilestoneMessage,
+  isPrioritySupplierDomain,
   MILESTONES,
   OTHER_PRIORITY_SUPPLIERS,
-  PRIORITY_SUPPLIER_DOMAINS,
+  PRIORITY_SUPPLIER_SCAN_DOMAINS,
 } from './supplierSetupUtils';
 
 // Lean manufacturing wisdom - displayed while we ironically batch-process emails
@@ -85,6 +96,8 @@ const LEAN_WISDOM = [
 // so the second mount can use them instead of making another call
 let moduleDiscoveryPromise: Promise<{ suppliers: DiscoveredSupplier[] }> | null = null;
 let moduleDiscoveryResult: DiscoveredSupplier[] | null = null;
+const SESSION_EXPIRED_MESSAGE = 'Session expired. Please sign in again.';
+const GMAIL_REQUIRED_MESSAGE = 'Connect Gmail to start email analysis.';
 
 // Background progress type for parent components
 interface BackgroundEmailProgress {
@@ -115,15 +128,16 @@ interface SupplierSetupProps {
   onCanProceed?: (canProceed: boolean) => void;
   onStateChange?: (state: EmailScanState) => void;
   initialState?: EmailScanState;
+  embedded?: boolean;
 }
 
 export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   onScanComplete,
-  onSkip,
   onProgressUpdate,
   onCanProceed,
   onStateChange,
   initialState,
+  embedded = false,
 }) => {
   // Track if we already have restored state (don't restart scans)
   const hasRestoredState = Boolean(initialState && (initialState.amazonOrders.length > 0 || initialState.priorityOrders.length > 0 || initialState.otherOrders.length > 0));
@@ -163,16 +177,19 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   const [isPriorityComplete, setIsPriorityComplete] = useState(initialState?.isPriorityComplete || false);
   const priorityPollAbortRef = useRef<{ cancelled: boolean }>({ cancelled: false });
 
+  const [gmailStatus, setGmailStatus] = useState<{ connected: boolean; gmailEmail?: string | null } | null>(null);
+  const [gmailStatusError, setGmailStatusError] = useState<string | null>(null);
+
   // Discovery state (runs in parallel)
   const [isDiscovering, setIsDiscovering] = useState(false);
-  const [discoveryProgress, setDiscoveryProgress] = useState<string>('');
   const [discoveredSuppliers, setDiscoveredSuppliers] = useState<DiscoveredSupplier[]>(initialState?.discoveredSuppliers || []);
   const [enabledSuppliers, setEnabledSuppliers] = useState<Set<string>>(() => {
     const base = new Set<string>();
     if (initialState?.selectedOtherSuppliers) {
       initialState.selectedOtherSuppliers.forEach(domain => {
-        if (!PRIORITY_SUPPLIER_DOMAINS.has(domain) && !domain.includes('amazon')) {
-          base.add(domain);
+        const normalizedDomain = canonicalizePrioritySupplierDomain(domain);
+        if (!isPrioritySupplierDomain(normalizedDomain) && !normalizedDomain.includes('amazon')) {
+          base.add(normalizedDomain);
         }
       });
     }
@@ -189,10 +206,51 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null);
   const [otherOrders, setOtherOrders] = useState<ExtractedOrder[]>(initialState?.otherOrders || []);
+  const [otherScanError, setOtherScanError] = useState<string | null>(null);
   const otherPollAbortRef = useRef<{ cancelled: boolean }>({ cancelled: false });
   const [hasStartedOtherImport, setHasStartedOtherImport] = useState<boolean>(
     initialState?.hasStartedOtherImport || false,
   );
+  const [showContinueAnytimePopup, setShowContinueAnytimePopup] = useState(false);
+  const [hasShownContinueAnytimePopup, setHasShownContinueAnytimePopup] = useState(false);
+
+  const getErrorMessage = useCallback((error: unknown, fallback: string): string => {
+    if (isSessionExpiredError(error)) {
+      return SESSION_EXPIRED_MESSAGE;
+    }
+    if (error instanceof ApiRequestError && error.code === 'GMAIL_AUTH_REQUIRED') {
+      return GMAIL_REQUIRED_MESSAGE;
+    }
+    return error instanceof Error && error.message ? error.message : fallback;
+  }, []);
+
+  const isGmailConnected = Boolean(gmailStatus?.connected);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadGmailStatus = async () => {
+      try {
+        const status = await gmailApi.getStatus();
+        if (isMounted) {
+          setGmailStatus(status);
+          setGmailStatusError(null);
+        }
+      } catch (error: unknown) {
+        const message = getErrorMessage(error, 'Unable to check Gmail connection.');
+        if (isMounted) {
+          setGmailStatusError(message);
+          setGmailStatus({ connected: false, gmailEmail: null });
+        }
+      }
+    };
+
+    void loadGmailStatus();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [getErrorMessage]);
 
   // Computed values for the experience
   const allItems = useMemo(() => {
@@ -251,13 +309,19 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   }, [allItems]);
 
   // Merge priority suppliers with discovered ones (excluding Amazon)
-  const allSuppliers = useMemo(() => mergeSuppliers(OTHER_PRIORITY_SUPPLIERS, discoveredSuppliers), [discoveredSuppliers]);
+  const allSuppliers = useMemo(
+    () =>
+      mergeSuppliers(OTHER_PRIORITY_SUPPLIERS, discoveredSuppliers, {
+        canonicalizeDomain: canonicalizePrioritySupplierDomain,
+      }),
+    [discoveredSuppliers],
+  );
 
   // Filter out priority suppliers for the selectable list
   const selectableOtherSuppliers = useMemo(
     () =>
       allSuppliers.filter(
-        s => !PRIORITY_SUPPLIER_DOMAINS.has(s.domain) && !s.domain.includes('amazon'),
+        s => !isPrioritySupplierDomain(s.domain) && !s.domain.includes('amazon'),
       ),
     [allSuppliers],
   );
@@ -336,8 +400,13 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       console.log('📦 Restored email scan state - skipping initialization');
       return;
     }
+
+    if (!isGmailConnected) {
+      return;
+    }
     
     let amazonRetryTimeout: ReturnType<typeof setTimeout> | null = null;
+    let priorityRetryTimeout: ReturnType<typeof setTimeout> | null = null;
     
     // Start Amazon with retry logic
     const startAmazon = async (retryCount = 0) => {
@@ -347,7 +416,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         setAmazonJobId(response.jobId);
         setAmazonError(null);
       } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Failed to start Amazon processing';
+        const errorMessage = getErrorMessage(error, 'Failed to start Amazon processing');
         console.error('Amazon processing error:', errorMessage);
         
         // Retry on rate limit or temporary errors (up to 3 times)
@@ -365,18 +434,18 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     const startPrioritySuppliers = async (retryCount = 0) => {
       try {
         console.log(`🏭 Starting McMaster-Carr & Uline${retryCount > 0 ? ` (retry ${retryCount})` : ''}...`);
-        const response = await jobsApi.startJob(['mcmaster.com', 'uline.com'], 'priority');
+        const response = await jobsApi.startJob(PRIORITY_SUPPLIER_SCAN_DOMAINS, 'priority');
         setPriorityJobId(response.jobId);
         setPriorityError(null);
       } catch (error: unknown) {
-        const errorMessage = error instanceof Error ? error.message : 'Failed to start McMaster-Carr & Uline';
+        const errorMessage = getErrorMessage(error, 'Failed to start McMaster-Carr & Uline');
         console.error('Priority suppliers error:', errorMessage);
         
         // Retry on rate limit (up to 3 times)
         if (retryCount < 3 && (errorMessage.includes('rate') || errorMessage.includes('429') || errorMessage.includes('Too many'))) {
           const retryDelay = (retryCount + 1) * 4000; // 4s, 8s, 12s
           console.log(`⏳ Rate limited, retrying priority suppliers in ${retryDelay / 1000}s...`);
-          setTimeout(() => startPrioritySuppliers(retryCount + 1), retryDelay);
+          priorityRetryTimeout = setTimeout(() => startPrioritySuppliers(retryCount + 1), retryDelay);
         } else {
           setPriorityError(errorMessage);
         }
@@ -392,12 +461,18 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     // Cleanup on unmount
     return () => {
       if (amazonRetryTimeout) clearTimeout(amazonRetryTimeout);
+      if (priorityRetryTimeout) clearTimeout(priorityRetryTimeout);
     };
-  }, [hasRestoredState]);
+  }, [getErrorMessage, hasRestoredState, isGmailConnected]);
 
   // Discover suppliers - memoized to allow proper dependency tracking
   // Uses module-level caching to handle StrictMode remounts
   const handleDiscoverSuppliers = useCallback(async () => {
+    if (!isGmailConnected) {
+      setDiscoverError(GMAIL_REQUIRED_MESSAGE);
+      setHasDiscovered(true);
+      return;
+    }
     // Check if we already have cached results (from previous mount in StrictMode)
     if (moduleDiscoveryResult) {
       setDiscoveredSuppliers(moduleDiscoveryResult);
@@ -407,7 +482,6 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     
     setIsDiscovering(true);
     setDiscoverError(null);
-    setDiscoveryProgress('Scanning your inbox for suppliers...');
     
     try {
       // Reuse in-flight promise if one exists (prevents duplicate API calls)
@@ -424,10 +498,9 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       
       setDiscoveredSuppliers(nonAmazonSuppliers);
       setHasDiscovered(true);
-      setDiscoveryProgress('');
     } catch (err: unknown) {
       console.error('Discovery error:', err);
-      const message = err instanceof Error ? err.message : 'Failed to discover suppliers';
+      const message = getErrorMessage(err, 'Failed to discover suppliers');
       setDiscoverError(message);
       // Still mark as discovered so the grid shows (with priority suppliers at minimum)
       setHasDiscovered(true);
@@ -436,16 +509,26 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     } finally {
       setIsDiscovering(false);
     }
-  }, []);
+  }, [getErrorMessage, isGmailConnected]);
 
   // 2. START SUPPLIER DISCOVERY (start immediately for faster supplier identification)
   // Uses ref to prevent infinite loop and module-level caching for StrictMode
   useEffect(() => {
+    if (!isGmailConnected) return;
     if (!hasDiscovered && !isDiscovering && !hasInitiatedDiscovery.current) {
       hasInitiatedDiscovery.current = true;
       handleDiscoverSuppliers();
     }
-  }, [hasDiscovered, isDiscovering, handleDiscoverSuppliers]);
+  }, [hasDiscovered, isDiscovering, handleDiscoverSuppliers, isGmailConnected]);
+
+  useEffect(() => {
+    if (!isGmailConnected) return;
+    if (discoverError === GMAIL_REQUIRED_MESSAGE) {
+      setDiscoverError(null);
+      setHasDiscovered(false);
+      hasInitiatedDiscovery.current = false;
+    }
+  }, [discoverError, isGmailConnected]);
 
   // Poll Amazon job status with adaptive backoff
   const pollAmazonStatus = useCallback(async () => {
@@ -480,18 +563,19 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
   useEffect(() => {
     if (amazonJobId && !isAmazonComplete) {
-      amazonPollAbortRef.current.cancelled = false;
+      const pollState = amazonPollAbortRef.current;
+      pollState.cancelled = false;
       const pollWithBackoff = async (delayMs: number) => {
-        if (amazonPollAbortRef.current.cancelled) return;
+        if (pollState.cancelled) return;
         await pollAmazonStatus();
-        if (!amazonPollAbortRef.current.cancelled) {
+        if (!pollState.cancelled) {
           const nextDelay = Math.min(Math.floor(delayMs * 1.35), 1800);
           setTimeout(() => pollWithBackoff(nextDelay), nextDelay);
         }
       };
       pollWithBackoff(700);
       return () => {
-        amazonPollAbortRef.current.cancelled = true;
+        pollState.cancelled = true;
       };
     }
   }, [amazonJobId, isAmazonComplete, pollAmazonStatus]);
@@ -504,7 +588,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       const status = await jobsApi.getStatus(priorityJobId);
       setPriorityStatus(status);
       
-      if (status.orders && status.orders.length > 0) {
+      if (Array.isArray(status.orders)) {
         const convertedOrders: ExtractedOrder[] = status.orders.map(o => ({
           id: o.id,
           originalEmailId: o.id,
@@ -517,7 +601,11 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         setPriorityOrders(convertedOrders);
       }
       
-      if (status.status === 'completed' || status.status === 'failed') {
+      if (status.status === 'failed') {
+        setPriorityError(status.error || 'Failed to process McMaster-Carr & Uline emails');
+        setIsPriorityComplete(true);
+        priorityPollAbortRef.current.cancelled = true;
+      } else if (status.status === 'completed') {
         setIsPriorityComplete(true);
         priorityPollAbortRef.current.cancelled = true;
       }
@@ -528,36 +616,33 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
   useEffect(() => {
     if (priorityJobId && !isPriorityComplete) {
-      priorityPollAbortRef.current.cancelled = false;
+      const pollState = priorityPollAbortRef.current;
+      pollState.cancelled = false;
       const pollWithBackoff = async (delayMs: number) => {
-        if (priorityPollAbortRef.current.cancelled) return;
+        if (pollState.cancelled) return;
         await pollPriorityStatus();
-        if (!priorityPollAbortRef.current.cancelled) {
+        if (!pollState.cancelled) {
           const nextDelay = Math.min(Math.floor(delayMs * 1.35), 1800);
           setTimeout(() => pollWithBackoff(nextDelay), nextDelay);
         }
       };
       pollWithBackoff(700);
       return () => {
-        priorityPollAbortRef.current.cancelled = true;
+        pollState.cancelled = true;
       };
     }
   }, [priorityJobId, isPriorityComplete, pollPriorityStatus]);
 
-  // Notify parent when user can leave email step
-  // User can proceed if: discovery is done AND (no other suppliers to select, OR they've selected some)
+  // Notify parent when user can leave email step.
+  // If additional suppliers exist, require explicit import start before proceeding.
   useEffect(() => {
-    // If no other suppliers were discovered, can proceed once discovery is done
-    // If there are other suppliers, can proceed once user has selected at least one
-    // (they don't need to start scanning - they can skip to continue and scan in background)
-    const canProceed = hasDiscovered && (!hasSelectableOtherSuppliers || selectedOtherCount > 0 || hasStartedOtherImport);
+    const canProceed = hasDiscovered && (!hasSelectableOtherSuppliers || hasStartedOtherImport);
 
     onCanProceed?.(canProceed);
   }, [
     hasSelectableOtherSuppliers,
     hasDiscovered,
     hasStartedOtherImport,
-    selectedOtherCount,
     onCanProceed,
   ]);
 
@@ -620,18 +705,19 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
   useEffect(() => {
     if (currentJobId && isScanning) {
-      otherPollAbortRef.current.cancelled = false;
+      const pollState = otherPollAbortRef.current;
+      pollState.cancelled = false;
       const pollWithBackoff = async (delayMs: number) => {
-        if (otherPollAbortRef.current.cancelled) return;
+        if (pollState.cancelled) return;
         await pollJobStatus();
-        if (!otherPollAbortRef.current.cancelled) {
+        if (!pollState.cancelled) {
           const nextDelay = Math.min(Math.floor(delayMs * 1.35), 2000);
           setTimeout(() => pollWithBackoff(nextDelay), nextDelay);
         }
       };
       pollWithBackoff(650);
       return () => {
-        otherPollAbortRef.current.cancelled = true;
+        pollState.cancelled = true;
       };
     }
   }, [currentJobId, isScanning, pollJobStatus]);
@@ -643,56 +729,66 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     }
   }, [currentJobId, otherOrders.length, hasStartedOtherImport]);
 
-  // Auto-start other supplier import when we have prior selections and discovery is done
-  const shouldAutoStartOtherImport =
-    hasDiscovered &&
-    !isScanning &&
-    !currentJobId &&
-    !hasStartedOtherImport &&
-    selectedOtherCount > 0 &&
-    selectableOtherSuppliers.length > 0;
-
   // Scan selected suppliers
   const handleScanSuppliers = useCallback(async () => {
+    if (isScanning || currentJobId || hasStartedOtherImport) {
+      return;
+    }
+
+    if (!isGmailConnected) {
+      setOtherScanError(GMAIL_REQUIRED_MESSAGE);
+      return;
+    }
+
     // Filter to only non-Amazon, non-priority enabled suppliers
-    const domainsToScan = Array.from(enabledSuppliers).filter(
-      d => !d.includes('amazon') && !PRIORITY_SUPPLIER_DOMAINS.has(d)
-    );
+    const domainsToScan = Array.from(
+      new Set(Array.from(enabledSuppliers).map((domain) => canonicalizePrioritySupplierDomain(domain))),
+    ).filter((domain) => !domain.includes('amazon') && !isPrioritySupplierDomain(domain));
     
     if (domainsToScan.length === 0) {
       return; // Nothing additional to scan
     }
+
+    if (!hasShownContinueAnytimePopup) {
+      setShowContinueAnytimePopup(true);
+      setHasShownContinueAnytimePopup(true);
+    }
     
     setIsScanning(true);
     setJobStatus(null);
-    setHasStartedOtherImport(true);
+    setOtherScanError(null);
     
     try {
       const response = await jobsApi.startJob(domainsToScan, 'other');
       setCurrentJobId(response.jobId);
+      setHasStartedOtherImport(true);
     } catch (error) {
       console.error('Scan error:', error);
+      setOtherScanError(getErrorMessage(error, 'Failed to start selected supplier import.'));
       setIsScanning(false);
     }
-  }, [enabledSuppliers]);
-
-  // Auto-start other supplier import when we have prior selections and discovery is done
-  useEffect(() => {
-    if (shouldAutoStartOtherImport) {
-      handleScanSuppliers();
-    }
-  }, [shouldAutoStartOtherImport, handleScanSuppliers]);
+  }, [
+    enabledSuppliers,
+    getErrorMessage,
+    hasShownContinueAnytimePopup,
+    hasStartedOtherImport,
+    currentJobId,
+    isScanning,
+    isGmailConnected,
+  ]);
 
   const handleToggleSupplier = useCallback((domain: string) => {
+    const normalizedDomain = canonicalizePrioritySupplierDomain(domain);
     setEnabledSuppliers(prev => {
       const next = new Set(prev);
-      if (next.has(domain)) {
-        next.delete(domain);
+      if (next.has(normalizedDomain)) {
+        next.delete(normalizedDomain);
       } else {
-        next.add(domain);
+        next.add(normalizedDomain);
       }
       return next;
     });
+    setOtherScanError(null);
   }, []);
 
   // Keep parent updated with collected orders as they come in
@@ -765,6 +861,21 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     () => calculateProgressPercent(priorityProgress),
     [priorityProgress],
   );
+  const priorityOrderCount = priorityOrders.length;
+  const priorityItemCount = useMemo(
+    () => priorityOrders.reduce((sum, order) => sum + order.items.length, 0),
+    [priorityOrders],
+  );
+  const priorityProcessedEmails = priorityProgress?.processed ?? 0;
+  const priorityTotalEmails = priorityProgress?.total ?? 0;
+  const prioritySummaryText = getPrioritySummaryText({
+    error: priorityError,
+    isComplete: isPriorityComplete,
+    processedEmails: priorityProcessedEmails,
+    totalEmails: priorityTotalEmails,
+    orderCount: priorityOrderCount,
+    itemCount: priorityItemCount,
+  });
 
   // Amazon progress
   const amazonProgress = amazonStatus?.progress;
@@ -779,7 +890,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   );
 
   return (
-    <div className="max-w-5xl mx-auto p-6 pb-32 space-y-6 relative">
+    <div className={embedded ? 'max-w-5xl mx-auto pb-32 space-y-5 relative' : 'max-w-5xl mx-auto p-6 pb-32 space-y-5 relative'}>
       
       {/* Milestone Celebration Overlay */}
       {milestoneMessage && (
@@ -818,44 +929,21 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         <div className="text-center py-8 animate-fade-in">
           <div className="inline-flex items-center gap-2 bg-arda-accent/10 text-arda-accent px-4 py-2 rounded-full text-sm font-medium mb-4">
             <Icons.Sparkles className="w-4 h-4" />
-            Welcome to Arda
+            Email sync started
           </div>
           <h1 className="text-3xl font-bold text-arda-text-primary mb-3">
-            Let's discover your supply chain
+            We’re scanning your inbox
           </h1>
           <p className="text-arda-text-secondary max-w-lg mx-auto">
-            We're scanning your emails to find orders, track spending, and identify 
-            replenishment patterns. This usually takes about 30 seconds.
+            We’re finding orders, tracking spend, and identifying replenishment patterns.
+            This usually takes about 30 seconds.
           </p>
         </div>
       )}
 
-
-      {/* Lean Wisdom - Always visible */}
-      <div>
-        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-5">
-          <div className="flex items-start gap-4">
-            <div className="flex-shrink-0 w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
-              <Icons.Lightbulb className="w-5 h-5 text-amber-600" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-amber-900 mb-1">
-                {isAnyProcessing ? 'While you wait, a word about batching...' : 'A word about batching...'}
-              </p>
-              <blockquote className="text-amber-800 italic text-sm leading-relaxed">
-                "{LEAN_WISDOM[wisdomIndex].quote}"
-              </blockquote>
-              <p className="text-xs text-amber-600 mt-2 font-medium">
-                {LEAN_WISDOM[wisdomIndex].attribution}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Live Stats Bar - The "wow" moment */}
       {(allItems.length > 0 || totalOrders > 0) && (
-        <div className="bg-gradient-to-r from-arda-accent to-blue-600 rounded-2xl p-6 text-white shadow-lg">
+        <div className={`bg-gradient-to-r from-arda-accent to-blue-600 rounded-2xl p-6 text-white shadow-lg ${isGmailConnected ? '' : 'opacity-60'}`}>
           <div className="grid grid-cols-4 gap-6 text-center">
             <div>
               <div className="text-4xl font-bold">{allItems.length}</div>
@@ -900,13 +988,22 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
                 : 'Ready to set up your inventory'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={onSkip}
-            className="text-sm font-semibold text-arda-accent hover:text-arda-accent/80 transition-colors"
-          >
-            Skip for now
-          </button>
+        </div>
+      )}
+
+      {!isGmailConnected && (
+        <div className="border border-arda-border rounded-2xl p-6 bg-arda-bg-secondary">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-xl bg-gray-400 text-white flex items-center justify-center">
+              <Icons.Mail className="w-6 h-6" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-lg font-semibold text-arda-text-primary">Gmail not connected</h3>
+              <p className="text-sm text-arda-text-secondary mt-1">
+                {gmailStatusError || 'Go back to the Welcome step and click "Connect Gmail & start sync" to link your Google account, or skip this step.'}
+              </p>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1021,9 +1118,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         priorityError
           ? 'bg-red-50 border-red-200'
           : isPriorityComplete 
-            ? priorityOrders.length > 0 
-              ? 'bg-green-50 border-green-300 shadow-md' 
-              : 'bg-gray-50 border-gray-200'
+            ? 'bg-green-50 border-green-300 shadow-md'
             : 'bg-blue-50 border-blue-200 shadow-sm'
       }`}>
         <div className="flex items-center justify-between mb-4">
@@ -1041,8 +1136,8 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
             </div>
             <div>
               <h3 className="text-xl font-bold text-arda-text-primary">Industrial Suppliers</h3>
-              <p className="text-sm text-arda-text-secondary">
-                McMaster-Carr, Uline, and more
+              <p className={`text-sm ${priorityError ? 'text-red-600' : 'text-arda-text-secondary'}`}>
+                {prioritySummaryText}
               </p>
             </div>
           </div>
@@ -1112,6 +1207,28 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         )}
       </div>
 
+      {/* Lean Wisdom - Always visible */}
+      <div>
+        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-5">
+          <div className="flex items-start gap-4">
+            <div className="flex-shrink-0 w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
+              <Icons.Lightbulb className="w-5 h-5 text-amber-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-amber-900 mb-1">
+                {isAnyProcessing ? 'While you wait, a word about batching...' : 'A word about batching...'}
+              </p>
+              <blockquote className="text-amber-800 italic text-sm leading-relaxed">
+                "{LEAN_WISDOM[wisdomIndex].quote}"
+              </blockquote>
+              <p className="text-xs text-amber-600 mt-2 font-medium">
+                {LEAN_WISDOM[wisdomIndex].attribution}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Additional Suppliers Section */}
       <div className="border-2 border-gray-200 rounded-2xl p-6">
         <div className="flex items-center justify-between mb-4">
@@ -1120,28 +1237,48 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
             <p className="text-sm text-arda-text-secondary">
               {isDiscovering 
                 ? 'Discovering...' 
-                : `${supplierCount} additional suppliers found`}
+                : hasStartedOtherImport
+                  ? 'Import started. Continue when ready.'
+                  : `${supplierCount} additional suppliers found`}
             </p>
           </div>
           
           {hasDiscovered && !isScanning && hasSelectableOtherSuppliers && (
             <button
               onClick={handleScanSuppliers}
-              disabled={selectedOtherCount === 0}
+              disabled={selectedOtherCount === 0 || hasStartedOtherImport}
               className={[
                 "px-5 py-2.5 rounded-xl font-medium transition-all flex items-center gap-2",
-                selectedOtherCount > 0
+                selectedOtherCount > 0 && !hasStartedOtherImport
                   ? "bg-arda-accent hover:bg-arda-accent-hover text-white"
                   : "bg-arda-border text-arda-text-muted cursor-not-allowed"
               ].join(" ")}
             >
               <Icons.Download className="w-4 h-4" />
-              {selectedOtherCount > 0
+              {hasStartedOtherImport
+                ? 'Import started'
+                : selectedOtherCount > 0
                 ? `Import ${selectedOtherCount} Supplier${selectedOtherCount === 1 ? '' : 's'}`
                 : 'Select suppliers to import'}
             </button>
           )}
         </div>
+
+        {otherScanError && !isScanning && (
+          <div className="mb-4 bg-red-50 border border-red-200 rounded-xl p-4">
+            <div className="flex items-center gap-3">
+              <Icons.AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+              <div>
+                <span className="font-medium text-red-700">
+                  {otherScanError}
+                </span>
+                <p className="text-sm text-red-600 mt-1">
+                  Continue stays disabled until supplier import starts. Select suppliers and try again.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Scanning Progress */}
         {isScanning && jobStatus && (
@@ -1189,10 +1326,12 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
               <Icons.AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0" />
               <div>
                 <span className="font-medium text-amber-700">
-                  Could not fully discover suppliers
+                  {discoverError === SESSION_EXPIRED_MESSAGE ? SESSION_EXPIRED_MESSAGE : 'Could not fully discover suppliers'}
                 </span>
                 <p className="text-sm text-amber-600 mt-1">
-                  Showing available suppliers. You can still select and import from the list below.
+                  {discoverError === SESSION_EXPIRED_MESSAGE
+                    ? 'Please sign in again to continue importing suppliers.'
+                    : 'Showing available suppliers. You can still select and import from the list below.'}
                 </p>
               </div>
             </div>
@@ -1325,6 +1464,51 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
                   <div className="text-xs text-arda-text-muted">Find savings opportunities</div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showContinueAnytimePopup && (
+        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="continue-anytime-title"
+            className="bg-white rounded-2xl shadow-xl border border-blue-100 w-full max-w-md p-6"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
+                  <Icons.Clock className="w-4 h-4 text-blue-700" />
+                </div>
+                <div>
+                  <h2 id="continue-anytime-title" className="text-base font-semibold text-blue-900">
+                    Continue anytime
+                  </h2>
+                  <p className="text-sm text-blue-800 mt-1">
+                    Email import keeps running in the background after you move to the next step. We’ll keep adding
+                    items as scans finish.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Close continue anytime popup"
+                onClick={() => setShowContinueAnytimePopup(false)}
+                className="text-arda-text-muted hover:text-arda-text-primary transition-colors"
+              >
+                <Icons.X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowContinueAnytimePopup(false)}
+                className="px-4 py-2 rounded-lg bg-arda-accent hover:bg-arda-accent-hover text-white font-medium transition-colors"
+              >
+                Got it
+              </button>
             </div>
           </div>
         </div>

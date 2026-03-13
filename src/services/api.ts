@@ -1,37 +1,440 @@
 // API client for backend communication
-// In production on Vercel, use same-origin (empty string) to leverage Vercel rewrites/proxy
-// This avoids cross-origin cookie issues. In development, use the direct API URL.
-//
-// Note: Some deployments may not have Vercel rewrites configured for /auth and /api.
-// Defaulting production builds to the Railway API keeps OAuth/login working even without rewrites.
-const API_BASE_URL =
-  import.meta.env.VITE_API_URL || 'https://order-pulse-api-production.up.railway.app';
+// Production defaults to same-origin so Vercel rewrites keep session cookies first-party.
+const DEFAULT_DEV_API_BASE_URL = 'http://localhost:3001';
+const DEFAULT_ARDA_APP_URL = 'https://live.app.arda.cards';
+const DEFAULT_ARDA_APP_URL_TEMPLATE = `${DEFAULT_ARDA_APP_URL}/?tenantId={tenantId}`;
+const SESSION_EXPIRED_MESSAGE = 'Session expired. Please sign in again.';
+export const SESSION_EXPIRED_EVENT = 'orderpulse:session-expired';
+
+interface ApiBaseUrlConfig {
+  viteApiUrl?: string;
+  isProd: boolean;
+}
+
+export function normalizeApiBaseUrl(baseUrl: string): string {
+  const trimmed = baseUrl.trim();
+  return trimmed.replace(/\/+$/, '');
+}
+
+export function resolveApiBaseUrl({ viteApiUrl, isProd }: ApiBaseUrlConfig): string {
+  if (viteApiUrl !== undefined) {
+    return normalizeApiBaseUrl(viteApiUrl);
+  }
+  return isProd ? '' : DEFAULT_DEV_API_BASE_URL;
+}
+
+const API_BASE_URL = resolveApiBaseUrl({
+  viteApiUrl: import.meta.env.VITE_API_URL as string | undefined,
+  isProd: import.meta.env.PROD,
+});
+
+export function buildArdaOpenUrl(
+  tenantId: string | null | undefined,
+  options?: { appUrl?: string; appUrlTemplate?: string },
+): string {
+  const appUrl = normalizeApiBaseUrl(
+    options?.appUrl ?? (import.meta.env.VITE_ARDA_APP_URL as string | undefined) ?? DEFAULT_ARDA_APP_URL,
+  );
+  const appUrlTemplate = (
+    options?.appUrlTemplate ??
+    (import.meta.env.VITE_ARDA_APP_URL_TEMPLATE as string | undefined) ??
+    DEFAULT_ARDA_APP_URL_TEMPLATE
+  ).trim();
+
+  if (!tenantId || !appUrlTemplate.includes('{tenantId}')) {
+    return appUrl;
+  }
+
+  return appUrlTemplate.replaceAll('{tenantId}', encodeURIComponent(tenantId));
+}
 
 interface ApiError {
   error: string;
+  code?: string;
+  details?: unknown;
+}
+
+export class SessionExpiredError extends Error {
+  constructor(message = SESSION_EXPIRED_MESSAGE) {
+    super(message);
+    this.name = 'SessionExpiredError';
+  }
+}
+
+export class ApiRequestError extends Error {
+  status: number;
+  code?: string;
+  details?: unknown;
+
+  constructor(message: string, status: number, code?: string, details?: unknown) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.code = code;
+    this.details = details;
+  }
+}
+
+export function isSessionExpiredError(error: unknown): error is SessionExpiredError {
+  return error instanceof SessionExpiredError;
+}
+
+export function isApiRequestError(error: unknown): error is ApiRequestError {
+  return error instanceof ApiRequestError;
+}
+
+let hasNotifiedSessionExpired = false;
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRYABLE_STATUS_CODES = new Set([429, 502, 503]);
+const RETRY_BACKOFF_MS = [1000, 2000, 4000];
+const REQUEST_TIMEOUT_MS = 30_000;
+const CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5;
+const CIRCUIT_BREAKER_OPEN_MS = 30_000;
+const isTestRuntime = import.meta.env.MODE === 'test';
+
+type CachedApiResponse = {
+  data: unknown;
+  cachedAtMs: number;
+};
+
+type CircuitState = {
+  consecutiveFailures: number;
+  openUntilMs: number | null;
+};
+
+interface ApiRequestContext {
+  endpoint: string;
+  url: string;
+  options: RequestInit;
+  correlationId: string;
+  requestKey: string;
+  attempt: number;
+}
+
+type ApiRequestInterceptor = (
+  context: ApiRequestContext,
+) => ApiRequestContext | Promise<ApiRequestContext>;
+
+const responseCache = new Map<string, CachedApiResponse>();
+const circuitBreakerState = new Map<string, CircuitState>();
+
+function notifySessionExpired(): void {
+  if (hasNotifiedSessionExpired) return;
+  hasNotifiedSessionExpired = true;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+  }
+}
+
+// Test helper for deterministic assertions.
+export function resetSessionExpiredSignalForTests(): void {
+  hasNotifiedSessionExpired = false;
+}
+
+export function resetApiClientStateForTests(): void {
+  hasNotifiedSessionExpired = false;
+  responseCache.clear();
+  circuitBreakerState.clear();
+}
+
+function requestMethod(options: RequestInit): string {
+  return (options.method ?? 'GET').toUpperCase();
+}
+
+function shouldRetryAutomatically(method: string): boolean {
+  // Restrict retries to safe reads so transient upstream failures cannot duplicate mutations.
+  return method === 'GET';
+}
+
+function createRequestKey(endpoint: string, options: RequestInit): string {
+  return `${requestMethod(options)} ${endpoint}`;
+}
+
+function createCorrelationId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+  return `req-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function buildRequestHeaders(headersInit: HeadersInit | undefined, correlationId: string): Headers {
+  const headers = new Headers(headersInit);
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+  headers.set('X-Request-ID', correlationId);
+  return headers;
+}
+
+function createTimeoutSignal(
+  existingSignal: AbortSignal | null | undefined,
+  timeoutMs: number,
+): { signal: AbortSignal; cleanup: () => void } {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort(new DOMException('Request timed out', 'TimeoutError'));
+  }, timeoutMs);
+
+  const abortFromExistingSignal = () => {
+    controller.abort(existingSignal?.reason);
+  };
+
+  if (existingSignal) {
+    if (existingSignal.aborted) {
+      abortFromExistingSignal();
+    } else {
+      existingSignal.addEventListener('abort', abortFromExistingSignal, { once: true });
+    }
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timeoutId);
+      existingSignal?.removeEventListener('abort', abortFromExistingSignal);
+    },
+  };
+}
+
+function readCachedResponse<T>(requestKey: string): T | null {
+  const cached = responseCache.get(requestKey);
+  return (cached?.data as T | undefined) ?? null;
+}
+
+function isCircuitOpen(requestKey: string): boolean {
+  const state = circuitBreakerState.get(requestKey);
+  if (!state?.openUntilMs) {
+    return false;
+  }
+  if (state.openUntilMs <= Date.now()) {
+    circuitBreakerState.delete(requestKey);
+    return false;
+  }
+  return true;
+}
+
+function resetCircuitBreaker(requestKey: string): void {
+  circuitBreakerState.delete(requestKey);
+}
+
+function recordTransientFailure(requestKey: string): CircuitState {
+  const current = circuitBreakerState.get(requestKey) ?? {
+    consecutiveFailures: 0,
+    openUntilMs: null,
+  };
+
+  const consecutiveFailures = current.consecutiveFailures + 1;
+  const nextState: CircuitState = {
+    consecutiveFailures,
+    openUntilMs:
+      consecutiveFailures >= CIRCUIT_BREAKER_FAILURE_THRESHOLD
+        ? Date.now() + CIRCUIT_BREAKER_OPEN_MS
+        : null,
+  };
+
+  circuitBreakerState.set(requestKey, nextState);
+  return nextState;
+}
+
+function isRetryableStatus(status: number): boolean {
+  return RETRYABLE_STATUS_CODES.has(status);
+}
+
+function isTransientNetworkError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return error instanceof TypeError || error.name === 'AbortError' || error.name === 'TimeoutError';
+}
+
+function parseRetryAfterMs(value: string | null): number | null {
+  if (!value) return null;
+
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const absoluteTimeMs = Date.parse(value);
+  if (Number.isNaN(absoluteTimeMs)) {
+    return null;
+  }
+
+  return Math.max(0, absoluteTimeMs - Date.now());
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function normalizeApiError(error: unknown): ApiRequestError {
+  if (error instanceof ApiRequestError) {
+    return error;
+  }
+  if (error instanceof Error) {
+    return new ApiRequestError(error.message || 'Network request failed', 0, 'NETWORK_ERROR');
+  }
+  return new ApiRequestError('Network request failed', 0, 'NETWORK_ERROR');
+}
+
+const apiRequestInterceptors: ApiRequestInterceptor[] = [
+  (context) => ({
+    ...context,
+    options: {
+      ...context.options,
+      credentials: 'include',
+      headers: buildRequestHeaders(context.options.headers, context.correlationId),
+    },
+  }),
+  (context) => {
+    if (import.meta.env.DEV && !isTestRuntime) {
+      console.debug('[api]', requestMethod(context.options), context.endpoint, {
+        attempt: context.attempt + 1,
+        requestId: context.correlationId,
+      });
+    }
+    return context;
+  },
+];
+
+async function applyRequestInterceptors(context: ApiRequestContext): Promise<ApiRequestContext> {
+  let nextContext = context;
+  for (const interceptor of apiRequestInterceptors) {
+    nextContext = await interceptor(nextContext);
+  }
+  return nextContext;
 }
 
 async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    ...options,
-    credentials: 'include', // Include cookies for session
-    headers: {
-      'Content-Type': 'application/json',
-      ...options.headers,
-    },
-  });
+  const method = requestMethod(options);
+  const requestKey = createRequestKey(endpoint, options);
+  const canRetryAutomatically = shouldRetryAutomatically(method);
 
-  if (!response.ok) {
-    const error: ApiError = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(error.error || `HTTP ${response.status}`);
+  if (isCircuitOpen(requestKey)) {
+    const cached = method === 'GET' ? readCachedResponse<T>(requestKey) : null;
+    if (cached !== null) {
+      return cached;
+    }
+    throw new ApiRequestError(
+      'Temporary upstream issue. Please retry shortly.',
+      503,
+      'CIRCUIT_OPEN',
+    );
   }
 
-  return response.json();
+  const correlationId = createCorrelationId();
+
+  for (let attempt = 0; attempt <= MAX_RETRY_ATTEMPTS; attempt += 1) {
+    const context = await applyRequestInterceptors({
+      endpoint,
+      url: `${API_BASE_URL}${endpoint}`,
+      options,
+      correlationId,
+      requestKey,
+      attempt,
+    });
+    const { signal, cleanup } = createTimeoutSignal(context.options.signal, REQUEST_TIMEOUT_MS);
+
+    try {
+      const response = await fetch(context.url, {
+        ...context.options,
+        signal,
+      });
+
+      if (!response.ok) {
+        const error: ApiError = await response.json().catch(() => ({ error: 'Request failed' }));
+        if (response.status === 401) {
+          notifySessionExpired();
+          throw new SessionExpiredError();
+        }
+
+        if (canRetryAutomatically && isRetryableStatus(response.status) && attempt < MAX_RETRY_ATTEMPTS) {
+          const retryAfterMs =
+            parseRetryAfterMs(response.headers.get('Retry-After'))
+            ?? RETRY_BACKOFF_MS[Math.min(attempt, RETRY_BACKOFF_MS.length - 1)];
+          await sleep(retryAfterMs);
+          continue;
+        }
+
+        if (isRetryableStatus(response.status)) {
+          const state = recordTransientFailure(requestKey);
+          const cached = method === 'GET' ? readCachedResponse<T>(requestKey) : null;
+          if (cached !== null && state.openUntilMs && state.openUntilMs > Date.now()) {
+            return cached;
+          }
+        }
+
+        throw new ApiRequestError(
+          error.error || `HTTP ${response.status}`,
+          response.status,
+          error.code,
+          error.details,
+        );
+      }
+
+      const data = (await response.json()) as T;
+      resetCircuitBreaker(requestKey);
+
+      if (method === 'GET') {
+        responseCache.set(requestKey, {
+          data,
+          cachedAtMs: Date.now(),
+        });
+      }
+
+      return data;
+    } catch (error) {
+      if (error instanceof SessionExpiredError) {
+        throw error;
+      }
+
+      const callerAborted = Boolean(context.options.signal?.aborted);
+      const transientNetworkError = !callerAborted && isTransientNetworkError(error);
+
+      if (canRetryAutomatically && transientNetworkError && attempt < MAX_RETRY_ATTEMPTS) {
+        const delayMs = RETRY_BACKOFF_MS[Math.min(attempt, RETRY_BACKOFF_MS.length - 1)];
+        await sleep(delayMs);
+        continue;
+      }
+
+      if (transientNetworkError) {
+        const state = recordTransientFailure(requestKey);
+        const cached = method === 'GET' ? readCachedResponse<T>(requestKey) : null;
+        if (cached !== null && state.openUntilMs && state.openUntilMs > Date.now()) {
+          return cached;
+        }
+      }
+
+      throw normalizeApiError(error);
+    } finally {
+      cleanup();
+    }
+  }
+
+  throw new ApiRequestError('Request failed', 0, 'NETWORK_ERROR');
 }
 
 // Auth API
 export const authApi = {
   getLoginUrl: () => `${API_BASE_URL}/auth/google`,
+
+  login: (email: string, password: string) =>
+    fetchApi<{ success: boolean; user: { id: string; email: string; name: string; picture_url: string } }>(
+      '/auth/local/login',
+      {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      }
+    ),
+
+  signup: (email: string, password: string, name?: string) =>
+    fetchApi<{ success: boolean; user: { id: string; email: string; name: string; picture_url: string } }>(
+      '/auth/local/signup',
+      {
+        method: 'POST',
+        body: JSON.stringify({ email, password, name }),
+      }
+    ),
   
   getCurrentUser: () => fetchApi<{ user: { id: string; email: string; name: string; picture_url: string } }>('/auth/me'),
   
@@ -56,6 +459,9 @@ export const gmailApi = {
     fetchApi<{ messages: GmailMessage[]; total: number }>(
       `/api/gmail/messages?q=${encodeURIComponent(query || '')}&maxResults=${maxResults || 10}`
     ),
+
+  getStatus: () =>
+    fetchApi<{ connected: boolean; gmailEmail?: string | null }>('/api/gmail/status'),
   
   sendEmail: (to: string, subject: string, body: string) =>
     fetchApi<{ success: boolean; messageId: string }>('/api/gmail/send', {
@@ -101,17 +507,7 @@ export interface DiscoveredSupplier {
 }
 
 export const discoverApi = {
-  discoverSuppliers: async (): Promise<{ suppliers: DiscoveredSupplier[] }> => {
-    const response = await fetch(`${API_BASE_URL}/api/discover/discover-suppliers`, {
-      credentials: 'include',
-    });
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      const errorMsg = errorData.error || `HTTP ${response.status}`;
-      throw new Error(errorMsg);
-    }
-    return response.json();
-  },
+  discoverSuppliers: () => fetchApi<{ suppliers: DiscoveredSupplier[] }>('/api/discover/discover-suppliers'),
   
   startJobWithFilter: (supplierDomains?: string[]) =>
     fetchApi<{ jobId: string; status: string; message: string }>('/api/jobs/start', {
@@ -165,37 +561,17 @@ export interface JobStatus {
 
 export const jobsApi = {
   // Start Amazon-first processing immediately
-  startAmazon: async (): Promise<{ jobId: string }> => {
-    const response = await fetch(`${API_BASE_URL}/api/jobs/start-amazon`, {
+  startAmazon: () =>
+    fetchApi<{ jobId: string }>('/api/jobs/start-amazon', {
       method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    });
-    if (!response.ok) {
-      const error: ApiError = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP ${response.status}`);
-    }
-    return response.json();
-  },
+    }),
   
   // Start processing for selected suppliers
-  startJob: async (supplierDomains?: string[], jobType?: string): Promise<{ jobId: string }> => {
-    const response = await fetch(`${API_BASE_URL}/api/jobs/start`, {
+  startJob: (supplierDomains?: string[], jobType?: string) =>
+    fetchApi<{ jobId: string }>('/api/jobs/start', {
       method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify({ supplierDomains, jobType }),
-    });
-    if (!response.ok) {
-      const error: ApiError = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP ${response.status}`);
-    }
-    return response.json();
-  },
+    }),
   
   getStatus: (jobId?: string) =>
     fetchApi<JobStatus>(`/api/jobs/status${jobId ? `?jobId=${jobId}` : ''}`),
@@ -203,6 +579,60 @@ export const jobsApi = {
   getJob: (jobId: string) =>
     fetchApi<JobStatus>(`/api/jobs/${jobId}`),
 };
+
+export interface UrlScrapedItem {
+  sourceUrl: string;
+  productUrl?: string;
+  imageUrl?: string;
+  itemName?: string;
+  supplier?: string;
+  price?: number;
+  currency?: string;
+  description?: string;
+  vendorSku?: string;
+  asin?: string;
+  needsReview: boolean;
+  extractionSource: 'amazon-paapi' | 'html-metadata' | 'hybrid-ai' | 'error';
+  confidence: number;
+}
+
+export interface UrlScrapeResult {
+  sourceUrl: string;
+  normalizedUrl?: string;
+  status: 'success' | 'partial' | 'failed';
+  message?: string;
+  extractionSource: UrlScrapedItem['extractionSource'];
+  item: UrlScrapedItem;
+}
+
+export interface UrlScrapeResponse {
+  requested: number;
+  processed: number;
+  results: UrlScrapeResult[];
+  items: UrlScrapedItem[];
+}
+
+export const urlIngestionApi = {
+  scrapeUrls: (urls: string[]) =>
+    fetchApi<UrlScrapeResponse>('/api/url-ingestion/scrape', {
+      method: 'POST',
+      body: JSON.stringify({ urls }),
+    }),
+  scrapeListingUrl: (url: string, maxUrls?: number) =>
+    fetchApi<ListingScrapeResponse>('/api/url-ingestion/scrape-listing', {
+      method: 'POST',
+      body: JSON.stringify({ url, maxUrls }),
+    }),
+};
+
+export interface ListingScrapeResponse {
+  listingUrl: string;
+  normalizedUrl?: string;
+  status: 'success' | 'partial' | 'failed';
+  message?: string;
+  productUrls: string[];
+  usedJina?: boolean;
+}
 
 // Amazon API
 export interface AmazonItemData {
@@ -287,11 +717,73 @@ export const ordersApi = {
     fetchApi<{ success: boolean }>(`/api/orders/${id}`, { method: 'DELETE' }),
 };
 
+export type IntegrationProvider = 'quickbooks' | 'xero';
+export type IntegrationConnectionStatus = 'connected' | 'reauth_required' | 'error' | 'disconnected';
+export type IntegrationSyncTrigger = 'manual' | 'scheduled' | 'webhook' | 'backfill';
+export type IntegrationSyncStatus = 'running' | 'success' | 'failed';
+
+export interface IntegrationConnection {
+  id: string;
+  provider: IntegrationProvider;
+  tenantId: string;
+  tenantName?: string;
+  status: IntegrationConnectionStatus;
+  tokenExpiresAt: string;
+  createdAt: string;
+  updatedAt: string;
+  lastRun?: {
+    id: string;
+    status: IntegrationSyncStatus;
+    trigger: IntegrationSyncTrigger;
+    startedAt: string;
+    finishedAt?: string;
+    error?: string;
+  };
+}
+
+export interface IntegrationSyncRun {
+  id: string;
+  connectionId: string;
+  trigger: IntegrationSyncTrigger;
+  status: IntegrationSyncStatus;
+  ordersUpserted: number;
+  ordersDeleted: number;
+  itemsUpserted: number;
+  apiCalls: number;
+  startedAt: string;
+  finishedAt?: string;
+  error?: string;
+}
+
+export const integrationsApi = {
+  connectProvider: (provider: IntegrationProvider) =>
+    fetchApi<{ authUrl: string }>(`/api/integrations/${provider}/connect`, {
+      method: 'POST',
+    }),
+
+  listConnections: () =>
+    fetchApi<{ connections: IntegrationConnection[] }>('/api/integrations/connections'),
+
+  disconnectConnection: (connectionId: string) =>
+    fetchApi<{ success: boolean }>(`/api/integrations/connections/${connectionId}`, {
+      method: 'DELETE',
+    }),
+
+  syncConnection: (connectionId: string) =>
+    fetchApi<{ success: boolean; runId: string }>(`/api/integrations/connections/${connectionId}/sync`, {
+      method: 'POST',
+    }),
+
+  getConnectionRuns: (connectionId: string) =>
+    fetchApi<{ runs: IntegrationSyncRun[] }>(`/api/integrations/connections/${connectionId}/runs`),
+};
+
 export { API_BASE_URL };
 
 // Arda API
 export interface ArdaItemInput {
   name: string;
+  description?: string;
   orderMechanism?: string;
   minQty?: number;
   minQtyUnit?: string;
@@ -301,6 +793,9 @@ export interface ArdaItemInput {
   orderQtyUnit?: string;
   primarySupplierLink?: string;
   imageUrl?: string;
+  sku?: string;
+  barcode?: string;
+  unitPrice?: number;
 }
 
 export interface ArdaKanbanCardInput {
@@ -359,6 +854,82 @@ export interface ArdaVelocitySyncResult {
   error?: string;
 }
 
+export interface ArdaTenantSuggestion {
+  tenantId: string;
+  matchedEmail: string;
+  domain: string;
+  matchCount: number;
+}
+
+export interface ArdaTenantResolutionDetails {
+  email?: string;
+  message?: string;
+  authorFound?: boolean;
+  tenantIdFound?: boolean;
+  canUseSuggestedTenant?: boolean;
+  canCreateTenant?: boolean;
+  suggestedTenant?: ArdaTenantSuggestion | null;
+  tenantId?: string;
+  autoProvisionAttempted?: boolean;
+  autoProvisionSucceeded?: boolean;
+  autoProvisionError?: string;
+  resolutionMode?: 'mapped' | 'provisioned' | 'override' | 'unresolved';
+}
+
+export interface ArdaSyncStatusEvent {
+  id: string;
+  operation: string;
+  success: boolean;
+  requested: number;
+  successful: number;
+  failed: number;
+  timestamp: string;
+  error?: string;
+  email?: string;
+  tenantId?: string;
+}
+
+export interface ArdaSyncStatusResponse {
+  success: boolean;
+  message: string;
+  user: string;
+  ardaConfigured: boolean;
+  totalAttempts: number;
+  successfulAttempts: number;
+  failedAttempts: number;
+  totalRequested: number;
+  totalSuccessful: number;
+  totalFailed: number;
+  lastAttemptAt: string | null;
+  lastSuccessAt: string | null;
+  lastErrorAt: string | null;
+  recent: ArdaSyncStatusEvent[];
+  updatedAt: string;
+  timestamp: string;
+}
+
+export interface ArdaSyncedTenantContext {
+  tenantId: string;
+  email?: string;
+  timestamp: string;
+}
+
+export function getLastSuccessfulSyncTenant(
+  syncStatus: Pick<ArdaSyncStatusResponse, 'recent'> | null | undefined,
+): ArdaSyncedTenantContext | null {
+  const recentEvents = syncStatus?.recent ?? [];
+  for (const event of recentEvents) {
+    if (event.success && event.tenantId) {
+      return {
+        tenantId: event.tenantId,
+        email: event.email,
+        timestamp: event.timestamp,
+      };
+    }
+  }
+  return null;
+}
+
 export const ardaApi = {
   // Check if Arda is configured
   getStatus: () => fetchApi<{ configured: boolean; message: string }>('/api/arda/status'),
@@ -374,14 +945,32 @@ export const ardaApi = {
   bulkCreateItems: (items: ArdaItemInput[]) =>
     fetchApi<{
       success: boolean;
+      code?: string;
       error?: string;
-      details?: { email?: string; message?: string; authorFound?: boolean; tenantIdFound?: boolean };
+      details?: ArdaTenantResolutionDetails;
       summary?: { total: number; successful: number; failed: number };
       results?: Array<{ item: string; status: string; error?: string }>;
     }>('/api/arda/items/bulk', {
       method: 'POST',
       body: JSON.stringify({ items }),
     }),
+
+  resolveTenant: (action: 'create_new' | 'use_suggested') =>
+    fetchApi<{ success: boolean; tenantId?: string; author?: string; error?: string }>('/api/arda/tenant/resolve', {
+      method: 'POST',
+      body: JSON.stringify({ action }),
+    }),
+
+  getTenantStatus: () =>
+    fetchApi<{
+      success: boolean;
+      resolved: boolean;
+      code?: string;
+      error?: string;
+      details?: ArdaTenantResolutionDetails;
+    }>('/api/arda/tenant/status'),
+
+  getSyncStatus: () => fetchApi<ArdaSyncStatusResponse>('/api/arda/sync-status'),
 
   // Create Kanban card
   createKanbanCard: (card: ArdaKanbanCardInput) =>

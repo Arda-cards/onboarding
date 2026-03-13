@@ -7,10 +7,13 @@ on:
 
 env:
   NODE_VERSION: 20
-  RAILWAY_SERVICE: orderpulse-server
+  RAILWAY_PROJECT_ID: f7c96f7b-ed85-4ae9-9428-de3888942936
+  RAILWAY_ENVIRONMENT: production
+  RAILWAY_SERVICE: order-pulse-api
+  RAILWAY_CLI_PACKAGE: "@railway/cli"
 
 jobs:
-  build-and-test:
+  frontend-build-and-test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -21,6 +24,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Install root deps
         run: npm ci
@@ -28,37 +32,124 @@ jobs:
       - name: Lint frontend
         run: npm run lint
 
-      - name: Test frontend (no coverage)
-        run: npm test -- --coverage=false
+      - name: Test frontend with coverage thresholds
+        run: npm run test:coverage
 
       - name: Build frontend
         run: npm run build
+
+  server-build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: server/package-lock.json
 
       - name: Install server deps
         working-directory: server
         run: npm ci
 
+      - name: Test server
+        working-directory: server
+        run: npm test
+
       - name: Build server
         working-directory: server
         run: npm run build
 
+  api-build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: api/package-lock.json
+
+      - name: Install onboarding API deps
+        working-directory: api
+        run: npm ci
+
+      - name: Test onboarding API
+        working-directory: api
+        run: npm test
+
+      - name: Build onboarding API
+        working-directory: api
+        run: npm run build
+
   deploy:
-    needs: build-and-test
+    needs:
+      - frontend-build-and-test
+      - server-build-and-test
+      - api-build-and-test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Railway CLI
-        run: curl -fsSL https://railway.app/install.sh | sh
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Validate Railway secret
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RAILWAY_TOKEN:-}" ]; then
+            echo "::error title=Missing RAILWAY_TOKEN secret::Add a valid Railway token to repo secrets as RAILWAY_TOKEN."
+            exit 1
+          fi
+
+      - name: Install Railway CLI (npm, retry)
+        run: |
+          set -euo pipefail
+
+          # Avoid flakiness in the curl installer (which pulls from GitHub).
+          # Installing via npm is typically more reliable in CI.
+          for attempt in 1 2 3; do
+            echo "Installing Railway CLI (attempt $attempt/3)..."
+            if npm install -g "${RAILWAY_CLI_PACKAGE}@latest"; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error title=Railway CLI install failed::npm install -g ${RAILWAY_CLI_PACKAGE}@latest failed after 3 attempts."
+              exit 1
+            fi
+            sleep $((attempt * 5))
+          done
+
+          echo "$(npm prefix -g)/bin" >> "$GITHUB_PATH"
+          railway --version
 
       - name: Deploy to Railway
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
           NODE_VERSION: ${{ env.NODE_VERSION }}
+          RAILWAY_PROJECT_ID: ${{ env.RAILWAY_PROJECT_ID }}
+          RAILWAY_ENVIRONMENT: ${{ env.RAILWAY_ENVIRONMENT }}
           RAILWAY_SERVICE: ${{ env.RAILWAY_SERVICE }}
         working-directory: server
         run: |
-          export PATH="$HOME/.railway/bin:$PATH"
-          railway up --service "$RAILWAY_SERVICE"
+          set -euo pipefail
+
+          LOG_FILE="$(mktemp)"
+          if ! railway up --ci --project "$RAILWAY_PROJECT_ID" --environment "$RAILWAY_ENVIRONMENT" --service "$RAILWAY_SERVICE" 2>&1 | tee "$LOG_FILE"; then
+            SUMMARY="$(tail -n 80 "$LOG_FILE" | tr '\n' ' ' | sed -e 's/%/%25/g' -e 's/\r/%0D/g')"
+            echo "::error title=Railway deploy failed::$SUMMARY"
+            exit 1
+          fi

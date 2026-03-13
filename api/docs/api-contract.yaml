@@ -1,0 +1,1580 @@
+openapi: 3.1.0
+info:
+  title: Onboarding API
+  version: 1.12.0
+  description: |
+    Backend API for onboarding durable session storage and ingestion.
+
+    ## Versioning
+
+    This contract follows semantic versioning. The `version` field tracks
+    breaking changes (major), new endpoints/fields (minor), and documentation
+    fixes (patch). See `docs/api-versioning.md` for the full change policy.
+
+    ## Authentication
+
+    All endpoints under `/api/onboarding` require two headers:
+    - `Authorization: Bearer <cognito-access-token>`
+    - `X-ID-Token: <cognito-id-token>`
+
+    The ID token carries the `custom:tenant` claim used for tenant isolation.
+
+    ## Error Convention
+
+    Every error response uses a stable shape:
+    ```json
+    { "error": { "code": "<ERROR_CODE>", "message": "...", "requestId": "..." } }
+    ```
+    Clients should match on `code` (not `message`) for programmatic handling.
+
+servers:
+  - url: /api/onboarding
+    description: Onboarding API base path
+
+security:
+  - cognitoBearer: []
+    cognitoIdToken: []
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Health check (no auth)
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /session:
+    get:
+      operationId: getSession
+      summary: Get current onboarding session
+      description: |
+        Returns the active onboarding session for the authenticated user and tenant.
+        If no session exists, returns 404.
+      responses:
+        "200":
+          description: Session data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      operationId: createSession
+      summary: Create a new onboarding session
+      description: |
+        Creates a new onboarding session for the authenticated user and tenant.
+        Returns 409 if an active session already exists.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    patch:
+      operationId: updateSession
+      summary: Update the current onboarding session
+      description: |
+        Merges the provided fields into the active session.
+        Only top-level fields in `data` are replaced; omitted fields are preserved.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSessionRequest"
+      responses:
+        "200":
+          description: Session updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /uploads/presign:
+    post:
+      operationId: createImageUploadUrl
+      summary: Get a presigned URL for image upload
+      description: |
+        Returns a presigned S3 PUT URL that the client uses to upload an image directly.
+        Object keys are session-scoped under the tenant prefix.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImageUploadPresignRequest"
+      responses:
+        "200":
+          description: Presigned upload URL generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageUploadPresignResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/ValidationError"
+        "503":
+          $ref: "#/components/responses/InternalError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /uploads/{key}:
+    get:
+      operationId: createImageDownloadUrl
+      summary: Get a presigned URL for image retrieval
+      description: |
+        Returns a short-lived presigned S3 GET URL for a tenant-owned upload object.
+        The `key` path parameter must be URL-encoded when it contains `/`.
+      parameters:
+        - in: path
+          name: key
+          required: true
+          schema:
+            type: string
+          description: URL-encoded S3 object key under the tenant upload prefix.
+      responses:
+        "200":
+          description: Presigned download URL generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageUploadDownloadResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/InternalError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /gmail/oauth/start:
+    post:
+      operationId: startGmailOauth
+      summary: Start Gmail OAuth
+      description: |
+        Returns an OAuth authorization URL for the user to connect Gmail.
+
+        Notes:
+        - The caller must be authenticated (Cognito headers).
+        - The returned URL redirects to `/gmail/oauth/callback` on this service.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GmailOAuthStartRequest"
+      responses:
+        "200":
+          description: OAuth URL generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GmailOAuthStartResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /gmail/oauth/callback:
+    get:
+      operationId: gmailOauthCallback
+      summary: Gmail OAuth callback (public)
+      description: |
+        Google redirects the user-agent to this endpoint after authorization.
+
+        This endpoint is intentionally public (no Cognito headers) and validates
+        the OAuth `state` parameter server-side before storing encrypted tokens.
+      security: []
+      responses:
+        "302":
+          description: Redirect back to frontend with success or error details.
+          headers:
+            Location:
+              schema:
+                type: string
+
+  /gmail/status:
+    get:
+      operationId: getGmailStatus
+      summary: Gmail connection status
+      description: |
+        Returns whether Gmail is configured and connected for the current user.
+      responses:
+        "200":
+          description: Status response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GmailStatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /barcode/lookup:
+    get:
+      operationId: lookupBarcode
+      summary: Barcode lookup (query)
+      description: |
+        Legacy query-string barcode lookup. Returns product metadata when available.
+        When providers are temporarily unavailable, returns an unenriched response
+        with `resultState=provider_unavailable`.
+      parameters:
+        - in: query
+          name: code
+          required: true
+          schema:
+            type: string
+          description: Barcode/GTIN code to look up.
+      responses:
+        "200":
+          description: Barcode lookup result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BarcodeLookupResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: lookupBarcodePost
+      summary: Barcode lookup
+      description: |
+        Look up a barcode from a request body payload. Returns an enriched product
+        when found, an empty result when not found, or an unenriched result when
+        upstream providers are temporarily unavailable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BarcodeLookupRequest"
+      responses:
+        "200":
+          description: Barcode lookup result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BarcodeLookupResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /urls/scrape:
+    post:
+      operationId: scrapeUrls
+      summary: URL scrape
+      description: |
+        Scrape and normalize up to 50 URLs and return reviewable item metadata.
+        The backend attempts Playwright rendering first, then jsdom parsing, and
+        finally a Jina reader fallback when earlier providers fail or produce no
+        useful metadata.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UrlScrapeRequest"
+      responses:
+        "200":
+          description: URL scrape response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UrlScrapeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /photos/analyze:
+    post:
+      operationId: analyzePhoto
+      summary: Photo analysis (Gemini)
+      description: |
+        Analyze an uploaded onboarding image and return extracted product metadata.
+        When `GEMINI_API_KEY` is not configured, the endpoint degrades gracefully
+        and returns `analyzed: false` with `reason: gemini_unavailable`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PhotoAnalyzeRequest"
+      responses:
+        "200":
+          description: Photo analysis response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhotoAnalyzeResponse"
+        "400":
+          $ref: "#/components/responses/ValidationError"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /sessions:
+    post:
+      operationId: createOnboardingSession
+      summary: Create a new onboarding session
+      description: |
+        Creates a new Redis-backed onboarding session for the authenticated user and tenant.
+        Returns the session ID plus deep-link URLs for mobile barcode and photo capture.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "200":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateSessionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /sessions/{sessionId}:
+    get:
+      operationId: getOnboardingSession
+      summary: Read session metadata
+      description: |
+        Returns metadata for an existing onboarding session. Authenticated users can
+        only read sessions they own (tenantId + userId must match). Mobile token flow
+        is not supported on this endpoint — Cognito headers are required.
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+      responses:
+        "200":
+          description: Session metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionMetaResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /images/upload:
+    post:
+      operationId: uploadImage
+      summary: Server-side image upload to S3
+      description: |
+        Accepts a base64 data URL, validates the image, and stores it in S3.
+        Returns the public or CDN URL for the uploaded image.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImageUploadRequest"
+      responses:
+        "200":
+          description: Image uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ImageUploadResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /complete:
+    post:
+      operationId: completeOnboarding
+      summary: Mark onboarding as complete
+      description: |
+        Records that the authenticated user has completed onboarding.
+        Idempotent — calling multiple times is safe.
+      responses:
+        "200":
+          description: Onboarding marked complete
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                properties:
+                  ok:
+                    type: boolean
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /scan-sessions/{sessionId}/barcodes:
+    get:
+      operationId: listBarcodes
+      summary: List scanned barcodes (mobile token)
+      description: |
+        Returns all barcodes recorded in this scan session.
+        Authenticated by short-lived `?token=` query parameter issued at session creation.
+        No Cognito headers are required for this endpoint.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+        - $ref: "#/components/parameters/MobileToken"
+      responses:
+        "200":
+          description: Barcode list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BarcodeListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: addBarcode
+      summary: Add a scanned barcode (mobile token)
+      description: |
+        Records a single barcode scan into the session.
+        Authenticated by short-lived `?token=` query parameter.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+        - $ref: "#/components/parameters/MobileToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddBarcodeRequest"
+      responses:
+        "200":
+          description: Barcode recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddBarcodeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /scan-sessions/{sessionId}/barcodes/{barcodeId}:
+    put:
+      operationId: updateBarcode
+      summary: Update a barcode record (mobile token)
+      description: |
+        Patches metadata on an existing barcode record in this session.
+        Authenticated by short-lived `?token=` query parameter.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+        - in: path
+          name: barcodeId
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/MobileToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBarcodeRequest"
+      responses:
+        "200":
+          description: Barcode updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddBarcodeResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /photo-sessions/{sessionId}/photos:
+    get:
+      operationId: listPhotos
+      summary: List captured photos (mobile token)
+      description: |
+        Returns all photos recorded in this photo session.
+        Authenticated by short-lived `?token=` query parameter.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+        - $ref: "#/components/parameters/MobileToken"
+      responses:
+        "200":
+          description: Photo list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PhotoListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      operationId: addPhoto
+      summary: Add a captured photo (mobile token)
+      description: |
+        Records a single photo into the session.
+        Authenticated by short-lived `?token=` query parameter.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+        - $ref: "#/components/parameters/MobileToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddPhotoRequest"
+      responses:
+        "200":
+          description: Photo recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddPhotoResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "422":
+          $ref: "#/components/responses/ValidationError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /photo-sessions/{sessionId}/photos/{photoId}:
+    get:
+      operationId: getPhoto
+      summary: Get a single photo (mobile token)
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+        - in: path
+          name: photoId
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/MobileToken"
+      responses:
+        "200":
+          description: Photo record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GetPhotoResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /photo-sessions/{sessionId}/photos/{photoId}/metadata:
+    put:
+      operationId: updatePhotoMetadata
+      summary: Update photo metadata (mobile token)
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionIdPath"
+        - in: path
+          name: photoId
+          required: true
+          schema:
+            type: string
+        - $ref: "#/components/parameters/MobileToken"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePhotoMetadataRequest"
+      responses:
+        "200":
+          description: Photo metadata updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AddPhotoResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  parameters:
+    SessionIdPath:
+      in: path
+      name: sessionId
+      required: true
+      schema:
+        type: string
+      description: Onboarding session ID (hex string).
+    MobileToken:
+      in: query
+      name: token
+      required: true
+      schema:
+        type: string
+      description: Short-lived mobile session token issued at session creation.
+
+  securitySchemes:
+    cognitoBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Cognito access token
+    cognitoIdToken:
+      type: apiKey
+      in: header
+      name: X-ID-Token
+      description: Cognito ID token (carries custom:tenant claim)
+
+  schemas:
+    # ---------- Shared ----------
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: object
+          required:
+            - code
+            - message
+            - requestId
+          properties:
+            code:
+              type: string
+              enum:
+                - AUTH_MISSING_TOKEN
+                - AUTH_INVALID_TOKEN
+                - AUTH_EXPIRED_TOKEN
+                - SESSION_EXPIRED
+                - INVALID_SESSION_TOKEN
+                - RATE_LIMITED
+                - VALIDATION_ERROR
+                - NOT_FOUND
+                - INTERNAL_ERROR
+              description: |
+                Stable error code for programmatic handling.
+                Clients MUST match on `code`, not `message`.
+            message:
+              type: string
+              description: Human-readable error description. May change between versions.
+            requestId:
+              type: string
+              format: uuid
+              description: Correlation ID for log tracing. Echoed from X-Request-ID if provided.
+            details:
+              description: |
+                Optional structured details. For VALIDATION_ERROR, may contain an array of
+                field-level messages or an object with per-field diagnostics.
+                Clients should treat this field as advisory; match on `code` for control flow.
+              oneOf:
+                - type: object
+                  additionalProperties: true
+                - type: array
+                  items:
+                    type: string
+
+    HealthResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum:
+            - ok
+          example: ok
+
+    # ---------- Session ----------
+
+    SessionResponse:
+      type: object
+      required:
+        - data
+      properties:
+        data:
+          $ref: "#/components/schemas/Session"
+
+    Session:
+      type: object
+      required:
+        - sessionId
+        - tenantId
+        - userId
+        - status
+        - createdAt
+        - updatedAt
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+        tenantId:
+          type: string
+        userId:
+          type: string
+        status:
+          type: string
+          enum:
+            - active
+            - completed
+            - expired
+        step:
+          type: string
+          description: Current onboarding step identifier
+        data:
+          type: object
+          additionalProperties: true
+          description: Arbitrary step-specific data stored by the client
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    # ---------- Gmail OAuth ----------
+
+    GmailOAuthStartRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        returnTo:
+          type: string
+          description: Optional frontend path to redirect to after OAuth success.
+
+    GmailOAuthStartResponse:
+      type: object
+      required:
+        - authUrl
+      properties:
+        authUrl:
+          type: string
+          description: Google OAuth authorization URL.
+
+    GmailStatusResponse:
+      type: object
+      required:
+        - configured
+        - connected
+      properties:
+        configured:
+          type: boolean
+          description: Whether Gmail OAuth is configured on the server.
+        connected:
+          type: boolean
+          description: Whether Gmail is connected for this user.
+        tokenExpiresAtMs:
+          type: integer
+          format: int64
+          nullable: true
+          description: Unix epoch milliseconds when the current access token expires (if known).
+
+    # ---------- Barcode Lookup ----------
+
+    BarcodeLookupRequest:
+      type: object
+      required:
+        - barcode
+      additionalProperties: false
+      properties:
+        barcode:
+          type: string
+          description: UPC/EAN/GTIN string captured by scanner or manual entry.
+
+    BarcodeLookupProduct:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        brand:
+          type: string
+          nullable: true
+        imageUrl:
+          type: string
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        source:
+          type: string
+          enum: [barcodelookup, upcitemdb]
+          nullable: true
+        normalizedBarcode:
+          type: string
+          nullable: true
+
+    BarcodeLookupResponse:
+      type: object
+      required:
+        - enriched
+        - resultState
+        - normalizedBarcode
+        - product
+      properties:
+        enriched:
+          type: boolean
+          description: Whether provider enrichment succeeded.
+        resultState:
+          type: string
+          enum: [found, not_found, provider_unavailable]
+          description: |
+            `found` when a provider returned product data,
+            `not_found` when providers responded cleanly with no match,
+            `provider_unavailable` when providers errored or timed out.
+        normalizedBarcode:
+          type: string
+          nullable: true
+          description: Canonical barcode candidate used for provider lookups.
+        product:
+          $ref: "#/components/schemas/BarcodeLookupProduct"
+          nullable: true
+
+    # ---------- URL Scrape ----------
+
+    UrlScrapeRequest:
+      type: object
+      required:
+        - urls
+      additionalProperties: false
+      properties:
+        urls:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+
+    UrlScrapeItem:
+      type: object
+      required:
+        - sourceUrl
+        - needsReview
+        - extractionSource
+        - confidence
+      properties:
+        sourceUrl:
+          type: string
+        productUrl:
+          type: string
+          nullable: true
+        imageUrl:
+          type: string
+          nullable: true
+        title:
+          type: string
+          nullable: true
+        itemName:
+          type: string
+          nullable: true
+        supplier:
+          type: string
+          nullable: true
+        price:
+          type: number
+          nullable: true
+        currency:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        vendorSku:
+          type: string
+          nullable: true
+        needsReview:
+          type: boolean
+        extractionSource:
+          type: string
+          enum: [playwright, jsdom, jina, error]
+        confidence:
+          type: number
+
+    UrlScrapeResult:
+      type: object
+      required:
+        - sourceUrl
+        - status
+        - extractionSource
+        - item
+      properties:
+        sourceUrl:
+          type: string
+        normalizedUrl:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [success, partial, failed]
+        message:
+          type: string
+          nullable: true
+        extractionSource:
+          type: string
+          enum: [playwright, jsdom, jina, error]
+        item:
+          $ref: "#/components/schemas/UrlScrapeItem"
+
+    UrlScrapeResponse:
+      type: object
+      required:
+        - requested
+        - processed
+        - results
+        - items
+      properties:
+        requested:
+          type: integer
+        processed:
+          type: integer
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/UrlScrapeResult"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/UrlScrapeItem"
+        expiresAt:
+          type: string
+          format: date-time
+          description: Optional cache expiry time for reusable scrape results.
+
+    # ---------- Photo Analysis ----------
+
+    PhotoAnalyzeRequest:
+      type: object
+      required:
+        - imageUrl
+      additionalProperties: false
+      properties:
+        imageUrl:
+          type: string
+          description: Public onboarding image URL or onboarding object key to analyze.
+
+    PhotoAnalyzeResponse:
+      type: object
+      required:
+        - analyzed
+        - productName
+        - description
+        - estimatedCategory
+        - brand
+        - confidence
+      additionalProperties: false
+      properties:
+        analyzed:
+          type: boolean
+        reason:
+          type: string
+          enum: [gemini_unavailable]
+          nullable: true
+        productName:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        estimatedCategory:
+          type: string
+          nullable: true
+        brand:
+          type: string
+          nullable: true
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+
+    CreateSessionRequest:
+      type: object
+      properties:
+        step:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+
+    UpdateSessionRequest:
+      type: object
+      properties:
+        step:
+          type: string
+        data:
+          type: object
+          additionalProperties: true
+        status:
+          type: string
+          enum:
+            - active
+            - completed
+
+    # ---------- Session Creation ----------
+
+    CreateSessionResponse:
+      type: object
+      required:
+        - sessionId
+        - mobileBarcodeUrl
+        - mobilePhotoUrl
+      properties:
+        sessionId:
+          type: string
+          description: Hex session ID used to access scan/photo endpoints.
+        mobileBarcodeUrl:
+          type: string
+          description: Deep-link URL (with token) for mobile barcode scanning.
+        mobilePhotoUrl:
+          type: string
+          description: Deep-link URL (with token) for mobile photo capture.
+
+    # ---------- Session Meta ----------
+
+    SessionMetaResponse:
+      type: object
+      required:
+        - sessionId
+        - tenantId
+        - userId
+        - createdAt
+        - lastActivity
+        - expiresAtMs
+      properties:
+        sessionId:
+          type: string
+          description: Hex session ID.
+        tenantId:
+          type: string
+          description: Tenant owning this session.
+        userId:
+          type: string
+          description: Cognito sub of the user who created the session.
+        createdAt:
+          type: string
+          format: date-time
+          description: ISO-8601 timestamp when the session was created.
+        lastActivity:
+          type: string
+          format: date-time
+          description: ISO-8601 timestamp of the most recent write.
+        expiresAtMs:
+          type: integer
+          description: Unix epoch milliseconds at which the session will expire.
+
+    # ---------- Server-side Image Upload ----------
+
+    ImageUploadRequest:
+      type: object
+      required:
+        - imageData
+      additionalProperties: false
+      properties:
+        imageData:
+          type: string
+          description: Base64 data URL (data:image/...;base64,...) of the image.
+
+    ImageUploadResponse:
+      type: object
+      required:
+        - imageUrl
+      properties:
+        imageUrl:
+          type: string
+          format: uri
+          description: Public or CDN URL of the uploaded image.
+
+    # ---------- Scan Session (Mobile Token) ----------
+
+    ScannedBarcode:
+      type: object
+      required:
+        - id
+        - barcode
+        - scannedAt
+        - source
+      properties:
+        id:
+          type: string
+        barcode:
+          type: string
+        barcodeType:
+          type: string
+          nullable: true
+        scannedAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [mobile, desktop]
+        productName:
+          type: string
+          nullable: true
+        brand:
+          type: string
+          nullable: true
+        imageUrl:
+          type: string
+          format: uri
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+
+    ScannedBarcodeInput:
+      type: object
+      required:
+        - barcode
+      description: |
+        Client-supplied barcode payload. The server fills `id`, `scannedAt`, and
+        `source` defaults when omitted.
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        barcode:
+          type: string
+        barcodeType:
+          type: string
+          nullable: true
+        scannedAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [mobile, desktop]
+        productName:
+          type: string
+          nullable: true
+        brand:
+          type: string
+          nullable: true
+        imageUrl:
+          type: string
+          format: uri
+          nullable: true
+        category:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+
+    AddBarcodeRequest:
+      type: object
+      required:
+        - barcode
+      properties:
+        barcode:
+          $ref: "#/components/schemas/ScannedBarcodeInput"
+
+    AddBarcodeResponse:
+      type: object
+      required:
+        - success
+        - barcode
+      properties:
+        success:
+          type: boolean
+        duplicate:
+          type: boolean
+        barcode:
+          $ref: "#/components/schemas/ScannedBarcode"
+
+    UpdateBarcodeRequest:
+      type: object
+      additionalProperties: true
+      description: Partial ScannedBarcode fields to merge.
+
+    BarcodeListResponse:
+      type: object
+      required:
+        - barcodes
+        - totalCount
+        - sessionCreatedAt
+      properties:
+        barcodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/ScannedBarcode"
+        totalCount:
+          type: integer
+        sessionCreatedAt:
+          type: string
+          format: date-time
+
+    # ---------- Photo Session (Mobile Token) ----------
+
+    CapturedPhoto:
+      type: object
+      required:
+        - id
+        - imageData
+        - capturedAt
+        - source
+      properties:
+        id:
+          type: string
+        imageData:
+          type: string
+          description: Base64 data URL of the captured image.
+        capturedAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [mobile, desktop]
+        analyzed:
+          type: boolean
+        suggestedName:
+          type: string
+          nullable: true
+        suggestedSupplier:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+
+    CapturedPhotoInput:
+      type: object
+      required:
+        - imageData
+      description: |
+        Client-supplied photo payload. The server fills `id`, `capturedAt`,
+        `source`, and `analyzed` defaults when omitted.
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+        imageData:
+          type: string
+          description: Base64 data URL of the captured image.
+        capturedAt:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [mobile, desktop]
+        analyzed:
+          type: boolean
+        suggestedName:
+          type: string
+          nullable: true
+        suggestedSupplier:
+          type: string
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+
+    AddPhotoRequest:
+      type: object
+      required:
+        - photo
+      properties:
+        photo:
+          $ref: "#/components/schemas/CapturedPhotoInput"
+
+    AddPhotoResponse:
+      type: object
+      required:
+        - success
+        - photo
+      properties:
+        success:
+          type: boolean
+        photo:
+          $ref: "#/components/schemas/CapturedPhoto"
+
+    GetPhotoResponse:
+      type: object
+      required:
+        - photo
+      properties:
+        photo:
+          $ref: "#/components/schemas/CapturedPhoto"
+
+    PhotoListResponse:
+      type: object
+      required:
+        - photos
+        - totalCount
+        - sessionCreatedAt
+      properties:
+        photos:
+          type: array
+          items:
+            $ref: "#/components/schemas/CapturedPhoto"
+        totalCount:
+          type: integer
+        sessionCreatedAt:
+          type: string
+          format: date-time
+
+    UpdatePhotoMetadataRequest:
+      type: object
+      additionalProperties: true
+      description: Partial CapturedPhoto fields to merge.
+
+    # ---------- Image Upload ----------
+
+    ImageUploadPresignRequest:
+      type: object
+      required:
+        - sessionId
+        - fileName
+        - contentType
+        - sizeBytes
+      properties:
+        sessionId:
+          type: string
+          description: Onboarding session that owns the uploaded asset.
+        fileName:
+          type: string
+          description: Original file name (used for metadata, not the S3 key)
+        contentType:
+          type: string
+          enum:
+            - image/jpeg
+            - image/png
+            - image/webp
+          description: MIME type of the image to upload
+        sizeBytes:
+          type: integer
+          format: int64
+          description: Expected file size in bytes, validated before presigning.
+
+    ImageUploadPresignResponse:
+      type: object
+      required:
+        - uploadUrl
+        - objectKey
+        - imageUrl
+        - expiresInSeconds
+      properties:
+        uploadUrl:
+          type: string
+          format: uri
+          description: Presigned S3 PUT URL
+        objectKey:
+          type: string
+          description: The object key that will be written to S3
+        imageUrl:
+          type: string
+          format: uri
+          description: Stable public or CDN URL for the object after upload
+        expiresInSeconds:
+          type: integer
+          description: Seconds until the presigned URL expires
+
+    ImageUploadDownloadResponse:
+      type: object
+      required:
+        - downloadUrl
+        - objectKey
+        - expiresInSeconds
+      properties:
+        downloadUrl:
+          type: string
+          format: uri
+          description: Presigned S3 GET URL
+        objectKey:
+          type: string
+          description: The tenant-owned object key being retrieved
+        expiresInSeconds:
+          type: integer
+          description: Seconds until the presigned URL expires
+
+  responses:
+    Unauthorized:
+      description: Authentication failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            missingToken:
+              summary: Missing token
+              value:
+                error:
+                  code: AUTH_MISSING_TOKEN
+                  message: Authorization Bearer token and X-ID-Token headers are required
+                  requestId: 550e8400-e29b-41d4-a716-446655440000
+            invalidToken:
+              summary: Invalid token
+              value:
+                error:
+                  code: AUTH_INVALID_TOKEN
+                  message: Invalid or expired access token
+                  requestId: 550e8400-e29b-41d4-a716-446655440000
+            expiredToken:
+              summary: Expired token
+              value:
+                error:
+                  code: AUTH_EXPIRED_TOKEN
+                  message: Invalid or expired access token
+                  requestId: 550e8400-e29b-41d4-a716-446655440000
+
+    ValidationError:
+      description: Request validation failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: "contentType must be one of: image/jpeg, image/png, image/webp"
+              requestId: 550e8400-e29b-41d4-a716-446655440000
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: NOT_FOUND
+              message: Session not found
+              requestId: 550e8400-e29b-41d4-a716-446655440000
+
+    Forbidden:
+      description: Access denied (invalid or mismatched session token)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INVALID_SESSION_TOKEN
+              message: Invalid session token. Please reopen the link from the desktop session.
+              requestId: 550e8400-e29b-41d4-a716-446655440000
+
+    RateLimited:
+      description: Rate limit exceeded
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: RATE_LIMITED
+              message: Photo analysis rate limit exceeded
+              requestId: 550e8400-e29b-41d4-a716-446655440000
+
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          example:
+            error:
+              code: INTERNAL_ERROR
+              message: An unexpected error occurred
+              requestId: 550e8400-e29b-41d4-a716-446655440000

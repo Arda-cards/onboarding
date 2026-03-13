@@ -1,27 +1,53 @@
 import { JobProgress, DiscoveredSupplier } from '../services/api';
 
-export const OTHER_PRIORITY_SUPPLIERS: DiscoveredSupplier[] = [
+const PRIORITY_SUPPLIER_CONFIG = [
   {
-    domain: 'mcmaster.com',
+    canonicalDomain: 'mcmaster.com',
+    aliases: ['mcmaster.com', 'mcmaster-carr.com'],
     displayName: 'McMaster-Carr',
-    emailCount: 0,
-    score: 100,
-    category: 'industrial',
-    sampleSubjects: [],
-    isRecommended: true,
   },
   {
-    domain: 'uline.com',
+    canonicalDomain: 'uline.com',
+    aliases: ['uline.com'],
     displayName: 'Uline',
+  },
+] as const;
+
+const PRIORITY_SUPPLIER_ALIAS_TO_CANONICAL: Record<string, string> = PRIORITY_SUPPLIER_CONFIG
+  .flatMap(({ canonicalDomain, aliases }) => aliases.map((alias) => [alias, canonicalDomain] as const))
+  .reduce<Record<string, string>>((map, [alias, canonicalDomain]) => {
+    map[alias] = canonicalDomain;
+    return map;
+  }, {});
+
+export const PRIORITY_SUPPLIER_SCAN_DOMAINS = Array.from(
+  new Set(PRIORITY_SUPPLIER_CONFIG.flatMap(({ aliases }) => aliases)),
+);
+
+// Contains both canonical domains and aliases.
+export const PRIORITY_SUPPLIER_DOMAINS = new Set<string>(PRIORITY_SUPPLIER_SCAN_DOMAINS);
+
+export const OTHER_PRIORITY_SUPPLIERS: DiscoveredSupplier[] = PRIORITY_SUPPLIER_CONFIG.map(
+  ({ canonicalDomain, displayName }) => ({
+    domain: canonicalDomain,
+    displayName,
     emailCount: 0,
     score: 100,
     category: 'industrial',
     sampleSubjects: [],
     isRecommended: true,
-  },
-];
+  }),
+);
 
-export const PRIORITY_SUPPLIER_DOMAINS = new Set(['mcmaster.com', 'uline.com']);
+export function canonicalizePrioritySupplierDomain(domain: string): string {
+  const normalized = domain.trim().toLowerCase();
+  return PRIORITY_SUPPLIER_ALIAS_TO_CANONICAL[normalized] || normalized;
+}
+
+export function isPrioritySupplierDomain(domain: string): boolean {
+  const normalized = domain.trim().toLowerCase();
+  return PRIORITY_SUPPLIER_DOMAINS.has(normalized);
+}
 
 export const CATEGORY_COLORS: Record<string, { bg: string; text: string; icon: string }> = {
   industrial: { bg: 'bg-blue-50', text: 'text-blue-600', icon: '🏭' },
@@ -85,4 +111,33 @@ export function calculateProgressPercent(progress?: JobProgress | null): number 
     return 0;
   }
   return Math.min(100, Math.max(0, percent));
+}
+
+interface PrioritySummaryParams {
+  error: string | null;
+  isComplete: boolean;
+  processedEmails: number;
+  totalEmails: number;
+  orderCount: number;
+  itemCount: number;
+}
+
+export function getPrioritySummaryText({
+  error,
+  isComplete,
+  processedEmails,
+  totalEmails,
+  orderCount,
+  itemCount,
+}: PrioritySummaryParams): string {
+  if (error) {
+    return error;
+  }
+  if (!isComplete) {
+    return `Analyzing ${processedEmails}/${totalEmails} emails • found ${itemCount} items across ${orderCount} orders`;
+  }
+  if (itemCount === 0) {
+    return `Analyzed ${processedEmails}/${totalEmails} emails, no line items extracted.`;
+  }
+  return `${itemCount} items from ${orderCount} orders`;
 }

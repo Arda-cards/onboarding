@@ -1,0 +1,37 @@
+{
+  "name": "wt-onboarding-api",
+  "version": "1.0.0",
+  "description": "Backend service for onboarding durable session storage and ingestion/providers.",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch & node --watch dist/index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.888.0",
+    "@aws-sdk/s3-request-presigner": "^3.888.0",
+    "@google/generative-ai": "^0.24.1",
+    "aws-jwt-verify": "^5.1.1",
+    "express": "^5.2.1",
+    "googleapis": "^160.0.0",
+    "jsdom": "^28.1.0",
+    "pino": "^10.3.1",
+    "redis": "^5.8.2"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/jsdom": "^28.0.0",
+    "@types/node": "^25.3.0",
+    "@types/supertest": "^6.0.3",
+    "supertest": "^7.1.4",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "yaml": "^2.8.2"
+  }
+}

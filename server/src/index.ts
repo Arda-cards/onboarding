@@ -17,9 +17,15 @@ import ardaRouter from './routes/arda.js';
 import cognitoRouter from './routes/cognito.js';
 import scanRouter from './routes/scan.js';
 import photoRouter from './routes/photo.js';
+import { urlIngestionRouter } from './routes/urlIngestion.js';
+import { integrationsRouter } from './routes/integrations.js';
 import { cognitoService } from './services/cognito.js';
 import { initializeJobManager, shutdownJobManager } from './services/jobManager.js';
 import { startCognitoSyncScheduler, stopCognitoSyncScheduler } from './services/cognitoScheduler.js';
+import inboundEmailRouter from './routes/inboundEmail.js';
+import { startInboundReceiptWorker, stopInboundReceiptWorker } from './services/inboundReceiptWorker.js';
+import { startProviderSyncScheduler, stopProviderSyncScheduler } from './services/integrations/syncScheduler.js';
+import { getLivenessReport, getReadinessReport } from './services/health.js';
 import { appLogger, requestLogger } from './middleware/requestLogger.js';
 import { securityHeaders } from './middleware/securityHeaders.js';
 import { defaultLimiter, authLimiter } from './middleware/rateLimiter.js';
@@ -93,7 +99,12 @@ app.use(cors({
 }));
 app.use(compression());
 // Increase body parser limit for large email payloads (500 emails can be ~10MB)
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({
+  limit: '50mb',
+  verify: (req, _res, buf) => {
+    (req as any).rawBody = buf.toString('utf8');
+  },
+}));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Session configuration
@@ -112,7 +123,16 @@ app.use(session({
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json(getLivenessReport());
+});
+
+app.get('/health/ready', async (_req, res) => {
+  const report = await getReadinessReport({
+    redisClient,
+    geminiApiKey: process.env.GEMINI_API_KEY ?? null,
+  });
+
+  res.status(report.status === 'down' ? 503 : 200).json(report);
 });
 
 // API routes (rate-limited where appropriate)
@@ -128,6 +148,9 @@ app.use('/api/amazon', amazonRouter);
 app.use('/api/scan', scanRouter);
 app.use('/api/barcode', scanRouter); // Also mount at /api/barcode for lookup endpoint
 app.use('/api/photo', photoRouter);
+app.use('/api/url-ingestion', defaultLimiter, urlIngestionRouter);
+app.use('/api/inbound', inboundEmailRouter);
+app.use('/api/integrations', defaultLimiter, integrationsRouter);
 
 // Error handler
 app.use(errorHandler);
@@ -139,6 +162,8 @@ async function shutdown(reason: string, exitCode = 0): Promise<void> {
   appLogger.warn({ reason }, '⚠️ Initiating graceful shutdown');
 
   stopCognitoSyncScheduler();
+  stopInboundReceiptWorker();
+  stopProviderSyncScheduler();
   shutdownJobManager();
 
   // Stop accepting new connections
@@ -167,6 +192,8 @@ async function startServer() {
     appLogger.info(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
     
     startCognitoSyncScheduler();
+    startInboundReceiptWorker();
+    startProviderSyncScheduler();
     
     const status = cognitoService.getSyncStatus();
     appLogger.info(`👥 Cognito users: ${status.userCount} loaded`);

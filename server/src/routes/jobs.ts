@@ -21,6 +21,30 @@ import {
   logConsolidationSummary,
   RawOrderData,
 } from '../utils/orderConsolidation.js';
+import {
+  buildSupplierJobQuery,
+  expandPrioritySupplierDomains,
+  getSupplierLookbackMonths,
+  sanitizeSupplierDomains,
+} from './jobsQueryUtils.js';
+import {
+  buildFinalOrderSnapshot,
+  buildLiveOrderSnapshot,
+} from './jobsProcessingUtils.js';
+import {
+  analyzeEmailWithRetry as analyzeEmailWithRetryShared,
+  createGeminiExtractionModel,
+  normalizeOrderDate as normalizeExtractionOrderDate,
+} from '../services/emailExtraction.js';
+import {
+  extractImageUrlsFromHtml,
+  extractUrlsFromHtml,
+  extractUrlsFromText,
+  isJunkUrl,
+  pickBestImageUrlForItem,
+  pickBestProductUrlForItem,
+  uniqueStrings,
+} from '../utils/urlExtraction.js';
 
 const router = Router();
 
@@ -42,38 +66,6 @@ const amazonLimiter = rateLimit({
   message: { error: 'Too many Amazon processing requests. Please wait a moment and try again.' },
   keyGenerator: (req: Request) => req.session?.userId || req.ip || 'anonymous',
 });
-
-const MAX_SUPPLIERS = 25;
-
-function parseEmailDate(dateHeader?: string): string | null {
-  if (!dateHeader) return null;
-  const parsed = new Date(dateHeader);
-  if (isNaN(parsed.getTime())) return null;
-  return parsed.toISOString().split('T')[0];
-}
-
-function normalizeOrderDate(orderDate?: string, fallbackDate?: string): string {
-  const candidates = [orderDate, fallbackDate];
-  for (const candidate of candidates) {
-    if (!candidate) continue;
-    const parsed = new Date(candidate);
-    if (!isNaN(parsed.getTime())) {
-      return parsed.toISOString().split('T')[0];
-    }
-  }
-  return new Date().toISOString().split('T')[0];
-}
-
-function sanitizeSupplierDomains(domains: unknown): string[] {
-  if (!Array.isArray(domains)) return [];
-
-  return domains
-    .map((domain) =>
-      typeof domain === 'string' ? domain.trim().toLowerCase() : '',
-    )
-    .filter((domain) => domain.length > 2 && domain.includes('.') && !domain.includes(' '))
-    .slice(0, MAX_SUPPLIERS);
-}
 
 // Extract text from PDF attachments
 async function extractPdfText(gmail: any, messageId: string, attachmentId: string): Promise<string> {
@@ -120,59 +112,6 @@ function findAttachments(parts: any[], attachments: Array<{ filename: string; at
 
 // Initialize Gemini AI client
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-
-const EXTRACTION_PROMPT = `You are an order extraction AI. Extract purchase data from emails.
-
-CRITICAL: EXTRACT ACTUAL ITEM NAMES FROM THE EMAIL BODY
-DO NOT use placeholders, generic descriptions, or the email subject as item names.
-Look for REAL product names, SKUs, and part numbers in the email content.
-
-ITEM EXTRACTION RULES:
-1. Find the EXACT product name/description as written in the email
-2. Include part numbers/SKUs when present (e.g., "S-1234 Industrial Tape" or "McMaster #91251A540")
-3. Extract ALL items - emails often contain multiple line items
-4. Look for item tables, order summaries, and line-by-line breakdowns
-5. If you cannot find specific item names, set items to an EMPTY array []
-
-AMAZON-SPECIFIC RULES:
-- For Amazon orders, ALWAYS extract the ASIN (10-character code starting with B0 or 10 digits)
-- Find ASINs in product URLs like amazon.com/dp/B08N5WRWNW or amazon.com/gp/product/B08N5WRWNW
-- Also look for ASINs in image URLs or product links
-- Set the "asin" field for each Amazon item
-
-WHERE TO FIND ITEMS:
-- Order confirmation tables
-- Invoice line items
-- "Items in your order" sections
-- Shipping manifests
-- Product name + quantity + price patterns
-
-SUPPLIER RECOGNITION (these are ALWAYS orders):
-- Industrial: McMaster-Carr, Grainger, Fastenal, ULine, MSC, Global Industrial, Zoro, Motion
-- Electronics: DigiKey, Mouser, Newark, Allied, AutomationDirect, Misumi, RS Components
-- General: Amazon, Costco, Home Depot, Lowes
-- Shipping: FedEx, UPS, DHL invoices
-
-Return JSON:
-{
-  "isOrder": true,
-  "supplier": "Exact Company Name",
-  "orderDate": "YYYY-MM-DD",
-  "totalAmount": 123.45,
-  "items": [
-    {"name": "ACTUAL product name from email", "quantity": 2, "unit": "ea", "unitPrice": 10.50, "partNumber": "ABC-123", "asin": null},
-    {"name": "Amazon Product Name", "quantity": 1, "unit": "ea", "unitPrice": 25.00, "partNumber": null, "asin": "B08N5WRWNW"}
-  ],
-  "confidence": 0.9
-}
-
-ONLY set isOrder: false for pure marketing, password resets, or newsletters.
-If it's an order but you can't find specific items, still mark isOrder: true with items: []
-
-If you cannot find an order date in the email body, use the email Date header (provided below).
-
-EMAIL:
-`;
 
 // Prompt for humanizing Amazon product names into shop-floor friendly names
 const NAME_HUMANIZATION_PROMPT = `You are a product naming assistant for a manufacturing shop floor. 
@@ -358,475 +297,13 @@ function _extractTextFromParts(parts: any[]): string {
   return text;
 }
 
-// Strip HTML tags for cleaner analysis - preserves table structure
-function stripHtml(html: string): string {
-  return html
-    // Remove style and script tags entirely
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-    .replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '')
-    // Convert table structure to readable format
-    .replace(/<\/tr>/gi, '\n')
-    .replace(/<\/td>/gi, ' | ')
-    .replace(/<\/th>/gi, ' | ')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<\/div>/gi, '\n')
-    .replace(/<\/li>/gi, '\n')
-    .replace(/<hr[^>]*>/gi, '\n---\n')
-    // Remove remaining HTML tags
-    .replace(/<[^>]+>/g, '')
-    // Decode HTML entities
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&#x27;/g, "'")
-    .replace(/&dollar;/g, '$')
-    .replace(/&#36;/g, '$')
-    // Clean up whitespace while preserving line structure
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n\s*\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
-
-function uniqueStrings(values: string[]): string[] {
-  return Array.from(new Set(values));
-}
-
-function cleanUrlCandidate(raw: string): string | null {
-  const v = (raw || '')
-    .trim()
-    .replace(/&amp;/g, '&')
-    .replace(/&#x2F;/g, '/')
-    .replace(/&#47;/g, '/')
-    .replace(/&#x3D;/g, '=')
-    .replace(/&#61;/g, '=')
-    // common trailing punctuation from email text
-    .replace(/[)\],.;]+$/g, '');
-
-  if (!/^https?:\/\//i.test(v)) return null;
-  try {
-    const parsed = new URL(v);
-    // Strip common tracking params
-    const trackingKeys = new Set(['gclid', 'fbclid', 'mc_cid', 'mc_eid']);
-    for (const key of Array.from(parsed.searchParams.keys())) {
-      const lower = key.toLowerCase();
-      if (lower.startsWith('utm_') || trackingKeys.has(lower)) {
-        parsed.searchParams.delete(key);
-      }
-    }
-    parsed.hash = '';
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-}
-
-function extractUrlsFromText(text: string): string[] {
-  if (!text) return [];
-  const re = /\bhttps?:\/\/[^\s"'<>]+/gi;
-  const matches = Array.from(text.matchAll(re)).map(m => m[0]);
-  const cleaned = matches.map(cleanUrlCandidate).filter((u): u is string => Boolean(u));
-  return uniqueStrings(cleaned);
-}
-
-function extractUrlsFromHtml(html: string): string[] {
-  if (!html) return [];
-  const hrefs = Array.from(html.matchAll(/href\s*=\s*["']([^"']+)["']/gi)).map(m => m[1]);
-  const candidates = [...hrefs, ...extractUrlsFromText(html)];
-  const cleaned = candidates.map(cleanUrlCandidate).filter((u): u is string => Boolean(u));
-  return uniqueStrings(cleaned);
-}
-
-function extractImageUrlsFromHtml(html: string): string[] {
-  if (!html) return [];
-  const imgSrcs = Array.from(html.matchAll(/<img[^>]*\ssrc\s*=\s*["']([^"']+)["']/gi)).map(m => m[1]);
-  const ogImages = Array.from(html.matchAll(/<meta[^>]*property\s*=\s*["']og:image["'][^>]*content\s*=\s*["']([^"']+)["']/gi)).map(m => m[1]);
-  const candidates = [...imgSrcs, ...ogImages];
-  const cleaned = candidates.map(cleanUrlCandidate).filter((u): u is string => Boolean(u));
-  return uniqueStrings(cleaned);
-}
-
-function looksLikeImageUrl(url: string): boolean {
-  try {
-    const u = new URL(url);
-    const p = u.pathname.toLowerCase();
-    return /\.(png|jpe?g|webp|gif|svg)$/.test(p);
-  } catch {
-    return false;
-  }
-}
-
-function isJunkUrl(url: string): boolean {
-  const lower = url.toLowerCase();
-  // email / marketing / tracking / account links
-  const junkFragments = [
-    'unsubscribe',
-    'preferences',
-    'privacy',
-    'terms',
-    'support',
-    'help',
-    'account',
-    'login',
-    'signup',
-    'doubleclick',
-    'mailchimp',
-    'mandrillapp',
-    'sendgrid',
-    'constantcontact',
-    'campaign-archive',
-  ];
-  if (junkFragments.some(f => lower.includes(f))) return true;
-  return false;
-}
-
-function pickBestProductUrlForItem(params: { vendorDomain?: string; itemName: string; sku?: string }, urls: string[]): string | undefined {
-  if (urls.length === 0) return undefined;
-  const vendorDomain = (params.vendorDomain || '').toLowerCase();
-  const vendorUrls = vendorDomain && vendorDomain !== 'unknown'
-    ? urls.filter(u => u.toLowerCase().includes(vendorDomain))
-    : urls;
-  const pool = vendorUrls.length > 0 ? vendorUrls : urls;
-
-  const sku = params.sku?.trim();
-  if (sku) {
-    const match = pool.find(u => u.toLowerCase().includes(sku.toLowerCase()));
-    if (match) return match;
-  }
-
-  const tokens = params.itemName
-    .toLowerCase()
-    .split(/[^a-z0-9]+/g)
-    .filter(t => t.length >= 4)
-    .slice(0, 3);
-  for (const token of tokens) {
-    const match = pool.find(u => u.toLowerCase().includes(token));
-    if (match) return match;
-  }
-
-  // Prefer non-root paths when possible
-  const nonRoot = pool.find(u => {
-    try {
-      const parsed = new URL(u);
-      return parsed.pathname && parsed.pathname !== '/';
-    } catch {
-      return false;
-    }
-  });
-  return nonRoot || pool[0];
-}
-
-function pickBestImageUrlForItem(params: { vendorDomain?: string }, urls: string[]): string | undefined {
-  if (urls.length === 0) return undefined;
-  const vendorDomain = (params.vendorDomain || '').toLowerCase();
-  const vendorUrls = vendorDomain && vendorDomain !== 'unknown'
-    ? urls.filter(u => u.toLowerCase().includes(vendorDomain))
-    : urls;
-  const pool = vendorUrls.length > 0 ? vendorUrls : urls;
-  const imagesOnly = pool.filter(looksLikeImageUrl);
-  if (imagesOnly.length > 0) return imagesOnly[0];
-  return pool[0];
-}
-
-// Analyze a single email with retry logic
-async function analyzeEmailWithRetry(
-  model: any,
-  email: { id: string; subject: string; sender: string; body: string; date?: string },
-  maxRetries: number = 3
-): Promise<any> {
-  // Clean the body - strip HTML if needed
-  let cleanBody = email.body;
-  if (cleanBody.includes('<html') || cleanBody.includes('<div') || cleanBody.includes('<table')) {
-    cleanBody = stripHtml(cleanBody);
-  }
-  
-  const emailContent = `
-Subject: ${email.subject}
-From: ${email.sender}
-Date: ${email.date || 'Unknown'}
-Content:
-${cleanBody.substring(0, 8000)}
-`;
-
-  // Debug: log what we're analyzing
-  console.log(`🔍 Analyzing: "${email.subject}" from ${email.sender}`);
-  console.log(`   Body length: ${cleanBody.length} chars (original: ${email.body.length})`);
-  if (cleanBody.length < 50) {
-    console.log(`   ⚠️ Very short body: "${cleanBody.substring(0, 100)}"`);
-  }
-
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      const result = await model.generateContent(EXTRACTION_PROMPT + emailContent);
-      const response = result.response;
-      const text = response.text();
-      
-      // Debug: log raw response
-      console.log(`   Gemini response (${text.length} chars): ${text.substring(0, 200)}...`);
-      
-      // Parse JSON from response
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
-      if (!jsonMatch) {
-        console.log(`   ❌ No JSON found in response`);
-        // Fallback: check for order keywords in the original email
-        const fallbackResult = keywordFallbackDetection(email, cleanBody);
-        if (fallbackResult.isOrder) {
-          console.log(`   🔄 Keyword fallback triggered: detected as order`);
-          return fallbackResult;
-        }
-        return { emailId: email.id, isOrder: false, items: [], confidence: 0 };
-      }
-      
-      let parsed = JSON.parse(jsonMatch[0]);
-      
-      // FALLBACK 1: If Gemini says not an order but we see clear signals, override
-      if (!parsed.isOrder) {
-        const fallbackResult = keywordFallbackDetection(email, cleanBody);
-        if (fallbackResult.isOrder) {
-          console.log(`   🔄 Keyword fallback OVERRIDE: Gemini said no order but keywords detected`);
-          parsed = { ...parsed, ...fallbackResult };
-        }
-      }
-      
-      // FALLBACK 2: If Gemini says it IS an order but returns no items, try extracting ourselves
-      if (parsed.isOrder && (!parsed.items || parsed.items.length === 0)) {
-        console.log(`   ⚠️ Gemini returned order with no items, trying regex extraction...`);
-        const extractedItems = extractItemsFromBody(cleanBody);
-        if (extractedItems.length > 0) {
-          console.log(`   ✅ Regex extraction found ${extractedItems.length} items`);
-          parsed.items = extractedItems;
-          parsed.totalAmount = extractedItems.reduce((sum: number, item: any) => 
-            sum + (item.totalPrice || item.unitPrice || 0), 0);
-        }
-      }
-
-      // Normalize order date (prefer email header date if missing/invalid)
-      parsed.orderDate = normalizeOrderDate(parsed.orderDate, email.date);
-      
-      console.log(`   Result: isOrder=${parsed.isOrder}, items=${parsed.items?.length || 0}, supplier=${parsed.supplier}`);
-      
-      return {
-        emailId: email.id,
-        ...parsed,
-      };
-    } catch (error: any) {
-      const isRateLimit = error.status === 429 || error.status === 403;
-      const isLastAttempt = attempt === maxRetries - 1;
-      
-      if (isRateLimit && !isLastAttempt) {
-        // Exponential backoff: 2s, 4s, 8s...
-        const waitTime = Math.pow(2, attempt + 1) * 1000;
-        console.log(`   ⏳ Rate limited, waiting ${waitTime/1000}s...`);
-        await delay(waitTime);
-        continue;
-      }
-      
-      console.error(`   ❌ Parse error for email ${email.id}:`, error.message || error);
-      // Try keyword fallback on error too
-      const fallbackResult = keywordFallbackDetection(email, cleanBody);
-      if (fallbackResult.isOrder) {
-        console.log(`   🔄 Error recovery: keyword fallback detected order`);
-        return fallbackResult;
-      }
-      return { emailId: email.id, isOrder: false, items: [], confidence: 0 };
-    }
-  }
-  
-  return { emailId: email.id, isOrder: false, items: [], confidence: 0 };
-}
-
-// Extract items from email body using regex patterns
-function extractItemsFromBody(body: string): any[] {
-  const items: any[] = [];
-  const seenNames = new Set<string>();
-  
-  // Pattern 1: "Product Name" followed by price like "$XX.XX"
-  // e.g., "Anker USB-C Cable $12.99"
-  const priceLinePattern = /([A-Z][^$\n]{5,60})\s*\$(\d+\.?\d*)/gi;
-  let match;
-  while ((match = priceLinePattern.exec(body)) !== null) {
-    const name = match[1].trim();
-    const price = parseFloat(match[2]);
-    // Skip if looks like totals or if already seen
-    if (!name.toLowerCase().includes('total') && 
-        !name.toLowerCase().includes('subtotal') && 
-        !name.toLowerCase().includes('shipping') &&
-        !name.toLowerCase().includes('tax') &&
-        !seenNames.has(name.toLowerCase())) {
-      seenNames.add(name.toLowerCase());
-      items.push({
-        name,
-        normalizedName: name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim(),
-        quantity: 1,
-        unit: 'ea',
-        unitPrice: price,
-        totalPrice: price
-      });
-    }
-  }
-  
-  // Pattern 2: "Item # XXXXX" followed by product name and price
-  // e.g., Costco format: "Item # 1732381 $19.99"
-  const itemNumberPattern = /Item\s*#?\s*:?\s*(\d+)[^$]*\$(\d+\.?\d*)/gi;
-  while ((match = itemNumberPattern.exec(body)) !== null) {
-    const sku = match[1];
-    const price = parseFloat(match[2]);
-    // Try to get the product name before "Item #"
-    const beforeMatch = body.substring(Math.max(0, match.index - 100), match.index);
-    const lines = beforeMatch.split('\n').filter(l => l.trim().length > 10);
-    const productName = lines[lines.length - 1]?.trim() || `Item ${sku}`;
-    
-    if (!seenNames.has(productName.toLowerCase()) && price > 0) {
-      seenNames.add(productName.toLowerCase());
-      items.push({
-        name: productName,
-        normalizedName: productName.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim(),
-        sku,
-        quantity: 1,
-        unit: 'ea',
-        unitPrice: price,
-        totalPrice: price
-      });
-    }
-  }
-  
-  // Pattern 3: Qty/Quantity followed by a number
-  // e.g., "Qty: 2" or "Quantity 3"
-  const qtyPattern = /([A-Za-z][^|\n]{5,60})\s*(?:Qty|Quantity)\s*:?\s*(\d+)\s*[|\s]*\$?(\d+\.?\d*)?/gi;
-  while ((match = qtyPattern.exec(body)) !== null) {
-    const name = match[1].trim();
-    const qty = parseInt(match[2], 10);
-    const price = match[3] ? parseFloat(match[3]) : 0;
-    
-    if (!seenNames.has(name.toLowerCase()) && qty > 0) {
-      seenNames.add(name.toLowerCase());
-      items.push({
-        name,
-        normalizedName: name.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim(),
-        quantity: qty,
-        unit: 'ea',
-        unitPrice: price || null,
-        totalPrice: price ? price * qty : null
-      });
-    }
-  }
-  
-  return items.slice(0, 20); // Limit to 20 items
-}
-
-// Keyword-based fallback detection when Gemini fails
-function keywordFallbackDetection(
-  email: { id: string; subject: string; sender: string; date?: string },
-  body: string
-): { emailId: string; isOrder: boolean; supplier: string | null; items: any[]; confidence: number; orderDate: string; totalAmount: number } {
-  const combined = `${email.subject} ${email.sender} ${body}`.toLowerCase();
-  const emailDate = parseEmailDate(email.date) || new Date().toISOString().split('T')[0];
-  
-  // Strong order signal keywords
-  const orderKeywords = [
-    'order confirmation', 'order #', 'order number', 'order placed',
-    'invoice', 'receipt', 'payment received', 'payment confirmation',
-    'your order', 'purchase', 'transaction', 'shipped', 'shipment',
-    'tracking number', 'delivered', 'out for delivery',
-    'qty', 'quantity', 'subtotal', 'total:', 'grand total', 'amount due'
-  ];
-  
-  // Known supplier domains/names
-  const knownSuppliers: Record<string, string> = {
-    'amazon': 'Amazon',
-    'costco': 'Costco',
-    'walmart': 'Walmart',
-    'target': 'Target',
-    'uline': 'Uline',
-    'grainger': 'Grainger',
-    'fastenal': 'Fastenal',
-    'mcmaster': 'McMaster-Carr',
-    'msc': 'MSC Industrial',
-    'homedepot': 'Home Depot',
-    'lowes': 'Lowes',
-    'sysco': 'Sysco',
-    'usfoods': 'US Foods',
-    'zoro': 'Zoro',
-    'staples': 'Staples',
-    'officedepot': 'Office Depot',
-    'newegg': 'Newegg',
-    'chewy': 'Chewy',
-    'ebay': 'eBay',
-    'fedex': 'FedEx',
-    'ups': 'UPS',
-    'usps': 'USPS'
-  };
-  
-  // Check for keywords
-  const hasOrderKeyword = orderKeywords.some(kw => combined.includes(kw));
-  
-  // Check for dollar amounts
-  const hasDollarAmount = /\$\d+\.?\d*/i.test(combined);
-  
-  // Detect supplier
-  let detectedSupplier: string | null = null;
-  for (const [key, name] of Object.entries(knownSuppliers)) {
-    if (combined.includes(key)) {
-      detectedSupplier = name;
-      break;
-    }
-  }
-  
-  // If we have strong signals, try to extract items
-  if ((hasOrderKeyword && hasDollarAmount) || (detectedSupplier && hasDollarAmount)) {
-    const extractedItems = extractItemsFromBody(body);
-    const totalAmount = extractedItems.reduce((sum, item) => sum + (item.totalPrice || item.unitPrice || 0), 0);
-    
-    console.log(`   📋 Fallback extracted ${extractedItems.length} items from ${detectedSupplier || 'email'}`);
-    
-    return {
-      emailId: email.id,
-      isOrder: true,
-      supplier: detectedSupplier || extractSupplierFromSender(email.sender),
-      items: extractedItems,
-      confidence: extractedItems.length > 0 ? 0.7 : 0.5,
-      orderDate: emailDate,
-      totalAmount
-    };
-  }
-  
-  return {
-    emailId: email.id,
-    isOrder: false,
-    supplier: null,
-    items: [],
-    confidence: 0,
-    orderDate: emailDate,
-    totalAmount: 0
-  };
-}
-
-// Extract supplier name from email sender
-function extractSupplierFromSender(sender: string): string {
-  // Try to extract domain or name from sender
-  const emailMatch = sender.match(/@([^.]+)/);
-  if (emailMatch) {
-    return emailMatch[1].charAt(0).toUpperCase() + emailMatch[1].slice(1);
-  }
-  // Try to extract name before email
-  const nameMatch = sender.match(/^([^<]+)/);
-  if (nameMatch) {
-    return nameMatch[1].trim();
-  }
-  return 'Unknown Supplier';
-}
-
 // Run the actual processing in the background
 async function processEmailsInBackground(
   jobId: string,
   userId: string,
   accessToken: string,
-  supplierDomains?: string[]
+  supplierDomains: string[],
+  jobType: string,
 ) {
   const job = jobManager.getJob(jobId);
   if (!job) return;
@@ -842,14 +319,9 @@ async function processEmailsInBackground(
     oauth2Client.setCredentials({ access_token: accessToken });
     const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
-    // Calculate 6 months ago for date filter
-    const sixMonthsAgo = new Date();
-    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-    const afterDate = sixMonthsAgo.toISOString().split('T')[0].replace(/-/g, '/');
-
     // Build query - ONLY for selected suppliers, EXCLUDING Amazon (handled separately)
     // Remove any Amazon domains from the list since Amazon is processed separately
-    const nonAmazonDomains = (supplierDomains || []).filter(d => 
+    const nonAmazonDomains = supplierDomains.filter(d =>
       !d.toLowerCase().includes('amazon')
     );
     
@@ -858,24 +330,53 @@ async function processEmailsInBackground(
       jobManager.updateJob(jobId, { status: 'completed' });
       return;
     }
-    
-    // Build query ONLY for selected suppliers - no general query
-    const fromClause = nonAmazonDomains.map(d => `from:${d}`).join(' OR ');
-    const query = `(${fromClause}) subject:(order OR invoice OR receipt OR confirmation OR shipment OR purchase OR payment) after:${afterDate}`;
-    
-    jobManager.addJobLog(jobId, `🔍 Processing ${nonAmazonDomains.length} suppliers: ${nonAmazonDomains.slice(0, 5).join(', ')}${nonAmazonDomains.length > 5 ? '...' : ''}`);
-    
-    const listResponse = await gmail.users.messages.list({
-      userId: 'me',
-      q: query,
-      maxResults: 200, // Reduced for faster processing
+
+    const lookbackMonths = getSupplierLookbackMonths(jobType);
+    const strictQuery = buildSupplierJobQuery({
+      supplierDomains: nonAmazonDomains,
+      jobType,
+      mode: 'strict',
     });
 
-    const messageIds = listResponse.data.messages || [];
-    jobManager.addJobLog(jobId, `📬 Found ${messageIds.length} matching emails`);
-    
+    jobManager.addJobLog(
+      jobId,
+      `🔍 Processing ${nonAmazonDomains.length} suppliers: ${nonAmazonDomains.slice(0, 5).join(', ')}${nonAmazonDomains.length > 5 ? '...' : ''}`,
+    );
+    jobManager.addJobLog(jobId, `🧭 Query mode=strict, lookback=${lookbackMonths} months`);
+
+    let queryMode: 'strict' | 'fallback' = 'strict';
+    let messageIds: Array<{ id?: string | null }> = [];
+
+    const strictResponse = await gmail.users.messages.list({
+      userId: 'me',
+      q: strictQuery,
+      maxResults: 200,
+    });
+    messageIds = strictResponse.data.messages || [];
+    jobManager.addJobLog(jobId, `📬 Strict query found ${messageIds.length} matching emails`);
+
+    if (jobType === 'priority' && messageIds.length === 0) {
+      const fallbackQuery = buildSupplierJobQuery({
+        supplierDomains: nonAmazonDomains,
+        jobType,
+        mode: 'fallback',
+      });
+      queryMode = 'fallback';
+      jobManager.addJobLog(jobId, '🔁 Strict query returned 0, retrying fallback query without subject filter');
+
+      const fallbackResponse = await gmail.users.messages.list({
+        userId: 'me',
+        q: fallbackQuery,
+        maxResults: 200,
+      });
+      messageIds = fallbackResponse.data.messages || [];
+      jobManager.addJobLog(jobId, `📬 Fallback query found ${messageIds.length} matching emails`);
+    }
+
+    jobManager.addJobLog(jobId, `🧪 Effective query mode: ${queryMode}`);
+
     if (messageIds.length === 0) {
-      jobManager.addJobLog(jobId, '⚠️ No order-related emails found in the last 6 months');
+      jobManager.addJobLog(jobId, `⚠️ No order-related emails found in the last ${lookbackMonths} months`);
       jobManager.updateJob(jobId, { status: 'completed' });
       return;
     }
@@ -946,7 +447,7 @@ async function processEmailsInBackground(
     }
 
     // Initialize Gemini model upfront
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    const model = createGeminiExtractionModel();
 
     // STEP 3: Process vendor by vendor and collect raw orders for consolidation
     let totalProcessed = 0;
@@ -1040,13 +541,13 @@ async function processEmailsInBackground(
             snippet: email.body.substring(0, 100) + '...',
           });
           
-          jobManager.updateJobProgress(jobId, { 
+          jobManager.updateJobProgress(jobId, {
             processed: totalProcessed,
-            currentTask: `${vendorName}: ${emailInfo.subject.substring(0, 40)}...`
+            currentTask: `${vendorName}: ${emailInfo.subject.substring(0, 40)}...`,
           });
 
           // Analyze with AI
-          const result = await analyzeEmailWithRetry(model, email);
+          const result = await analyzeEmailWithRetryShared(model as any, email);
           
           // Collect raw order data for consolidation (instead of adding immediately)
           if (result.isOrder && result.items?.length > 0) {
@@ -1056,7 +557,7 @@ async function processEmailsInBackground(
               subject: email.subject,
               supplier: result.supplier || vendorName,
               orderNumber: extractOrderNumber(email.subject, email.body),
-              orderDate: normalizeOrderDate(result.orderDate, email.date),
+              orderDate: normalizeExtractionOrderDate(result.orderDate, email.date),
               totalAmount: result.totalAmount || 0,
               items: result.items.map((item: any, idx: number) => ({
                 id: `${email.id}-${idx}`,
@@ -1077,6 +578,12 @@ async function processEmailsInBackground(
             };
             
             rawOrders.push(rawOrder);
+
+            if (jobType === 'priority') {
+              const liveSnapshot = buildLiveOrderSnapshot(rawOrders);
+              jobManager.replaceJobOrders(jobId, liveSnapshot.orders);
+              jobManager.updateJobProgress(jobId, { success: liveSnapshot.success });
+            }
             
             // Log email type for visibility
             const emailType = detectEmailType(email.subject);
@@ -1085,16 +592,15 @@ async function processEmailsInBackground(
             // Log each item found for real-time visibility
             for (const item of result.items.slice(0, 3)) {
               const price = item.unitPrice ? `$${item.unitPrice.toFixed(2)}` : '';
-              const qty = item.quantity > 1 ? `x${item.quantity}` : '';
+              const quantity = typeof item.quantity === 'number' ? item.quantity : 1;
+              const qty = quantity > 1 ? `x${quantity}` : '';
               jobManager.addJobLog(jobId, `   ${typeEmoji} ${item.name?.substring(0, 50) || 'Item'} ${qty} ${price}`);
             }
             if (result.items.length > 3) {
               jobManager.addJobLog(jobId, `   ... and ${result.items.length - 3} more items`);
             }
           }
-          
-          totalProcessed++;
-          
+
           // Small delay between requests to avoid rate limits
           await delay(100);
           
@@ -1105,6 +611,12 @@ async function processEmailsInBackground(
             jobManager.addJobLog(jobId, `   ⚠️ Rate limited - waiting...`);
             await delay(2000);
           }
+        } finally {
+          totalProcessed++;
+          jobManager.updateJobProgress(jobId, {
+            processed: totalProcessed,
+            success: rawOrders.length,
+          });
         }
       }
       
@@ -1135,37 +647,15 @@ async function processEmailsInBackground(
       jobManager.addJobLog(jobId, `   ⏱️ ${ordersWithLeadTime.length} orders with lead time data (avg ${avgLeadTime.toFixed(1)} days)`);
     }
     
-    // Add consolidated orders to job
-    for (const consolidated of consolidatedOrders) {
-      const order: ProcessedOrder = {
-        id: consolidated.id,
-        supplier: consolidated.supplier,
-        orderDate: consolidated.orderDate,
-        totalAmount: consolidated.totalAmount || 0,
-        items: consolidated.items.map(item => ({
-          id: item.id,
-          name: item.name,
-          quantity: item.quantity,
-          unit: item.unit,
-          unitPrice: item.unitPrice || 0,
-          asin: item.asin,
-          sku: item.sku,
-          productUrl: item.productUrl,
-          imageUrl: item.imageUrl,
-          amazonEnriched: item.amazonEnriched,
-        })),
-        confidence: consolidated.confidence,
-      };
-      
-      jobManager.addJobOrder(jobId, order);
-    }
+    const finalSnapshot = buildFinalOrderSnapshot(consolidatedOrders);
+    jobManager.replaceJobOrders(jobId, finalSnapshot.orders);
 
     // Complete
     jobManager.updateJob(jobId, { status: 'completed' });
     jobManager.setJobCurrentEmail(jobId, null);
     jobManager.updateJobProgress(jobId, { 
       processed: totalProcessed,
-      success: consolidatedOrders.length,
+      success: finalSnapshot.success,
       currentTask: '✅ Complete' 
     });
     jobManager.addJobLog(jobId, `🎉 Complete: ${consolidatedOrders.length} unique orders from ${totalProcessed} emails across ${sortedVendors.length} vendors`);
@@ -1199,32 +689,36 @@ router.post('/start', jobsLimiter, requireAuth, async (req: Request, res: Respon
     }
 
     const { supplierDomains, jobType } = req.body as { supplierDomains?: unknown; jobType?: string };
-    const validDomains = sanitizeSupplierDomains(supplierDomains);
-    if (supplierDomains && validDomains.length === 0) {
-      return res.status(400).json({ error: 'supplierDomains must contain valid hostnames' });
-    }
-
     // Create job with specified type (defaults to 'suppliers')
     // allowConcurrent=true ensures this job won't cancel other job types
     const effectiveJobType = typeof jobType === 'string' && jobType.length > 0 ? jobType : 'suppliers';
-    console.log(`📥 /start request: userId=${userId.substring(0, 8)}, jobType=${effectiveJobType}, domains=${validDomains.length}`);
+    const sanitizedDomains = sanitizeSupplierDomains(supplierDomains);
+    if (supplierDomains && sanitizedDomains.length === 0) {
+      return res.status(400).json({ error: 'supplierDomains must contain valid hostnames' });
+    }
+
+    const effectiveDomains = effectiveJobType === 'priority'
+      ? expandPrioritySupplierDomains(sanitizedDomains)
+      : sanitizedDomains;
+
+    console.log(`📥 /start request: userId=${userId.substring(0, 8)}, jobType=${effectiveJobType}, domains=${effectiveDomains.length}`);
     const job = jobManager.createJob(userId, { jobType: effectiveJobType, allowConcurrent: true });
     
-    if (validDomains.length > 0) {
-      jobManager.addJobLog(job.id, `🚀 Job created for ${validDomains.length} selected suppliers: ${validDomains.join(', ')}`);
+    if (effectiveDomains.length > 0) {
+      jobManager.addJobLog(job.id, `🚀 Job created for ${effectiveDomains.length} selected suppliers: ${effectiveDomains.join(', ')}`);
     } else {
       jobManager.addJobLog(job.id, '🚀 Job created, processing all suppliers...');
     }
 
     // Start processing in background (don't await)
-    processEmailsInBackground(job.id, userId, accessToken, validDomains);
+    processEmailsInBackground(job.id, userId, accessToken, effectiveDomains, effectiveJobType);
 
     // Return immediately with job ID
     res.status(202).json({ 
       jobId: job.id,
       status: 'started',
-      message: validDomains.length 
-        ? `Processing ${validDomains.length} suppliers in background`
+      message: effectiveDomains.length 
+        ? `Processing ${effectiveDomains.length} suppliers in background`
         : 'Processing all suppliers in background'
     });
   } catch (error: any) {
