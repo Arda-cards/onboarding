@@ -195,14 +195,14 @@ export default function App() {
     return (
       <div className="relative min-h-screen arda-mesh flex flex-col">
         <div className="absolute inset-0 pointer-events-none overflow-hidden">
-          <div className="absolute -top-10 left-10 w-56 h-56 rounded-full bg-orange-400/15 blur-3xl animate-float" />
-          <div className="absolute top-32 right-12 w-72 h-72 rounded-full bg-blue-500/10 blur-3xl animate-float" />
+          <div className="absolute -top-10 left-10 w-56 h-56 rounded-full bg-arda-accent/15 blur-3xl animate-float" />
+          <div className="absolute top-32 right-12 w-72 h-72 rounded-full bg-arda-info/10 blur-3xl animate-float" />
         </div>
 
         <header className="relative z-10 bg-white/80 backdrop-blur border-b border-arda-border px-6 py-4">
           <div className="max-w-5xl mx-auto flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gradient-to-br from-orange-500 to-orange-600 rounded-lg flex items-center justify-center shadow-arda">
+              <div className="w-10 h-10 bg-arda-accent rounded-lg flex items-center justify-center shadow-arda">
                 <Icons.Package className="w-6 h-6 text-white" />
               </div>
               <div>
@@ -224,8 +224,8 @@ export default function App() {
 
         <div className="relative z-10 flex-1 flex items-center justify-center p-8">
           <div className="w-full max-w-lg text-center arda-glass rounded-2xl p-8">
-            <div className="w-20 h-20 mx-auto bg-green-100 rounded-full flex items-center justify-center mb-6">
-              <Icons.CheckCircle2 className="w-10 h-10 text-green-500" />
+            <div className="w-20 h-20 mx-auto bg-arda-success-bg rounded-full flex items-center justify-center mb-6">
+              <Icons.CheckCircle2 className="w-10 h-10 text-arda-success" />
             </div>
             <h2 className="text-2xl font-bold text-arda-text-primary mb-3">
               Setup Complete!
