@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { LoginScreen } from './views/LoginScreen';
-import { OnboardingFlow } from './views/OnboardingFlow';
+import { OnboardingFlow, OnboardingCompletionSummary } from './views/OnboardingFlow';
 import { MobileScanner } from './views/MobileScanner';
 import { GoogleUserProfile } from './types';
 import {
@@ -132,8 +132,8 @@ export default function App() {
     localStorage.removeItem('orderPulse_onboardingComplete');
   };
 
-  const handleOnboardingComplete = (items: unknown[]) => {
-    setImportedItemCount(items.length);
+  const handleOnboardingComplete = (summary: OnboardingCompletionSummary) => {
+    setImportedItemCount(summary.totalItems);
     setHasCompletedOnboarding(true);
     localStorage.setItem('orderPulse_onboardingComplete', 'true');
     void (async () => {

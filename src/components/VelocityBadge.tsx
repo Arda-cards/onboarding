@@ -22,15 +22,15 @@ const getVelocityClass = (dailyBurnRate: number): {
     return {
       label: 'Fast',
       color: 'text-arda-accent',
-      bgColor: 'bg-orange-100',
-      borderColor: 'border-orange-200',
+      bgColor: 'bg-arda-warning-soft',
+      borderColor: 'border-arda-warning-border',
     };
   } else if (dailyBurnRate >= 3) {
     return {
       label: 'Medium',
       color: 'text-arda-accent',
-      bgColor: 'bg-orange-100',
-      borderColor: 'border-orange-200',
+      bgColor: 'bg-arda-warning-soft',
+      borderColor: 'border-arda-warning-border',
     };
   } else if (dailyBurnRate >= 1) {
     return {

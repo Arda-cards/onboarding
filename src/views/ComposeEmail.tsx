@@ -238,7 +238,7 @@ export const ComposeEmail: React.FC<ComposeEmailProps> = ({
               <button
                 type="submit"
                 disabled={isSending || isImproving}
-                className="bg-arda-accent text-white px-6 py-2 rounded-md font-bold text-sm hover:bg-blue-600 flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50 shadow-lg shadow-blue-500/20"
+                className="bg-arda-accent text-white px-6 py-2 rounded-md font-bold text-sm hover:bg-arda-accent-hover flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50 shadow-lg shadow-arda-lg"
               >
                 {isSending ? (
                   <>

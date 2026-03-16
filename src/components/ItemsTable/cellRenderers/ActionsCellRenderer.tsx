@@ -23,7 +23,7 @@ export const ActionsCellRenderer = (props: ActionsCellRendererProps) => {
           type="button"
           onClick={() => props.onSyncSingle?.(id)}
           disabled={isSyncing}
-          className="p-1 rounded hover:bg-orange-50 text-gray-500 hover:text-orange-600 transition-colors disabled:opacity-50"
+          className="p-1 rounded text-arda-text-muted hover:bg-arda-warning-bg hover:text-arda-warning-text transition-colors disabled:opacity-50"
           title="Sync to Arda"
         >
           {isSyncing ? (
@@ -37,7 +37,7 @@ export const ActionsCellRenderer = (props: ActionsCellRendererProps) => {
         <button
           type="button"
           onClick={() => props.onRemoveItem?.(id)}
-          className="p-1 rounded hover:bg-red-50 text-gray-400 hover:text-red-500 transition-colors"
+          className="p-1 rounded text-arda-text-muted hover:bg-arda-danger-bg hover:text-arda-danger transition-colors"
           title="Remove item"
         >
           <Icons.Trash2 className="w-3.5 h-3.5" />

@@ -151,7 +151,7 @@ const ColorPicker: React.FC<{
                 onSelect(undefined);
                 setIsOpen(false);
               }}
-              className="w-6 h-6 rounded-full border-2 border-dashed border-gray-300 hover:border-arda-accent transition-colors flex items-center justify-center text-gray-400 text-xs"
+              className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-dashed border-arda-border hover:border-arda-accent text-arda-text-muted text-xs transition-colors"
               title="No color"
             >
               ✕
@@ -181,9 +181,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   amazonLookupLoadingIds,
 }) => {
   const reviewBadgeClasses: Record<ReviewStatus, string> = {
-    pending: 'bg-yellow-50 text-yellow-700 border-yellow-200',
-    approved: 'bg-green-50 text-green-700 border-green-200',
-    excluded: 'bg-red-50 text-red-700 border-red-200',
+    pending: 'bg-arda-warning-bg text-arda-warning-text border-arda-warning-border',
+    approved: 'bg-arda-success-bg text-arda-success-text border-arda-success-border',
+    excluded: 'bg-arda-danger-bg text-arda-danger-text border-arda-danger-border',
   };
   const [historyItem, setHistoryItem] = useState<InventoryItem | null>(null);
   const [syncingItems, setSyncingItems] = useState<Set<string>>(new Set());
@@ -467,17 +467,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 
       {/* Error Banner */}
       {bulkSyncError && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start gap-3">
-          <Icons.AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+        <div className="flex items-start gap-3 rounded-lg border border-arda-danger-border bg-arda-danger-bg p-4">
+          <Icons.AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-arda-danger" />
           <div className="flex-1">
-            <h4 className="font-semibold text-red-800 text-sm">Sync Failed</h4>
-            <p className="text-red-700 text-sm mt-1">{bulkSyncError}</p>
+            <h4 className="text-sm font-semibold text-arda-danger-text">Sync Failed</h4>
+            <p className="mt-1 text-sm text-arda-danger-text">{bulkSyncError}</p>
           </div>
           <button
             onClick={() => setBulkSyncError(null)}
             title="Dismiss error"
             aria-label="Dismiss error"
-            className="text-red-400 hover:text-red-600 p-1"
+            className="p-1 text-arda-danger hover:text-arda-danger-text"
           >
             <Icons.X className="w-4 h-4" />
           </button>
@@ -510,7 +510,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 <tr 
                   key={item.id} 
                   className={`hover:bg-arda-bg-tertiary/50 transition-colors ${
-                    item.isDraft ? 'bg-yellow-50/50 border-l-2 border-l-yellow-400' : ''
+                    item.isDraft ? 'bg-arda-warning-bg border-l-2 border-l-arda-warning' : ''
                   }`}
                 >
                   {/* Color */}
@@ -535,7 +535,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         </span>
                       )}
                       {item.isDraft && (
-                        <span className="ml-2 text-[10px] bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded font-medium">
+                        <span className="ml-2 rounded bg-arda-warning-soft px-1.5 py-0.5 text-[10px] font-medium text-arda-warning-text">
                           DRAFT
                         </span>
                       )}
@@ -626,7 +626,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                               const current = reviewStatusById?.[item.id] || 'pending';
                               onReviewStatusChange(item.id, current === 'approved' ? 'pending' : 'approved');
                             }}
-                            className="text-xs px-2 py-1 rounded border border-green-200 text-green-700 hover:bg-green-50 transition-colors"
+                            className="rounded border border-arda-success-border px-2 py-1 text-xs text-arda-success-text transition-colors hover:bg-arda-success-bg"
                             title="Approve item"
                             aria-label="Approve item"
                           >
@@ -639,7 +639,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                               const current = reviewStatusById?.[item.id] || 'pending';
                               onReviewStatusChange(item.id, current === 'excluded' ? 'pending' : 'excluded');
                             }}
-                            className="text-xs px-2 py-1 rounded border border-red-200 text-red-700 hover:bg-red-50 transition-colors"
+                            className="rounded border border-arda-danger-border px-2 py-1 text-xs text-arda-danger-text transition-colors hover:bg-arda-danger-bg"
                             title="Exclude item"
                             aria-label="Exclude item"
                           >

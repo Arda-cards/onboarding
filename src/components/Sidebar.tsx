@@ -49,17 +49,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
         
         {/* Sync Status */}
         {isIngesting && ingestionProgress && (
-          <div className="mt-3 bg-orange-50 rounded-lg p-2">
-            <div className="flex items-center gap-2 text-xs text-orange-700">
-              <div className="animate-spin w-3 h-3 border-2 border-orange-500 border-t-transparent rounded-full" />
+          <div className="mt-3 rounded-lg bg-arda-warning-bg p-2">
+            <div className="flex items-center gap-2 text-xs text-arda-warning-text">
+              <div className="h-3 w-3 animate-spin rounded-full border-2 border-arda-warning border-t-transparent" />
               <span className="font-medium">Syncing emails...</span>
             </div>
-            <div className="mt-1 text-xs text-orange-600">
+            <div className="mt-1 text-xs text-arda-warning-text">
               {ingestionProgress.processed}/{ingestionProgress.total} processed
             </div>
-            <div className="mt-1 h-1 bg-orange-200 rounded-full overflow-hidden">
+            <div className="mt-1 h-1 overflow-hidden rounded-full bg-arda-warning-soft">
               <div 
-                className="h-full bg-orange-500 transition-all duration-300"
+                className="h-full bg-arda-warning transition-all duration-300"
                 style={{ 
                   width: ingestionProgress.total > 0 
                     ? `${(ingestionProgress.processed / ingestionProgress.total) * 100}%` 
@@ -82,7 +82,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onClick={() => onChangeView(item.id)}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 ${
                 isActive
-                  ? 'bg-orange-50 text-arda-accent'
+                  ? 'bg-arda-warning-bg text-arda-accent'
                   : 'text-arda-text-secondary hover:text-arda-text-primary hover:bg-arda-bg-tertiary'
               }`}
             >
@@ -102,7 +102,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 ${
             isIngesting
               ? 'text-arda-text-muted cursor-not-allowed'
-              : 'text-red-600 hover:text-red-700 hover:bg-red-50'
+              : 'text-arda-danger-text hover:text-arda-danger hover:bg-arda-danger-bg'
           }`}
         >
           <Icons.RefreshCw className={`w-5 h-5 ${isIngesting ? 'animate-spin' : ''}`} />

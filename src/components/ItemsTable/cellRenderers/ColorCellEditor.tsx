@@ -33,15 +33,15 @@ export const ColorCellEditor = forwardRef<unknown, CustomCellEditorProps<MasterL
   return (
     <div
       ref={containerRef}
-      className="bg-white border border-gray-200 rounded-lg shadow-lg p-2 grid grid-cols-4 gap-1 min-w-[140px]"
+      className="bg-white border border-arda-border rounded-lg shadow-lg p-2 grid grid-cols-4 gap-1 min-w-[140px]"
     >
       {colors.map((color) => (
         <button
           key={color.id}
           type="button"
           onClick={() => handleSelect(color.id)}
-          className={`w-8 h-8 rounded-full ${color.bg} hover:ring-2 ring-offset-1 ring-[#FC5A29] transition-all ${
-            value?.toUpperCase() === color.id ? 'ring-2 ring-[#FC5A29]' : ''
+          className={`w-8 h-8 rounded-full ${color.bg} hover:ring-2 ring-offset-1 ring-arda-accent transition-all ${
+            value?.toUpperCase() === color.id ? 'ring-2 ring-arda-accent' : ''
           }`}
           title={color.label}
         />
@@ -49,7 +49,7 @@ export const ColorCellEditor = forwardRef<unknown, CustomCellEditorProps<MasterL
       <button
         type="button"
         onClick={() => handleSelect('')}
-        className="w-8 h-8 rounded-full border-2 border-dashed border-gray-300 hover:border-[#FC5A29] transition-colors flex items-center justify-center text-gray-400 text-xs"
+        className="w-8 h-8 rounded-full border-2 border-dashed border-arda-border hover:border-arda-accent transition-colors flex items-center justify-center text-arda-text-muted text-xs"
         title="No color"
       >
         ✕

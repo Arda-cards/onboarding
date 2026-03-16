@@ -19,8 +19,8 @@ export const ImageCellRenderer = (props: CustomCellRendererProps<MasterListItem>
   }
 
   return (
-    <div className="w-8 h-8 rounded bg-gray-100 flex items-center justify-center">
-      <Icons.Package className="w-4 h-4 text-gray-400" />
+    <div className="flex h-8 w-8 items-center justify-center rounded bg-arda-bg-secondary">
+      <Icons.Package className="w-4 h-4 text-arda-text-muted" />
     </div>
   );
 };

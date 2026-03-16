@@ -50,12 +50,12 @@ export function isPrioritySupplierDomain(domain: string): boolean {
 }
 
 export const CATEGORY_COLORS: Record<string, { bg: string; text: string; icon: string }> = {
-  industrial: { bg: 'bg-blue-50', text: 'text-blue-600', icon: '🏭' },
-  retail: { bg: 'bg-green-50', text: 'text-green-600', icon: '🛒' },
-  electronics: { bg: 'bg-cyan-50', text: 'text-cyan-600', icon: '⚡' },
-  office: { bg: 'bg-purple-50', text: 'text-purple-600', icon: '📎' },
-  food: { bg: 'bg-orange-50', text: 'text-orange-600', icon: '🍽️' },
-  unknown: { bg: 'bg-gray-50', text: 'text-gray-600', icon: '📦' },
+  industrial: { bg: 'bg-arda-info-bg', text: 'text-arda-info-text', icon: '🏭' },
+  retail: { bg: 'bg-arda-success-bg', text: 'text-arda-success-text', icon: '🛒' },
+  electronics: { bg: 'bg-arda-info-soft', text: 'text-arda-info-text', icon: '⚡' },
+  office: { bg: 'bg-arda-bg-secondary', text: 'text-arda-text-secondary', icon: '📎' },
+  food: { bg: 'bg-arda-warning-bg', text: 'text-arda-warning-text', icon: '🍽️' },
+  unknown: { bg: 'bg-arda-bg-secondary', text: 'text-arda-text-secondary', icon: '📦' },
 };
 
 export const MILESTONES = {

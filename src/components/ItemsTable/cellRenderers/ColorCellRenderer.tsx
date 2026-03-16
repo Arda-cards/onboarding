@@ -17,7 +17,7 @@ export const ColorCellRenderer = (props: CustomCellRendererProps<MasterListItem>
   const bgClass = color ? colorMap[color] : undefined;
 
   if (!bgClass) {
-    return <span className="text-gray-400 text-xs italic">—</span>;
+    return <span className="text-arda-text-muted text-xs italic">—</span>;
   }
 
   return (

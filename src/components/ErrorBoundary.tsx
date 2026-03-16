@@ -38,9 +38,9 @@ export class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div className="min-h-[300px] flex flex-col items-center justify-center p-8 bg-arda-bg-secondary border border-red-500/30 rounded-lg">
-          <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-4">
-            <Icons.AlertCircle className="w-8 h-8 text-red-400" />
+        <div className="min-h-[300px] flex flex-col items-center justify-center rounded-lg border border-arda-danger-border bg-arda-bg-secondary p-8">
+          <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-arda-danger-soft">
+            <Icons.AlertCircle className="w-8 h-8 text-arda-danger-text" />
           </div>
           <h3 className="text-lg font-bold text-arda-text-primary mb-2">Something went wrong</h3>
           <p className="text-sm text-arda-text-muted text-center max-w-md mb-4">

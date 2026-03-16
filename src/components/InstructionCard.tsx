@@ -23,7 +23,7 @@ export const InstructionCard: React.FC<InstructionCardProps> = ({
       <div className="flex items-start gap-3">
         <div
           className={[
-            'flex items-center justify-center text-arda-accent bg-orange-50 border border-orange-100',
+            'flex items-center justify-center border border-arda-warning-border bg-arda-warning-bg text-arda-accent',
             isCompact ? 'w-8 h-8 rounded-lg' : 'w-9 h-9 rounded-xl',
           ].join(' ')}
         >

@@ -64,7 +64,7 @@ describe('UrlScrapeStep', () => {
     expect(screen.getByRole('button', { name: /Scrape URLs/i })).toBeDisabled();
   });
 
-  it('imports only approved rows and preserves manual edits', async () => {
+  it('auto-approves successful rows and preserves manual edits', async () => {
     const user = userEvent.setup();
     const onImportItems = vi.fn();
 
@@ -112,25 +112,31 @@ describe('UrlScrapeStep', () => {
     expect(await screen.findByLabelText('Item name for https://example.com/a')).toHaveValue('Widget A');
     expect(screen.getByText(/1 success/i)).toBeInTheDocument();
     expect(screen.getByText(/1 partial/i)).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'Approve https://example.com/a' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: 'Approve https://example.com/b' })).not.toBeChecked();
 
-    await user.click(screen.getByRole('button', { name: /Import approved/i }));
-    expect(screen.getByText(/approve at least one row/i)).toBeInTheDocument();
-    expect(onImportItems).not.toHaveBeenCalled();
+    await user.click(screen.getAllByRole('button', { name: /Import approved rows/i })[0]);
+    expect(onImportItems).toHaveBeenCalledTimes(1);
+    expect(onImportItems.mock.calls[0][0]).toHaveLength(1);
+    expect(onImportItems.mock.calls[0][0][0]).toMatchObject({
+      sourceUrl: 'https://example.com/a',
+      supplier: 'Acme',
+    });
 
     const supplierInput = screen.getByLabelText('Supplier for https://example.com/a');
     await user.clear(supplierInput);
     await user.type(supplierInput, 'Acme Updated');
     await user.click(screen.getByRole('button', { name: /Add https:\/\/example\.com\/a to Master List/i }));
 
-    expect(onImportItems).toHaveBeenCalledTimes(1);
-    expect(onImportItems.mock.calls[0][0]).toHaveLength(1);
-    expect(onImportItems.mock.calls[0][0][0]).toMatchObject({
+    expect(onImportItems).toHaveBeenCalledTimes(2);
+    expect(onImportItems.mock.calls[1][0]).toHaveLength(1);
+    expect(onImportItems.mock.calls[1][0][0]).toMatchObject({
       sourceUrl: 'https://example.com/a',
       supplier: 'Acme Updated',
     });
   });
 
-  it('adds all success/partial rows to the import list', async () => {
+  it('adds only successful rows to the import list when using the bulk approve action', async () => {
     const user = userEvent.setup();
     const onImportItems = vi.fn();
 
@@ -191,12 +197,12 @@ describe('UrlScrapeStep', () => {
     );
     await user.click(screen.getByRole('button', { name: /Scrape URLs/i }));
 
-    await user.click(screen.getByRole('button', { name: /Add all/i }));
+    await user.click(screen.getByRole('button', { name: /Approve all eligible rows/i }));
 
     expect(onImportItems).toHaveBeenCalledTimes(1);
-    expect(onImportItems.mock.calls[0][0]).toHaveLength(2);
+    expect(onImportItems.mock.calls[0][0]).toHaveLength(1);
     expect(onImportItems.mock.calls[0][0][0].sourceUrl).toBe('https://example.com/a');
-    expect(onImportItems.mock.calls[0][0][1].sourceUrl).toBe('https://example.com/b');
+    expect(screen.getByRole('checkbox', { name: 'Approve https://example.com/b' })).not.toBeChecked();
   });
 
   it('appends new scraped rows instead of replacing previous results', async () => {

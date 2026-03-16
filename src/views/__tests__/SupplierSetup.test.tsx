@@ -157,12 +157,12 @@ describe('SupplierSetup supplier import behavior', () => {
       />,
     );
 
-    await waitFor(() => expect(getLastCanProceedValue(onCanProceed)).toBe(false));
+    await waitFor(() => expect(getLastCanProceedValue(onCanProceed)).toBe(true));
 
     await user.click(screen.getByText('Fastenal'));
 
     expect(mocks.startJob).not.toHaveBeenCalled();
-    await waitFor(() => expect(getLastCanProceedValue(onCanProceed)).toBe(false));
+    await waitFor(() => expect(getLastCanProceedValue(onCanProceed)).toBe(true));
   });
 
   it('does not show the continue anytime popup by default', () => {
@@ -194,14 +194,13 @@ describe('SupplierSetup supplier import behavior', () => {
     await user.click(screen.getByText('Grainger'));
     await user.click(screen.getByRole('button', { name: 'Import 2 Suppliers' }));
 
-    expect(await screen.findByRole('dialog', { name: 'Continue anytime' })).toBeInTheDocument();
+    expect((await screen.findAllByText('Scanning optional suppliers')).length).toBeGreaterThan(0);
     await waitFor(() => expect(mocks.startJob).toHaveBeenCalledTimes(1));
     expect(mocks.startJob).toHaveBeenCalledWith(['fastenal.com', 'grainger.com'], 'other');
   });
 
-  it('shows the continue anytime popup only once per page visit', async () => {
+  it('shows inline background-import guidance instead of the legacy popup', async () => {
     const user = userEvent.setup();
-    mocks.startJob.mockRejectedValueOnce(new Error('Failed to start selected supplier import.'));
 
     render(
       <SupplierSetup
@@ -214,17 +213,11 @@ describe('SupplierSetup supplier import behavior', () => {
 
     await user.click(screen.getByText('Fastenal'));
     await user.click(screen.getByRole('button', { name: 'Import 1 Supplier' }));
-    expect(await screen.findByRole('dialog', { name: 'Continue anytime' })).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Got it' }));
-    expect(screen.queryByRole('dialog', { name: 'Continue anytime' })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Import 1 Supplier' }));
-    await waitFor(() => expect(mocks.startJob).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('This scan keeps running if you move to the next step.')).toBeInTheDocument();
     expect(screen.queryByRole('dialog', { name: 'Continue anytime' })).not.toBeInTheDocument();
   });
 
-  it('renders batching callout between Industrial Suppliers and Other Suppliers', () => {
+  it('renders the operational progress panel above the supplier sections', async () => {
     render(
       <SupplierSetup
         onScanComplete={vi.fn()}
@@ -234,15 +227,13 @@ describe('SupplierSetup supplier import behavior', () => {
       />,
     );
 
+    const [progressHeading] = await screen.findAllByText('Ready for optional suppliers');
     const industrialHeading = screen.getByRole('heading', { name: 'Industrial Suppliers' });
-    const batchingCallout = screen.getByText('A word about batching...');
-    const otherHeading = screen.getByRole('heading', { name: 'Other Suppliers' });
 
-    expect(industrialHeading.compareDocumentPosition(batchingCallout) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(batchingCallout.compareDocumentPosition(otherHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(progressHeading.compareDocumentPosition(industrialHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('keeps proceed disabled until other import is explicitly started', async () => {
+  it('allows proceed once required email scans are complete, even before optional import starts', async () => {
     const user = userEvent.setup();
     const onCanProceed = vi.fn();
 
@@ -255,10 +246,10 @@ describe('SupplierSetup supplier import behavior', () => {
       />,
     );
 
-    await waitFor(() => expect(getLastCanProceedValue(onCanProceed)).toBe(false));
+    await waitFor(() => expect(getLastCanProceedValue(onCanProceed)).toBe(true));
 
     await user.click(screen.getByText('Fastenal'));
-    await waitFor(() => expect(getLastCanProceedValue(onCanProceed)).toBe(false));
+    await waitFor(() => expect(getLastCanProceedValue(onCanProceed)).toBe(true));
 
     await user.click(screen.getByRole('button', { name: 'Import 1 Supplier' }));
     await waitFor(() => expect(getLastCanProceedValue(onCanProceed)).toBe(true));
@@ -279,7 +270,7 @@ describe('SupplierSetup supplier import behavior', () => {
     await waitFor(() => expect(getLastCanProceedValue(onCanProceed)).toBe(true));
   });
 
-  it('shows an error and keeps proceed disabled when import start fails', async () => {
+  it('shows an error but still allows proceed when optional import start fails', async () => {
     const user = userEvent.setup();
     const onCanProceed = vi.fn();
     mocks.startJob.mockRejectedValueOnce(new Error('Failed to start selected supplier import.'));
@@ -297,7 +288,7 @@ describe('SupplierSetup supplier import behavior', () => {
     await user.click(screen.getByRole('button', { name: 'Import 1 Supplier' }));
 
     expect(await screen.findByText('Failed to start selected supplier import.')).toBeInTheDocument();
-    await waitFor(() => expect(getLastCanProceedValue(onCanProceed)).toBe(false));
+    await waitFor(() => expect(getLastCanProceedValue(onCanProceed)).toBe(true));
   });
 
 });

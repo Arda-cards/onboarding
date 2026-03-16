@@ -26,37 +26,37 @@ const getCategoryConfig = (category: DiscoveredSupplier['category']) => {
     case 'industrial':
       return {
         label: 'Industrial',
-        color: 'text-blue-400',
-        bgColor: 'bg-blue-500/20',
-        borderColor: 'border-blue-500/50',
+        color: 'text-arda-info-text',
+        bgColor: 'bg-arda-info-soft',
+        borderColor: 'border-arda-info-border',
       };
     case 'retail':
       return {
         label: 'Retail',
-        color: 'text-green-400',
-        bgColor: 'bg-green-500/20',
-        borderColor: 'border-green-500/50',
+        color: 'text-arda-success-text',
+        bgColor: 'bg-arda-success-soft',
+        borderColor: 'border-arda-success-border',
       };
     case 'office':
       return {
         label: 'Office',
-        color: 'text-purple-400',
-        bgColor: 'bg-purple-500/20',
-        borderColor: 'border-purple-500/50',
+        color: 'text-arda-text-secondary',
+        bgColor: 'bg-arda-bg-secondary',
+        borderColor: 'border-arda-border',
       };
     case 'food':
       return {
         label: 'Food',
-        color: 'text-orange-400',
-        bgColor: 'bg-orange-500/20',
-        borderColor: 'border-orange-500/50',
+        color: 'text-arda-warning-text',
+        bgColor: 'bg-arda-warning-soft',
+        borderColor: 'border-arda-warning-border',
       };
     case 'electronics':
       return {
         label: 'Electronics',
-        color: 'text-cyan-400',
-        bgColor: 'bg-cyan-500/20',
-        borderColor: 'border-cyan-500/50',
+        color: 'text-arda-info-text',
+        bgColor: 'bg-arda-info-soft',
+        borderColor: 'border-arda-info-border',
       };
     case 'unknown':
     default:
@@ -151,7 +151,7 @@ export const SupplierConfig: React.FC<SupplierConfigProps> = ({
                 key={supplier.domain}
                 className={`bg-white border rounded-xl shadow-arda p-5 transition-all ${
                   supplier.isRecommended
-                    ? 'border-arda-accent/50 bg-orange-50/30'
+                    ? 'border-arda-accent/50 bg-arda-warning-bg'
                     : 'border-arda-border'
                 } ${isDisabled ? 'opacity-60' : ''}`}
               >
@@ -215,9 +215,9 @@ export const SupplierConfig: React.FC<SupplierConfigProps> = ({
                                 <div
                                   className={`h-full rounded-full transition-all absolute left-0 top-0 ${
                                     supplier.score >= 70
-                                      ? 'bg-green-500'
+                                      ? 'bg-arda-success'
                                       : supplier.score >= 40
-                                      ? 'bg-yellow-500'
+                                      ? 'bg-arda-warning'
                                       : 'bg-arda-text-muted'
                                   }`}
                                   style={{ width: `${Math.min(supplier.score, 100)}%` }}

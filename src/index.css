@@ -73,7 +73,7 @@ body {
 
 .btn-arda-secondary {
   @apply bg-arda-text-primary text-white px-4 py-2 rounded-arda font-medium text-sm;
-  @apply hover:bg-gray-800 transition-colors duration-200;
+  @apply hover:bg-arda-text-secondary transition-colors duration-200;
 }
 
 .btn-arda-outline {
@@ -128,7 +128,7 @@ body {
 
 .sidebar-arda-item-active {
   @apply flex items-center gap-3 px-3 py-2 rounded-arda;
-  @apply bg-orange-50 text-arda-accent font-medium;
+  @apply bg-arda-accent/10 text-arda-accent font-medium;
 }
 
 /* Animation utilities */

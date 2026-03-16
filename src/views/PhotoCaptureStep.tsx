@@ -277,7 +277,7 @@ export const PhotoCaptureStep: React.FC<PhotoCaptureStepProps> = ({
         <div
           className={`
             card-arda p-6 space-y-4 transition-colors cursor-pointer
-            ${dragOver ? 'border-orange-300 bg-orange-50' : 'hover:border-arda-border-hover'}
+            ${dragOver ? 'border-arda-warning-border bg-arda-warning-bg' : 'hover:border-arda-border-hover'}
           `}
           onDragOver={(event) => { event.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
@@ -285,7 +285,7 @@ export const PhotoCaptureStep: React.FC<PhotoCaptureStepProps> = ({
           onClick={() => fileInputRef.current?.click()}
         >
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 bg-orange-50 rounded-2xl flex items-center justify-center border border-orange-100">
+            <div className="w-12 h-12 bg-arda-warning-bg rounded-2xl flex items-center justify-center border border-arda-warning-border">
               <Icons.Upload className="w-6 h-6 text-arda-accent" />
             </div>
             <div>
