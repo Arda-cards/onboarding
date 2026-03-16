@@ -18,16 +18,16 @@ interface OrderTimelineProps {
 
 // Color palette for suppliers
 const SUPPLIER_COLORS = [
-  '#f97316', // orange-500
-  '#3b82f6', // blue-500
-  '#10b981', // green-500
-  '#8b5cf6', // purple-500
-  '#ec4899', // pink-500
-  '#06b6d4', // cyan-500
-  '#f59e0b', // amber-500
-  '#ef4444', // red-500
-  '#14b8a6', // teal-500
-  '#6366f1', // indigo-500
+  'var(--arda-series-1)',
+  'var(--arda-series-2)',
+  'var(--arda-series-3)',
+  'var(--arda-series-4)',
+  'var(--arda-series-5)',
+  'var(--arda-series-6)',
+  'var(--arda-series-7)',
+  'var(--arda-series-8)',
+  'var(--arda-series-9)',
+  'var(--arda-series-10)',
 ];
 
 interface ChartDataPoint {
@@ -164,32 +164,32 @@ export const OrderTimeline: React.FC<OrderTimelineProps> = ({
         <ScatterChart
           margin={{ top: 20, right: 30, bottom: 60, left: 60 }}
         >
-          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" opacity={0.5} />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--arda-border)" opacity={0.5} />
           <XAxis
             type="number"
             dataKey="x"
             domain={['dataMin', 'dataMax']}
             tickFormatter={formatXAxis}
-            stroke="#4B5563"
+            stroke="var(--arda-text-secondary)"
             style={{ fontSize: '12px' }}
             label={{
               value: 'Date',
               position: 'insideBottom',
               offset: -10,
-              style: { textAnchor: 'middle', fill: '#4B5563', fontSize: '14px' },
+              style: { textAnchor: 'middle', fill: 'var(--arda-text-secondary)', fontSize: '14px' },
             }}
           />
           <YAxis
             type="number"
             dataKey="y"
             tickFormatter={formatYAxis}
-            stroke="#4B5563"
+            stroke="var(--arda-text-secondary)"
             style={{ fontSize: '12px' }}
             label={{
               value: 'Order Value',
               angle: -90,
               position: 'insideLeft',
-              style: { textAnchor: 'middle', fill: '#4B5563', fontSize: '14px' },
+              style: { textAnchor: 'middle', fill: 'var(--arda-text-secondary)', fontSize: '14px' },
             }}
           />
           <Tooltip content={<CustomTooltip />} />
@@ -197,7 +197,7 @@ export const OrderTimeline: React.FC<OrderTimelineProps> = ({
             wrapperStyle={{ paddingTop: '20px' }}
             iconType="circle"
             formatter={(value) => (
-              <span style={{ color: '#4B5563', fontSize: '12px' }}>{value}</span>
+              <span style={{ color: 'var(--arda-text-secondary)', fontSize: '12px' }}>{value}</span>
             )}
           />
           {supplierData.map((supplier) => {

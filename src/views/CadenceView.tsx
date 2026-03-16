@@ -22,6 +22,18 @@ type VelocityDatum = {
 };
 
 export const CadenceView: React.FC<CadenceViewProps> = ({ inventory }) => {
+  const chartGridStroke = 'var(--arda-border)';
+  const chartAxisStroke = 'var(--arda-text-secondary)';
+  const chartCursorFill = 'var(--arda-bg-tertiary)';
+  const chartTooltipStyle = {
+    background: 'var(--arda-bg)',
+    border: '1px solid var(--arda-border)',
+    color: 'var(--arda-text-primary)',
+  };
+  const cadenceFill = 'var(--arda-info)';
+  const cadenceUrgentFill = 'var(--arda-danger)';
+  const velocityFill = 'var(--arda-success)';
+
   // Cadence chart data (days between orders)
   const cadenceData: CadenceDatum[] = inventory
     .map(item => ({
@@ -145,28 +157,28 @@ export const CadenceView: React.FC<CadenceViewProps> = ({ inventory }) => {
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={cadenceData} layout="vertical" margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" horizontal={false} />
-                <XAxis type="number" stroke="#6B7280" fontSize={12} tickLine={false} axisLine={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} horizontal={false} />
+                <XAxis type="number" stroke={chartAxisStroke} fontSize={12} tickLine={false} axisLine={false} />
                 <YAxis
                   dataKey="name"
                   type="category"
-                  stroke="#6B7280"
+                  stroke={chartAxisStroke}
                   fontSize={10}
                   tickLine={false}
                   axisLine={false}
                   width={100}
                 />
                 <Tooltip
-                  cursor={{ fill: '#F3F4F6' }}
-                  contentStyle={{ background: '#FFFFFF', border: '1px solid #E5E7EB', color: '#111827' }}
+                  cursor={{ fill: chartCursorFill }}
+                  contentStyle={chartTooltipStyle}
                   formatter={(value, _name, props) => {
                     const payload = props?.payload as CadenceDatum;
                     return [`${value} days (${payload.orderCount} orders)`, payload.fullName];
                   }}
                 />
-                <Bar dataKey="cadence" fill="#58a6ff" radius={[0, 4, 4, 0]} barSize={18}>
+                <Bar dataKey="cadence" fill={cadenceFill} radius={[0, 4, 4, 0]} barSize={18}>
                   {cadenceData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.cadence < 14 ? '#f85149' : '#58a6ff'} />
+                    <Cell key={`cell-${index}`} fill={entry.cadence < 14 ? cadenceUrgentFill : cadenceFill} />
                   ))}
                 </Bar>
               </BarChart>
@@ -181,26 +193,26 @@ export const CadenceView: React.FC<CadenceViewProps> = ({ inventory }) => {
           <div className="h-72">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={velocityData} layout="vertical" margin={{ top: 5, right: 30, left: 10, bottom: 5 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" horizontal={false} />
-                <XAxis type="number" stroke="#6B7280" fontSize={12} tickLine={false} axisLine={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} horizontal={false} />
+                <XAxis type="number" stroke={chartAxisStroke} fontSize={12} tickLine={false} axisLine={false} />
                 <YAxis
                   dataKey="name"
                   type="category"
-                  stroke="#6B7280"
+                  stroke={chartAxisStroke}
                   fontSize={10}
                   tickLine={false}
                   axisLine={false}
                   width={100}
                 />
                 <Tooltip
-                  cursor={{ fill: '#F3F4F6' }}
-                  contentStyle={{ background: '#FFFFFF', border: '1px solid #E5E7EB', color: '#111827' }}
+                  cursor={{ fill: chartCursorFill }}
+                  contentStyle={chartTooltipStyle}
                   formatter={(value, _name, props) => {
                     const payload = props?.payload as VelocityDatum;
                     return [`${value} units/day`, payload.fullName];
                   }}
                 />
-                <Bar dataKey="velocity" fill="#3fb950" radius={[0, 4, 4, 0]} barSize={18} />
+                <Bar dataKey="velocity" fill={velocityFill} radius={[0, 4, 4, 0]} barSize={18} />
               </BarChart>
             </ResponsiveContainer>
           </div>

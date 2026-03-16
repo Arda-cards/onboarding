@@ -23,7 +23,7 @@ interface SidebarProps {
 // Arda logo SVG
 const ArdaLogo = ({ className = "h-7 w-auto" }: { className?: string }) => (
   <svg viewBox="0 0 80 28" className={className}>
-    <text x="0" y="22" fill="#FC5A29" fontSize="24" fontWeight="bold" fontFamily="system-ui, -apple-system, sans-serif">
+    <text x="0" y="22" fill="currentColor" fontSize="24" fontWeight="bold" fontFamily="system-ui, -apple-system, sans-serif">
       arda
     </text>
   </svg>
@@ -43,7 +43,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* Header */}
       <div className="p-6 border-b border-arda-border">
         <div className="flex items-center gap-2">
-          <ArdaLogo />
+          <ArdaLogo className="h-7 w-auto text-arda-accent" />
           <span className="text-xs font-medium text-arda-text-muted uppercase tracking-wider">{APP_DESCRIPTION}</span>
         </div>
         

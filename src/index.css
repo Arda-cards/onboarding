@@ -8,13 +8,71 @@
 :root {
   --arda-accent: #FC5A29;
   --arda-accent-hover: #E54D1F;
+  --arda-accent-soft: rgba(252, 90, 41, 0.08);
+  --arda-accent-soft-strong: rgba(252, 90, 41, 0.15);
+  --arda-accent-soft-border: rgba(252, 90, 41, 0.25);
+  --arda-accent-glow: rgba(252, 90, 41, 0.08);
+  --arda-accent-pulse: rgba(252, 90, 41, 0.4);
+  --arda-accent-pulse-end: rgba(252, 90, 41, 0);
+  --arda-accent-ring: 0 0 0 2px rgba(252, 90, 41, 0.2);
   --arda-bg: #FFFFFF;
   --arda-bg-secondary: #F9FAFB;
   --arda-bg-tertiary: #F3F4F6;
   --arda-border: #E5E7EB;
+  --arda-border-hover: #D1D5DB;
   --arda-text-primary: #111827;
   --arda-text-secondary: #4B5563;
   --arda-text-muted: #9CA3AF;
+  --arda-info: #3B82F6;
+  --arda-info-bg: #EFF6FF;
+  --arda-info-border: #BFDBFE;
+  --arda-info-text: #1D4ED8;
+  --arda-warning: #F59E0B;
+  --arda-warning-bg: #FFFBEB;
+  --arda-warning-border: #FDE68A;
+  --arda-warning-text: #92400E;
+  --arda-success: #22C55E;
+  --arda-success-bg: #ECFDF5;
+  --arda-success-border: #86EFAC;
+  --arda-success-text: #15803D;
+  --arda-danger: #EF4444;
+  --arda-danger-bg: #FEF2F2;
+  --arda-danger-border: #FECACA;
+  --arda-danger-text: #B91C1C;
+  --arda-series-1: var(--arda-accent);
+  --arda-series-2: var(--arda-info);
+  --arda-series-3: var(--arda-success);
+  --arda-series-4: #8B5CF6;
+  --arda-series-5: #EC4899;
+  --arda-series-6: #06B6D4;
+  --arda-series-7: var(--arda-warning);
+  --arda-series-8: var(--arda-danger);
+  --arda-series-9: #14B8A6;
+  --arda-series-10: #6366F1;
+  --arda-overlay: rgba(15, 23, 42, 0.3);
+  --arda-mesh-warm: rgba(252, 90, 41, 0.16);
+  --arda-mesh-cool: rgba(59, 130, 246, 0.16);
+  --arda-mesh-violet: rgba(99, 102, 241, 0.18);
+  --arda-glass-bg: rgba(255, 255, 255, 0.82);
+  --arda-glass-bg-soft: rgba(255, 255, 255, 0.8);
+  --arda-glass-border: rgba(229, 231, 235, 0.7);
+  --arda-shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.1), 0 1px 2px -1px rgba(15, 23, 42, 0.1);
+  --arda-shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.1), 0 2px 4px -2px rgba(15, 23, 42, 0.1);
+  --arda-shadow-glass: 0 25px 80px rgba(15, 23, 42, 0.06), 0 8px 30px var(--arda-accent-glow);
+  --arda-pill-gradient: linear-gradient(120deg, var(--arda-accent-soft-strong), rgba(59, 130, 246, 0.12));
+  --arda-mesh-gradient: radial-gradient(circle at 20% 20%, var(--arda-mesh-warm), transparent 25%),
+    radial-gradient(circle at 80% 10%, var(--arda-mesh-cool), transparent 22%),
+    radial-gradient(circle at 70% 80%, var(--arda-mesh-violet), transparent 28%),
+    linear-gradient(135deg, var(--arda-bg) 0%, var(--arda-bg-secondary) 40%, var(--arda-bg-tertiary) 100%);
+  --arda-shimmer-gradient: linear-gradient(
+    90deg,
+    rgba(147, 197, 253, 0.6),
+    rgba(96, 165, 250, 1),
+    rgba(59, 130, 246, 1),
+    rgba(96, 165, 250, 1),
+    rgba(147, 197, 253, 0.6)
+  );
+  --arda-text-gradient: linear-gradient(135deg, var(--arda-accent) 0%, var(--arda-info) 100%);
 }
 
 body {
@@ -25,24 +83,21 @@ body {
 
 /* Arda proprietary look */
 .arda-mesh {
-  background: radial-gradient(circle at 20% 20%, rgba(252, 90, 41, 0.16), transparent 25%),
-              radial-gradient(circle at 80% 10%, rgba(59, 130, 246, 0.16), transparent 22%),
-              radial-gradient(circle at 70% 80%, rgba(99, 102, 241, 0.18), transparent 28%),
-              linear-gradient(135deg, #ffffff 0%, #f9fafb 40%, #f3f4f6 100%);
+  background: var(--arda-mesh-gradient);
 }
 
 .arda-glass {
   backdrop-filter: blur(14px);
-  background: rgba(255, 255, 255, 0.82);
-  border: 1px solid rgba(229, 231, 235, 0.7);
-  box-shadow: 0 25px 80px rgba(15, 23, 42, 0.06), 0 8px 30px rgba(252, 90, 41, 0.08);
+  background: var(--arda-glass-bg);
+  border: 1px solid var(--arda-glass-border);
+  box-shadow: var(--arda-shadow-glass);
 }
 
 .arda-pill {
   @apply inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold;
-  background: linear-gradient(120deg, rgba(252, 90, 41, 0.15), rgba(59, 130, 246, 0.12));
-  color: #FC5A29;
-  border: 1px solid rgba(252, 90, 41, 0.25);
+  background: var(--arda-pill-gradient);
+  color: var(--arda-accent);
+  border: 1px solid var(--arda-accent-soft-border);
 }
 
 /* Custom Scrollbar - Light theme */
@@ -56,12 +111,12 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #D1D5DB;
+  background: var(--arda-border-hover);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #9CA3AF;
+  background: var(--arda-text-muted);
 }
 
 /* Arda Button Styles */
@@ -177,8 +232,8 @@ body {
 }
 
 @keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(252, 90, 41, 0.4); }
-  50% { box-shadow: 0 0 0 15px rgba(252, 90, 41, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 var(--arda-accent-pulse); }
+  50% { box-shadow: 0 0 0 15px var(--arda-accent-pulse-end); }
 }
 
 @keyframes shimmer {
@@ -209,13 +264,7 @@ body {
 }
 
 .animate-shimmer {
-  background: linear-gradient(90deg, 
-    rgba(147, 197, 253, 0.6), 
-    rgba(96, 165, 250, 1), 
-    rgba(59, 130, 246, 1),
-    rgba(96, 165, 250, 1),
-    rgba(147, 197, 253, 0.6)
-  );
+  background: var(--arda-shimmer-gradient);
   background-size: 200% 100%;
   animation: shimmer 1.5s ease-in-out infinite;
 }
@@ -249,7 +298,7 @@ body {
 
 /* Gradient text */
 .text-gradient {
-  background: linear-gradient(135deg, #FC5A29 0%, #3B82F6 100%);
+  background: var(--arda-text-gradient);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -257,7 +306,7 @@ body {
 
 /* Glass effect */
 .glass {
-  background: rgba(255, 255, 255, 0.8);
+  background: var(--arda-glass-bg-soft);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
 }
