@@ -33,10 +33,6 @@ vi.mock('../OnboardingWelcomeStep', () => ({
   ),
 }));
 
-vi.mock('../BarcodeScanStep', () => ({
-  BarcodeScanStep: () => <div>barcode-step</div>,
-}));
-
 vi.mock('../IntegrationsStep', () => ({
   IntegrationsStep: () => <div>integrations-step</div>,
 }));
@@ -78,6 +74,10 @@ vi.mock('../UrlScrapeStep', () => ({
       </button>
     </div>
   ),
+}));
+
+vi.mock('../BarcodeScanStep', () => ({
+  BarcodeScanStep: () => <div>barcode-step</div>,
 }));
 
 vi.mock('../PhotoCaptureStep', () => ({

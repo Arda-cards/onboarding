@@ -350,7 +350,7 @@ function hmac(key: Buffer | string, value: string): Buffer {
 }
 
 function getAmzDate(date = new Date()): string {
-  return date.toISOString().replace(/[:\-]|\.\d{3}/g, '');
+  return date.toISOString().replace(/[:-]|\.\d{3}/g, '');
 }
 
 function getDateStamp(amzDate: string): string {

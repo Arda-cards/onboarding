@@ -161,7 +161,7 @@ const ONBOARDING_STEPS: StepConfig[] = [
   },
   {
     id: 'photo',
-    number: 6,
+    number: 5,
     title: 'Images',
     description: 'Photograph items with labels',
     tipsTitle: 'What to do',
@@ -178,7 +178,7 @@ const ONBOARDING_STEPS: StepConfig[] = [
   },
   {
     id: 'csv',
-    number: 7,
+    number: 6,
     title: 'CSV',
     description: 'Import from spreadsheet',
     tipsTitle: 'What to do',
@@ -195,7 +195,7 @@ const ONBOARDING_STEPS: StepConfig[] = [
   },
   {
     id: 'masterlist',
-    number: 8,
+    number: 7,
     title: 'Review',
     description: 'Review and sync items',
     tipsTitle: 'What to do',
@@ -634,31 +634,15 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
     // Don't auto-advance - user will click Continue when ready
   }, []);
 
-  // Handle barcode scan
+  // Handle photo capture
   const handleBarcodeScanned = useCallback((barcode: ScannedBarcode) => {
     setScannedBarcodes(prev => {
-      const byIdIndex = prev.findIndex(item => item.id === barcode.id);
-      if (byIdIndex >= 0) {
-        const existing = prev[byIdIndex];
-        const merged = { ...existing, ...barcode, id: existing.id };
-        const hasChanged = JSON.stringify(existing) !== JSON.stringify(merged);
-        if (!hasChanged) return prev;
-        const next = [...prev];
-        next[byIdIndex] = merged;
-        return next;
+      const existingIndex = prev.findIndex(item => item.id === barcode.id || item.barcode === barcode.barcode);
+      if (existingIndex >= 0) {
+        const updated = [...prev];
+        updated[existingIndex] = barcode;
+        return updated;
       }
-
-      const byBarcodeIndex = prev.findIndex(item => item.barcode === barcode.barcode);
-      if (byBarcodeIndex >= 0) {
-        const existing = prev[byBarcodeIndex];
-        const merged = { ...existing, ...barcode, id: barcode.id };
-        const hasChanged = JSON.stringify(existing) !== JSON.stringify(merged);
-        if (!hasChanged) return prev;
-        const next = [...prev];
-        next[byBarcodeIndex] = merged;
-        return next;
-      }
-
       return [...prev, barcode];
     });
   }, []);
@@ -1169,14 +1153,9 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
           sessionId={mobileSessionId}
           scannedBarcodes={scannedBarcodes}
           onBarcodeScanned={handleBarcodeScanned}
-          onComplete={() => handleStepComplete('barcode')}
-          onBack={() => {
-            setTipsOpenForStep(null);
-            setCurrentStep('url');
-          }}
         />
       )}
-      
+
       {currentStep === 'photo' && (
         <PhotoCaptureStep
           sessionId={mobileSessionId}
