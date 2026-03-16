@@ -401,13 +401,13 @@ export const CSVReconcileStep: React.FC<CSVReconcileStepProps> = ({
   const getSourceBadge = (source: ReconciliationItem['source']) => {
     switch (source) {
       case 'email':
-        return <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-xs rounded">📧 Email</span>;
+        return <span className="rounded px-1.5 py-0.5 text-xs bg-arda-info-soft text-arda-info-text">📧 Email</span>;
       case 'barcode':
-        return <span className="px-1.5 py-0.5 bg-green-100 text-green-700 text-xs rounded">📊 Barcode</span>;
+        return <span className="rounded px-1.5 py-0.5 text-xs bg-arda-success-soft text-arda-success-text">📊 Barcode</span>;
       case 'photo':
-        return <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 text-xs rounded">📷 Photo</span>;
+        return <span className="rounded px-1.5 py-0.5 text-xs bg-arda-bg-secondary text-arda-text-secondary">📷 Photo</span>;
       case 'csv':
-        return <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-xs rounded">📄 CSV</span>;
+        return <span className="rounded px-1.5 py-0.5 text-xs bg-arda-warning-soft text-arda-warning-text">📄 CSV</span>;
     }
   };
 
@@ -416,22 +416,22 @@ export const CSVReconcileStep: React.FC<CSVReconcileStepProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Review & Push to Arda</h1>
-          <p className="text-gray-500 mt-1">
+          <h1 className="text-2xl font-bold text-arda-text-primary">Review & Push to Arda</h1>
+          <p className="mt-1 text-arda-text-muted">
             Deduplicate, reconcile fields, and sync items to your Arda inventory
           </p>
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
-            className="px-4 py-2 text-gray-600 hover:text-gray-900 transition-colors"
+            className="px-4 py-2 text-arda-text-secondary hover:text-arda-text-primary transition-colors"
           >
             ← Back
           </button>
           <button
             onClick={pushToArda}
             disabled={isPushing || stats.approved === 0}
-            className="px-6 py-2 bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white rounded-lg font-medium transition-colors flex items-center gap-2"
+            className="btn-arda-primary px-6 py-2 rounded-lg flex items-center gap-2 disabled:bg-arda-border disabled:text-white disabled:cursor-not-allowed"
           >
             {isPushing ? (
               <>
@@ -453,61 +453,61 @@ export const CSVReconcileStep: React.FC<CSVReconcileStepProps> = ({
         <button
           onClick={() => setFilter('all')}
           className={`p-4 rounded-lg border-2 transition-colors ${
-            filter === 'all' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 bg-white hover:border-gray-300'
+            filter === 'all' ? 'border-arda-info-border bg-arda-info-bg' : 'border-arda-border bg-white hover:border-arda-border-hover'
           }`}
         >
-          <div className="text-2xl font-bold text-gray-900">{stats.total}</div>
-          <div className="text-sm text-gray-500">Total Items</div>
+          <div className="text-2xl font-bold text-arda-text-primary">{stats.total}</div>
+          <div className="text-sm text-arda-text-muted">Total Items</div>
         </button>
         <button
           onClick={() => setFilter('duplicates')}
           className={`p-4 rounded-lg border-2 transition-colors ${
-            filter === 'duplicates' ? 'border-yellow-500 bg-yellow-50' : 'border-gray-200 bg-white hover:border-gray-300'
+            filter === 'duplicates' ? 'border-arda-warning-border bg-arda-warning-bg' : 'border-arda-border bg-white hover:border-arda-border-hover'
           }`}
         >
-          <div className="text-2xl font-bold text-yellow-600">{stats.duplicates}</div>
-          <div className="text-sm text-gray-500">Duplicates</div>
+          <div className="text-2xl font-bold text-arda-warning-text">{stats.duplicates}</div>
+          <div className="text-sm text-arda-text-muted">Duplicates</div>
         </button>
         <button
           onClick={() => setFilter('needs_review')}
           className={`p-4 rounded-lg border-2 transition-colors ${
-            filter === 'needs_review' ? 'border-orange-500 bg-orange-50' : 'border-gray-200 bg-white hover:border-gray-300'
+            filter === 'needs_review' ? 'border-arda-warning-border bg-arda-warning-bg' : 'border-arda-border bg-white hover:border-arda-border-hover'
           }`}
         >
-          <div className="text-2xl font-bold text-orange-600">{stats.needsReview}</div>
-          <div className="text-sm text-gray-500">Needs Review</div>
+          <div className="text-2xl font-bold text-arda-warning-text">{stats.needsReview}</div>
+          <div className="text-sm text-arda-text-muted">Needs Review</div>
         </button>
         <button
           onClick={() => setFilter('approved')}
           className={`p-4 rounded-lg border-2 transition-colors ${
-            filter === 'approved' ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white hover:border-gray-300'
+            filter === 'approved' ? 'border-arda-success-border bg-arda-success-bg' : 'border-arda-border bg-white hover:border-arda-border-hover'
           }`}
         >
-          <div className="text-2xl font-bold text-green-600">{stats.approved}</div>
-          <div className="text-sm text-gray-500">Approved</div>
+          <div className="text-2xl font-bold text-arda-success-text">{stats.approved}</div>
+          <div className="text-sm text-arda-text-muted">Approved</div>
         </button>
-        <div className="p-4 rounded-lg border-2 border-gray-200 bg-white">
-          <div className="text-2xl font-bold text-gray-400">{stats.excluded}</div>
-          <div className="text-sm text-gray-500">Excluded</div>
+        <div className="rounded-lg border-2 border-arda-border bg-white p-4">
+          <div className="text-2xl font-bold text-arda-text-muted">{stats.excluded}</div>
+          <div className="text-sm text-arda-text-muted">Excluded</div>
         </div>
       </div>
 
       {/* Actions bar */}
-      <div className="flex items-center gap-4 bg-white rounded-lg border border-gray-200 p-4">
+      <div className="flex items-center gap-4 rounded-lg border border-arda-border bg-white p-4">
         <div className="flex-1 relative">
-          <Icons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+          <Icons.Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-arda-text-muted" />
           <input
             type="text"
             placeholder="Search items..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="w-full rounded-lg border border-arda-border py-2 pl-10 pr-4 focus:outline-none focus:ring-2 focus:ring-arda-info"
           />
         </div>
         
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="px-4 py-2 border border-gray-200 rounded-lg hover:bg-gray-50 flex items-center gap-2"
+          className="btn-arda-outline px-4 py-2 rounded-lg flex items-center gap-2"
         >
           <Icons.Upload className="w-4 h-4" />
           Upload CSV
@@ -523,17 +523,17 @@ export const CSVReconcileStep: React.FC<CSVReconcileStepProps> = ({
         
         {selectedItems.size > 0 && (
           <>
-            <div className="h-6 w-px bg-gray-200" />
-            <span className="text-sm text-gray-500">{selectedItems.size} selected</span>
+            <div className="h-6 w-px bg-arda-border" />
+            <span className="text-sm text-arda-text-muted">{selectedItems.size} selected</span>
             <button
               onClick={approveSelected}
-              className="px-3 py-1.5 bg-green-100 text-green-700 rounded-lg text-sm font-medium hover:bg-green-200"
+              className="rounded-lg bg-arda-success-soft px-3 py-1.5 text-sm font-medium text-arda-success-text hover:bg-arda-success-border"
             >
               Approve
             </button>
             <button
               onClick={excludeSelected}
-              className="px-3 py-1.5 bg-red-100 text-red-700 rounded-lg text-sm font-medium hover:bg-red-200"
+              className="rounded-lg bg-arda-danger-soft px-3 py-1.5 text-sm font-medium text-arda-danger-text hover:bg-arda-danger-border"
             >
               Exclude
             </button>
@@ -542,10 +542,10 @@ export const CSVReconcileStep: React.FC<CSVReconcileStepProps> = ({
       </div>
 
       {/* Items table */}
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div className="overflow-hidden rounded-xl border border-arda-border bg-white">
         <div className="overflow-x-auto">
           <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
+            <thead className="border-b border-arda-border bg-arda-bg-secondary">
               <tr>
                 <th className="w-10 px-4 py-3">
                   <input
@@ -563,24 +563,24 @@ export const CSVReconcileStep: React.FC<CSVReconcileStepProps> = ({
                     title="Select all items"
                   />
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Item</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Barcode</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Supplier</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Min/Order Qty</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-arda-text-muted">Item</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-arda-text-muted">Source</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-arda-text-muted">Barcode</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-arda-text-muted">Supplier</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-arda-text-muted">Location</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-arda-text-muted">Min/Order Qty</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-arda-text-muted">Status</th>
+                <th className="px-4 py-3 text-left text-xs font-medium uppercase text-arda-text-muted">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody className="divide-y divide-arda-border">
               {filteredItems.map((item) => (
                 <tr 
                   key={item.id} 
                   className={`
-                    hover:bg-gray-50 transition-colors
-                    ${item.isExcluded ? 'opacity-50 bg-gray-50' : ''}
-                    ${item.isDuplicate ? 'bg-yellow-50' : ''}
+                    hover:bg-arda-bg-secondary transition-colors
+                    ${item.isExcluded ? 'opacity-50 bg-arda-bg-secondary' : ''}
+                    ${item.isDuplicate ? 'bg-arda-warning-bg' : ''}
                   `}
                 >
                   <td className="px-4 py-3">
@@ -604,31 +604,31 @@ export const CSVReconcileStep: React.FC<CSVReconcileStepProps> = ({
                         />
                       )}
                       <div>
-                        <p className="font-medium text-gray-900">{item.name}</p>
-                        {item.sku && <p className="text-xs text-gray-400">SKU: {item.sku}</p>}
+                        <p className="font-medium text-arda-text-primary">{item.name}</p>
+                        {item.sku && <p className="text-xs text-arda-text-muted">SKU: {item.sku}</p>}
                       </div>
                     </div>
                   </td>
                   <td className="px-4 py-3">{getSourceBadge(item.source)}</td>
                   <td className="px-4 py-3">
-                    <span className="font-mono text-sm text-gray-600">{item.barcode || '-'}</span>
+                    <span className="font-mono text-sm text-arda-text-secondary">{item.barcode || '-'}</span>
                   </td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{item.supplier || '-'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-600">{item.location || '-'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-600">
+                  <td className="px-4 py-3 text-sm text-arda-text-secondary">{item.supplier || '-'}</td>
+                  <td className="px-4 py-3 text-sm text-arda-text-secondary">{item.location || '-'}</td>
+                  <td className="px-4 py-3 text-sm text-arda-text-secondary">
                     {item.minQty || item.orderQty ? `${item.minQty || '-'} / ${item.orderQty || '-'}` : '-'}
                   </td>
                   <td className="px-4 py-3">
                     {item.isExcluded ? (
-                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs">Excluded</span>
+                      <span className="rounded px-2 py-0.5 text-xs bg-arda-bg-secondary text-arda-text-muted">Excluded</span>
                     ) : item.isApproved ? (
-                      <span className="px-2 py-0.5 bg-green-100 text-green-700 rounded text-xs">Approved</span>
+                      <span className="rounded px-2 py-0.5 text-xs bg-arda-success-soft text-arda-success-text">Approved</span>
                     ) : item.isDuplicate ? (
-                      <span className="px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded text-xs">Duplicate</span>
+                      <span className="rounded px-2 py-0.5 text-xs bg-arda-warning-soft text-arda-warning-text">Duplicate</span>
                     ) : item.needsReview ? (
-                      <span className="px-2 py-0.5 bg-orange-100 text-orange-700 rounded text-xs">Review</span>
+                      <span className="rounded px-2 py-0.5 text-xs bg-arda-warning-soft text-arda-warning-text">Review</span>
                     ) : (
-                      <span className="px-2 py-0.5 bg-gray-100 text-gray-500 rounded text-xs">Pending</span>
+                      <span className="rounded px-2 py-0.5 text-xs bg-arda-bg-secondary text-arda-text-muted">Pending</span>
                     )}
                   </td>
                   <td className="px-4 py-3">
@@ -637,7 +637,7 @@ export const CSVReconcileStep: React.FC<CSVReconcileStepProps> = ({
                         <button
                           onClick={() => mergeDuplicate(item.id)}
                           title="Merge with original"
-                          className="p-1.5 hover:bg-yellow-100 rounded text-yellow-600"
+                          className="rounded p-1.5 text-arda-warning-text hover:bg-arda-warning-soft"
                         >
                           <Icons.GitMerge className="w-4 h-4" />
                         </button>
@@ -646,7 +646,7 @@ export const CSVReconcileStep: React.FC<CSVReconcileStepProps> = ({
                         <button
                           onClick={() => updateItem(item.id, { isApproved: true, needsReview: false })}
                           title="Approve"
-                          className="p-1.5 hover:bg-green-100 rounded text-green-600"
+                          className="rounded p-1.5 text-arda-success-text hover:bg-arda-success-soft"
                         >
                           <Icons.Check className="w-4 h-4" />
                         </button>
@@ -655,7 +655,7 @@ export const CSVReconcileStep: React.FC<CSVReconcileStepProps> = ({
                         <button
                           onClick={() => updateItem(item.id, { isExcluded: true, needsReview: false })}
                           title="Exclude"
-                          className="p-1.5 hover:bg-red-100 rounded text-red-600"
+                          className="rounded p-1.5 text-arda-danger-text hover:bg-arda-danger-soft"
                         >
                           <Icons.X className="w-4 h-4" />
                         </button>
@@ -669,7 +669,7 @@ export const CSVReconcileStep: React.FC<CSVReconcileStepProps> = ({
         </div>
         
         {filteredItems.length === 0 && (
-          <div className="px-6 py-12 text-center text-gray-400">
+          <div className="px-6 py-12 text-center text-arda-text-muted">
             <Icons.Search className="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p>No items match your filter</p>
           </div>
@@ -679,9 +679,9 @@ export const CSVReconcileStep: React.FC<CSVReconcileStepProps> = ({
       {/* CSV Mapping Modal */}
       {showMappingModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full mx-4 p-6 space-y-4">
-            <h3 className="text-lg font-semibold">Map CSV Columns</h3>
-            <p className="text-sm text-gray-500">
+          <div className="mx-4 w-full max-w-lg space-y-4 rounded-xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-semibold text-arda-text-primary">Map CSV Columns</h3>
+            <p className="text-sm text-arda-text-muted">
               Match your CSV columns to the item fields. {csvData.length} rows detected.
             </p>
             
@@ -697,12 +697,12 @@ export const CSVReconcileStep: React.FC<CSVReconcileStepProps> = ({
                 { key: 'unitPrice', label: 'Unit Price' },
               ].map(({ key, label }) => (
                 <div key={key} className="flex items-center gap-4">
-                  <label htmlFor={`mapping-${key}`} className="w-32 text-sm text-gray-600">{label}</label>
+                  <label htmlFor={`mapping-${key}`} className="w-32 text-sm text-arda-text-secondary">{label}</label>
                   <select
                     id={`mapping-${key}`}
                     value={columnMapping[key as keyof ColumnMapping] || ''}
                     onChange={(e) => setColumnMapping(prev => ({ ...prev, [key]: e.target.value || undefined }))}
-                    className="flex-1 px-3 py-2 border border-gray-200 rounded-lg"
+                    className="flex-1 rounded-lg border border-arda-border px-3 py-2"
                     aria-label={`Select column for ${label}`}
                   >
                     <option value="">-- Select column --</option>
@@ -717,14 +717,14 @@ export const CSVReconcileStep: React.FC<CSVReconcileStepProps> = ({
             <div className="flex justify-end gap-3 pt-4">
               <button
                 onClick={() => { setShowMappingModal(false); setCsvData([]); }}
-                className="px-4 py-2 text-gray-600 hover:text-gray-900"
+                className="px-4 py-2 text-arda-text-secondary hover:text-arda-text-primary"
               >
                 Cancel
               </button>
               <button
                 onClick={applyCSVMapping}
                 disabled={!columnMapping.name}
-                className="px-4 py-2 bg-blue-500 text-white rounded-lg disabled:bg-gray-300"
+                className="btn-arda-primary rounded-lg px-4 py-2 disabled:bg-arda-border disabled:text-white"
               >
                 Import {csvData.length} Items
               </button>
@@ -736,15 +736,15 @@ export const CSVReconcileStep: React.FC<CSVReconcileStepProps> = ({
       {/* Push progress */}
       {isPushing && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-sm w-full mx-4 p-6 text-center">
-            <Icons.Loader2 className="w-12 h-12 animate-spin text-blue-500 mx-auto mb-4" />
-            <p className="text-lg font-medium">Pushing to Arda...</p>
-            <p className="text-gray-500 mt-1">
+          <div className="mx-4 w-full max-w-sm rounded-xl bg-white p-6 text-center shadow-xl">
+            <Icons.Loader2 className="mx-auto mb-4 h-12 w-12 animate-spin text-arda-info" />
+            <p className="text-lg font-medium text-arda-text-primary">Pushing to Arda...</p>
+            <p className="mt-1 text-arda-text-muted">
               {pushProgress.current} of {pushProgress.total} items
             </p>
-            <div className="mt-4 h-2 bg-gray-100 rounded-full overflow-hidden">
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-arda-bg-secondary">
               <div 
-                className="h-full bg-blue-500 transition-all"
+                className="h-full bg-arda-info transition-all"
                 style={{ width: `${(pushProgress.current / pushProgress.total) * 100}%` }}
               />
             </div>
@@ -754,12 +754,12 @@ export const CSVReconcileStep: React.FC<CSVReconcileStepProps> = ({
 
       {/* Push error */}
       {pushError && (
-        <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 flex items-center gap-3">
-          <Icons.AlertCircle className="w-5 h-5 text-red-500" />
-          <span className="text-red-700">{pushError}</span>
+        <div className="flex items-center gap-3 rounded-lg border border-arda-danger-border bg-arda-danger-bg px-4 py-3">
+          <Icons.AlertCircle className="w-5 h-5 text-arda-danger" />
+          <span className="text-arda-danger-text">{pushError}</span>
           <button 
             onClick={() => setPushError(null)} 
-            className="ml-auto text-red-500 hover:text-red-700"
+            className="ml-auto text-arda-danger hover:text-arda-danger-text"
             aria-label="Dismiss error"
             title="Dismiss error"
           >

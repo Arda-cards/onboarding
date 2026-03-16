@@ -324,9 +324,9 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                 </div>
                 <div className="flex items-center gap-4 text-sm">
                   <span className="text-arda-text-secondary">{stats.total} items</span>
-                  <span className="text-yellow-600">{stats.pending} pending</span>
-                  <span className="text-green-600">{stats.approved} approved</span>
-                  <span className="text-red-600">{stats.rejected} rejected</span>
+                  <span className="text-arda-warning-text">{stats.pending} pending</span>
+                  <span className="text-arda-success-text">{stats.approved} approved</span>
+                  <span className="text-arda-danger-text">{stats.rejected} rejected</span>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -357,7 +357,7 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                   className={[
                     'px-3 py-1.5 rounded-arda text-sm font-medium transition-colors border',
                     filter === f
-                      ? 'bg-arda-accent text-white border-orange-600'
+                      ? 'bg-arda-accent text-white border-arda-accent-hover'
                       : 'bg-white/70 text-arda-text-secondary border-arda-border hover:bg-arda-bg-tertiary',
                   ].join(' ')}
                 >
@@ -381,20 +381,20 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
 
           {/* Bulk actions */}
           {selectedItems.size > 0 && (
-            <div className="bg-orange-50 border border-orange-200 rounded-arda-lg p-4 flex items-center justify-between">
-              <span className="text-orange-800 font-medium">
+            <div className="bg-arda-warning-bg border border-arda-warning-border rounded-arda-lg p-4 flex items-center justify-between">
+              <span className="text-arda-warning-text font-medium">
                 {selectedItems.size} items selected
               </span>
               <div className="flex items-center gap-2">
                 <button
                   onClick={approveSelected}
-                  className="px-4 py-2 bg-green-600 text-white rounded-arda text-sm font-medium hover:bg-green-700 transition-colors"
+                  className="px-4 py-2 bg-arda-success text-white rounded-arda text-sm font-medium hover:bg-arda-success-text transition-colors"
                 >
                   Approve Selected
                 </button>
                 <button
                   onClick={rejectSelected}
-                  className="px-4 py-2 bg-red-600 text-white rounded-arda text-sm font-medium hover:bg-red-700 transition-colors"
+                  className="px-4 py-2 bg-arda-danger text-white rounded-arda text-sm font-medium hover:bg-arda-danger-text transition-colors"
                 >
                   Reject Selected
                 </button>
@@ -412,7 +412,7 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                       type="checkbox"
                       checked={selectedItems.size === filteredItems.length && filteredItems.length > 0}
                       onChange={toggleSelectAll}
-                      className="rounded border-gray-300"
+                      className="rounded border-arda-border"
                     />
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-arda-text-secondary uppercase tracking-wider">
@@ -444,8 +444,8 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                     key={item.id} 
                     className={`
                       hover:bg-arda-bg-tertiary transition-colors
-                      ${item.isApproved ? 'bg-green-50' : ''}
-                      ${item.isRejected ? 'bg-red-50 opacity-60' : ''}
+                      ${item.isApproved ? 'bg-arda-success-bg' : ''}
+                      ${item.isRejected ? 'bg-arda-danger-bg opacity-60' : ''}
                     `}
                   >
                     <td className="px-4 py-3">
@@ -453,7 +453,7 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                         type="checkbox"
                         checked={selectedItems.has(item.id)}
                         onChange={() => toggleSelection(item.id)}
-                        className="rounded border-gray-300"
+                        className="rounded border-arda-border"
                       />
                     </td>
                     <td className="px-4 py-3">
@@ -476,17 +476,17 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                     </td>
                     <td className="px-4 py-3">
                       {item.isApproved && (
-                        <span className="px-2 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                        <span className="px-2 py-1 bg-arda-success-soft text-arda-success-text rounded-full text-xs font-medium">
                           Approved
                         </span>
                       )}
                       {item.isRejected && (
-                        <span className="px-2 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium">
+                        <span className="px-2 py-1 bg-arda-danger-soft text-arda-danger-text rounded-full text-xs font-medium">
                           Rejected
                         </span>
                       )}
                       {!item.isApproved && !item.isRejected && (
-                        <span className="px-2 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-medium">
+                        <span className="px-2 py-1 bg-arda-warning-soft text-arda-warning-text rounded-full text-xs font-medium">
                           Pending
                         </span>
                       )}
@@ -497,8 +497,8 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                           onClick={() => approveItem(item.id)}
                           className={`p-1.5 rounded transition-colors ${
                             item.isApproved 
-                              ? 'bg-green-100 text-green-600' 
-                              : 'hover:bg-green-100 text-gray-400 hover:text-green-600'
+                              ? 'bg-arda-success-soft text-arda-success-text' 
+                              : 'hover:bg-arda-success-soft text-arda-text-muted hover:text-arda-success-text'
                           }`}
                           title="Approve"
                         >
@@ -508,8 +508,8 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                           onClick={() => rejectItem(item.id)}
                           className={`p-1.5 rounded transition-colors ${
                             item.isRejected 
-                              ? 'bg-red-100 text-red-600' 
-                              : 'hover:bg-red-100 text-gray-400 hover:text-red-600'
+                              ? 'bg-arda-danger-soft text-arda-danger-text' 
+                              : 'hover:bg-arda-danger-soft text-arda-text-muted hover:text-arda-danger-text'
                           }`}
                           title="Reject"
                         >
@@ -534,7 +534,7 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
           <div className="flex items-center justify-between">
             <button
               onClick={approveAll}
-              className="px-4 py-2 bg-green-100 text-green-800 rounded-arda font-medium hover:bg-green-200 transition-colors"
+              className="px-4 py-2 bg-arda-success-soft text-arda-success-text rounded-arda font-medium hover:bg-arda-success-border transition-colors"
             >
               Approve All Items
             </button>
@@ -572,7 +572,7 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
               ].map(({ key, label, required }) => (
                 <div key={key} className="flex items-center gap-4">
                   <label className="w-40 text-sm font-medium text-arda-text-secondary">
-                    {label} {required && <span className="text-red-500">*</span>}
+                    {label} {required && <span className="text-arda-danger">*</span>}
                   </label>
                   <select
                     value={columnMapping[key as keyof ColumnMapping] || ''}
@@ -604,7 +604,7 @@ export const CSVUploadStep: React.FC<CSVUploadStepProps> = ({
                     </thead>
                     <tbody>
                       {csvData.slice(0, 3).map((row, i) => (
-                        <tr key={i} className="border-t border-gray-100">
+                        <tr key={i} className="border-t border-arda-border">
                           <td className="px-2 py-1">{row[columnMapping.name || ''] || '—'}</td>
                           <td className="px-2 py-1">{row[columnMapping.sku || ''] || '—'}</td>
                           <td className="px-2 py-1">{row[columnMapping.supplier || ''] || '—'}</td>

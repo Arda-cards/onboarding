@@ -9,7 +9,7 @@ interface UrlScrapeStepProps {
   onReviewStateChange?: (state: UrlReviewState) => void;
 }
 
-interface UrlReviewState {
+export interface UrlReviewState {
   pendingReviewCount: number;
   unimportedApprovedCount: number;
   totalRows: number;
@@ -100,10 +100,15 @@ export const UrlScrapeStep: React.FC<UrlScrapeStepProps> = ({
   const failedCount = rows.filter(result => result.status === 'failed').length;
   const approvedCount = rows.filter(row => row.approved).length;
   const pendingCount = rows.length - approvedCount;
+  const alreadyAddedCount = rows.filter(row => isImportedRowSynced(row, importedBySource.get(row.sourceUrl))).length;
+  const readyToImportCount = rows.filter(row => (
+    row.approved && !isImportedRowSynced(row, importedBySource.get(row.sourceUrl))
+  )).length;
   const unimportedApprovedCount = rows.filter(row => (
     row.approved && !isImportedRowSynced(row, importedBySource.get(row.sourceUrl))
   )).length;
   const canContinue = rows.length === 0 || (pendingCount === 0 && unimportedApprovedCount === 0);
+  const autoApprovableCount = rows.filter(row => row.status === 'success' && !row.approved).length;
 
   useEffect(() => {
     onReviewStateChange?.({
@@ -150,7 +155,7 @@ export const UrlScrapeStep: React.FC<UrlScrapeStepProps> = ({
               sourceUrl: result.item.sourceUrl || result.sourceUrl,
               productUrl: result.item.productUrl || result.sourceUrl,
             },
-            approved: existing?.approved ?? false,
+            approved: existing?.approved ?? result.status === 'success',
           });
         });
 
@@ -204,6 +209,13 @@ export const UrlScrapeStep: React.FC<UrlScrapeStepProps> = ({
     setImportMessage(`Imported ${approvedRows.length} approved row${approvedRows.length === 1 ? '' : 's'}.`);
   };
 
+  const handleApproveReadyRows = () => {
+    setRows(previousRows => previousRows.map(row => (
+      row.status === 'success' ? { ...row, approved: true } : row
+    )));
+    setImportMessage('Approved all successful rows. Review partial or failed rows before continuing.');
+  };
+
   const handleAddRowToMasterList = (sourceUrl: string) => {
     const row = rows.find(entry => entry.sourceUrl === sourceUrl);
     if (!row) return;
@@ -214,14 +226,14 @@ export const UrlScrapeStep: React.FC<UrlScrapeStepProps> = ({
   };
 
   const handleAddAllToMasterList = () => {
-    const eligible = rows.filter(row => row.status === 'success' || row.status === 'partial');
+    const eligible = rows.filter(row => row.status === 'success');
     if (eligible.length === 0) {
-      setImportMessage('No successful or partial rows to add.');
+      setImportMessage('No successful rows to add.');
       return;
     }
 
     setRows(previousRows => previousRows.map(row => (
-      row.status === 'success' || row.status === 'partial'
+      row.status === 'success'
         ? { ...row, approved: true }
         : row
     )));
@@ -341,7 +353,7 @@ https://supplier.com/products/part-123"
         />
 
         <div className="mt-3 flex items-center justify-between text-xs">
-          <span className={overLimit ? 'text-red-600 font-medium' : 'text-arda-text-muted'}>
+          <span className={overLimit ? 'font-medium text-arda-danger-text' : 'text-arda-text-muted'}>
             {parsedUrls.length} unique URL{parsedUrls.length === 1 ? '' : 's'}
             {overLimit ? ` (max ${MAX_URLS})` : ''}
           </span>
@@ -357,20 +369,76 @@ https://supplier.com/products/part-123"
         </div>
 
         {error && (
-          <p className="mt-3 text-sm text-red-600">{error}</p>
+          <p className="mt-3 text-sm text-arda-danger-text">{error}</p>
         )}
       </div>
 
       {(rows.length > 0 || importedItems.length > 0) && (
         <div className="bg-white rounded-2xl border border-arda-border p-6 shadow-sm">
+          <div className="mb-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="rounded-xl border border-arda-success-border bg-arda-success-bg px-4 py-3">
+              <div className="text-[11px] uppercase tracking-wide text-arda-success-text">Ready to import</div>
+              <div className="mt-1 text-2xl font-bold text-arda-success-text">{readyToImportCount}</div>
+            </div>
+            <div className="rounded-xl border border-arda-warning-border bg-arda-warning-bg px-4 py-3">
+              <div className="text-[11px] uppercase tracking-wide text-arda-warning-text">Need review</div>
+              <div className="mt-1 text-2xl font-bold text-arda-warning-text">{pendingCount}</div>
+            </div>
+            <div className="rounded-xl border border-arda-info-border bg-arda-info-bg px-4 py-3">
+              <div className="text-[11px] uppercase tracking-wide text-arda-info-text">Already added</div>
+              <div className="mt-1 text-2xl font-bold text-arda-info-text">{alreadyAddedCount}</div>
+            </div>
+          </div>
+
+          {!canContinue && (
+            <div className="mb-4 rounded-xl border border-arda-warning-border bg-arda-warning-bg px-4 py-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-arda-warning-text">
+                    {pendingCount > 0
+                      ? `${pendingCount} row${pendingCount === 1 ? '' : 's'} still need review before you can continue.`
+                      : `${unimportedApprovedCount} approved row${unimportedApprovedCount === 1 ? '' : 's'} still need to be imported.`}
+                  </p>
+                  <p className="mt-1 text-xs text-arda-warning-text">
+                    {pendingCount > 0
+                      ? 'Approve or delete every row so the review table reflects exactly what should enter the master list.'
+                      : 'Import approved rows now to carry them into the review step.'}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {autoApprovableCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleApproveReadyRows}
+                      className="btn-arda-outline text-sm py-2 px-3 inline-flex items-center gap-2"
+                    >
+                      <Icons.Check className="w-4 h-4" />
+                      Approve all ready rows
+                    </button>
+                  )}
+                  {unimportedApprovedCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleImport}
+                      className="btn-arda-primary text-sm py-2 px-3 inline-flex items-center gap-2"
+                    >
+                      <Icons.Download className="w-4 h-4" />
+                      Import approved rows
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
             <div className="flex flex-wrap items-center gap-3 text-sm">
               <span className="font-semibold text-arda-text-primary">Scrape Results</span>
               <span className="text-arda-text-muted">→</span>
               <span className="font-medium text-arda-text-secondary">Master List</span>
-              <span className="text-green-600">{successCount} success</span>
-              <span className="text-orange-600">{partialCount} partial</span>
-              <span className="text-red-600">{failedCount} failed</span>
+              <span className="text-arda-success-text">{successCount} success</span>
+              <span className="text-arda-warning-text">{partialCount} partial</span>
+              <span className="text-arda-danger-text">{failedCount} failed</span>
               <span className="text-arda-text-secondary">{approvedCount} approved</span>
               <span className="text-arda-text-muted">{pendingCount} pending review</span>
             </div>
@@ -382,7 +450,7 @@ https://supplier.com/products/part-123"
                 className="btn-arda-primary text-sm py-1.5 inline-flex items-center gap-2 disabled:opacity-50"
               >
                 <Icons.ArrowRight className="w-4 h-4" />
-                Add all → Import list
+                Approve all eligible rows
               </button>
               <button
                 type="button"
@@ -391,7 +459,7 @@ https://supplier.com/products/part-123"
                 className="btn-arda-outline text-sm py-1.5 inline-flex items-center gap-2 disabled:opacity-50"
               >
                 <Icons.Download className="w-4 h-4" />
-                Import approved
+                Import approved rows
               </button>
             </div>
           </div>
@@ -399,10 +467,10 @@ https://supplier.com/products/part-123"
           <div className="max-h-[520px] overflow-auto space-y-3 rounded-xl border border-arda-border bg-arda-bg-secondary/30 p-3">
             {rows.map(row => {
               const statusColor = row.status === 'success'
-                ? 'text-green-600 bg-green-50 border-green-100'
+                ? 'text-arda-success-text bg-arda-success-bg border-arda-success-border'
                 : row.status === 'partial'
-                  ? 'text-orange-600 bg-orange-50 border-orange-100'
-                  : 'text-red-600 bg-red-50 border-red-100';
+                  ? 'text-arda-warning-text bg-arda-warning-bg border-arda-warning-border'
+                  : 'text-arda-danger-text bg-arda-danger-bg border-arda-danger-border';
 
               const isSynced = isImportedRowSynced(row, importedBySource.get(row.sourceUrl));
               const productHref = row.item.productUrl || row.sourceUrl;
@@ -438,7 +506,7 @@ https://supplier.com/products/part-123"
                             onChange={(event) => handleToggleApproval(row.sourceUrl, event.target.checked)}
                             aria-label={`Approve ${row.sourceUrl}`}
                           />
-                          <span>Reviewed</span>
+                          <span>{row.status === 'success' ? 'Ready' : 'Reviewed'}</span>
                         </label>
 
                         <span className={`text-[11px] px-2 py-0.5 rounded-full border ${statusColor}`}>
@@ -548,7 +616,7 @@ https://supplier.com/products/part-123"
                       <button
                         type="button"
                         onClick={() => handleDeleteRow(row.sourceUrl)}
-                        className="text-red-600 hover:text-red-700 inline-flex items-center gap-1 text-xs"
+                        className="inline-flex items-center gap-1 text-xs text-arda-danger-text hover:text-arda-danger"
                         aria-label={`Delete ${row.sourceUrl}`}
                       >
                         <Icons.Trash2 className="w-3.5 h-3.5" />

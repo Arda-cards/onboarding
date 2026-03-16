@@ -318,7 +318,7 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
       <div className="px-4 pt-4 space-y-4">
         <div className="arda-glass rounded-2xl px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-arda">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-arda-accent to-arda-accent-hover flex items-center justify-center shadow-arda">
               <Icons.Package className="w-5 h-5 text-white" />
             </div>
             <div>
@@ -335,7 +335,7 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
               {scannedItems.length} scanned
             </span>
             <div className={`w-2 h-2 rounded-full ${
-              scannedItems.some(i => !i.synced) ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'
+              scannedItems.some(i => !i.synced) ? 'bg-arda-warning animate-pulse' : 'bg-arda-success'
             }`} />
           </div>
         </div>
@@ -363,11 +363,11 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
           {/* Scanning overlay for barcode mode */}
           {mode === 'barcode' && isScanning && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <div className="w-64 h-40 border-2 border-orange-400/60 rounded-xl relative">
-                <div className="absolute top-0 left-0 w-6 h-6 border-l-4 border-t-4 border-orange-300 rounded-tl-xl" />
-                <div className="absolute top-0 right-0 w-6 h-6 border-r-4 border-t-4 border-orange-300 rounded-tr-xl" />
-                <div className="absolute bottom-0 left-0 w-6 h-6 border-l-4 border-b-4 border-orange-300 rounded-bl-xl" />
-                <div className="absolute bottom-0 right-0 w-6 h-6 border-r-4 border-b-4 border-orange-300 rounded-br-xl" />
+              <div className="w-64 h-40 border-2 border-arda-warning-border rounded-xl relative">
+                <div className="absolute top-0 left-0 w-6 h-6 border-l-4 border-t-4 border-arda-warning rounded-tl-xl" />
+                <div className="absolute top-0 right-0 w-6 h-6 border-r-4 border-t-4 border-arda-warning rounded-tr-xl" />
+                <div className="absolute bottom-0 left-0 w-6 h-6 border-l-4 border-b-4 border-arda-warning rounded-bl-xl" />
+                <div className="absolute bottom-0 right-0 w-6 h-6 border-r-4 border-b-4 border-arda-warning rounded-br-xl" />
 
                 {/* Scanning line animation */}
                 <div className="absolute left-4 right-4 h-0.5 bg-arda-accent animate-scan" />
@@ -382,7 +382,7 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
           {error && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/70">
               <div className="text-center p-6">
-                <Icons.AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-3" />
+                <Icons.AlertCircle className="w-12 h-12 text-arda-danger mx-auto mb-3" />
                 <p className="text-white mb-4">{error}</p>
                 <button
                   onClick={startCamera}
@@ -427,7 +427,7 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
                   key={item.id}
                   className={`
                     flex-shrink-0 px-3 py-2 rounded-lg flex items-center gap-2 border
-                    ${item.synced ? 'bg-green-50 border-green-200' : 'bg-arda-bg-tertiary border-arda-border'}
+                    ${item.synced ? 'bg-arda-success-bg border-arda-success-border' : 'bg-arda-bg-tertiary border-arda-border'}
                   `}
                 >
                   {item.type === 'barcode' ? (
@@ -439,7 +439,7 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
                     <img src={item.data} alt="" className="w-10 h-10 rounded object-cover" />
                   )}
                   {item.synced && (
-                    <Icons.Check className="w-4 h-4 text-green-600" />
+                    <Icons.Check className="w-4 h-4 text-arda-success-text" />
                   )}
                 </div>
               ))}
@@ -472,8 +472,8 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
           )}
 
           {mode === 'barcode' && isScanning && (
-            <div className="w-16 h-16 rounded-full bg-green-500/10 flex items-center justify-center">
-              <Icons.Barcode className="w-8 h-8 text-green-600" />
+            <div className="w-16 h-16 rounded-full bg-arda-success-soft flex items-center justify-center">
+              <Icons.Barcode className="w-8 h-8 text-arda-success-text" />
             </div>
           )}
 
@@ -482,10 +482,10 @@ export const MobileScanner: React.FC<MobileScannerProps> = ({
             aria-label={flashEnabled ? 'Disable flash' : 'Enable flash'}
             title={flashEnabled ? 'Disable flash' : 'Enable flash'}
             className={`w-12 h-12 rounded-full flex items-center justify-center border ${
-              flashEnabled ? 'bg-yellow-400 border-yellow-300' : 'bg-white/80 border-arda-border'
+              flashEnabled ? 'bg-arda-warning-soft border-arda-warning-border' : 'bg-white/80 border-arda-border'
             }`}
           >
-            <Icons.Zap className={`w-5 h-5 ${flashEnabled ? 'text-black' : 'text-arda-text-secondary'}`} />
+            <Icons.Zap className={`w-5 h-5 ${flashEnabled ? 'text-arda-warning-text' : 'text-arda-text-secondary'}`} />
           </button>
         </div>
       </div>

@@ -371,7 +371,7 @@ export const JourneyView: React.FC<JourneyViewProps> = ({
                     </span>
                   )}
                   {(selectedItem.asin || selectedProfile.asin) && (
-                    <span className="px-2 py-0.5 bg-orange-100 text-orange-700 text-xs rounded font-mono">
+                    <span className="px-2 py-0.5 bg-arda-info-bg text-arda-info-text text-xs rounded font-mono">
                       ASIN: {selectedItem.asin || selectedProfile.asin}
                     </span>
                   )}
@@ -785,7 +785,7 @@ const OrderCard: React.FC<{
               })}
             </span>
             {order.confidence && order.confidence < 0.8 && (
-              <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded">
+              <span className="text-xs bg-arda-warning-bg text-arda-warning-text px-1.5 py-0.5 rounded">
                 Low confidence
               </span>
             )}

@@ -76,25 +76,25 @@ export const ItemDetailPanel: React.FC<ItemDetailPanelProps> = ({
           {/* Velocity Stats Grid */}
           <div className="grid grid-cols-2 gap-3 p-4 border-b border-arda-border">
             <div className="bg-arda-bg-secondary rounded-lg p-3">
-              <div className="text-2xl font-bold text-orange-400">
+              <div className="text-2xl font-bold text-arda-warning-text">
                 {itemProfile.dailyBurnRate.toFixed(1)}
               </div>
               <div className="text-xs text-arda-text-muted mt-1">Daily Burn Rate</div>
             </div>
             <div className="bg-arda-bg-secondary rounded-lg p-3">
-              <div className="text-2xl font-bold text-blue-400">
+              <div className="text-2xl font-bold text-arda-info-text">
                 {Math.round(itemProfile.averageCadenceDays)}
               </div>
               <div className="text-xs text-arda-text-muted mt-1">Cadence (Days)</div>
             </div>
             <div className="bg-arda-bg-secondary rounded-lg p-3">
-              <div className="text-2xl font-bold text-green-400">
+              <div className="text-2xl font-bold text-arda-success-text">
                 {itemProfile.totalQuantityOrdered}
               </div>
               <div className="text-xs text-arda-text-muted mt-1">Total Ordered</div>
             </div>
             <div className="bg-arda-bg-secondary rounded-lg p-3">
-              <div className="text-2xl font-bold text-purple-400">
+              <div className="text-2xl font-bold text-arda-text-secondary">
                 {itemProfile.orderCount}
               </div>
               <div className="text-xs text-arda-text-muted mt-1">Order Count</div>
@@ -119,7 +119,7 @@ export const ItemDetailPanel: React.FC<ItemDetailPanelProps> = ({
               {itemProfile.nextPredictedOrder && (
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-arda-text-muted">Next Predicted Order</span>
-                  <span className="font-medium text-yellow-600">
+                  <span className="font-medium text-arda-warning-text">
                     {new Date(itemProfile.nextPredictedOrder).toLocaleDateString()}
                   </span>
                 </div>

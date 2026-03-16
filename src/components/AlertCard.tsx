@@ -29,27 +29,27 @@ export const AlertCard: React.FC<AlertCardProps> = ({ alert, onReorder, inventor
       case 'overdue':
         return {
           icon: Icons.AlertCircle,
-          iconColor: 'text-red-400',
-          bgColor: 'bg-red-500/10',
-          borderColor: 'border-red-500/30',
+          iconColor: 'text-arda-danger-text',
+          bgColor: 'bg-arda-danger-bg',
+          borderColor: 'border-arda-danger-border',
           label: 'Overdue',
           timeText: daysUntil === 0 ? 'Today' : `${Math.abs(daysUntil)} day${Math.abs(daysUntil) !== 1 ? 's' : ''} ago`,
         };
       case 'upcoming':
         return {
           icon: Icons.Clock,
-          iconColor: 'text-yellow-400',
-          bgColor: 'bg-yellow-500/10',
-          borderColor: 'border-yellow-500/30',
+          iconColor: 'text-arda-warning-text',
+          bgColor: 'bg-arda-warning-bg',
+          borderColor: 'border-arda-warning-border',
           label: 'Upcoming',
           timeText: daysUntil === 0 ? 'Today' : `${daysUntil} day${daysUntil !== 1 ? 's' : ''}`,
         };
       case 'high-velocity':
         return {
           icon: Icons.Zap,
-          iconColor: 'text-orange-400',
-          bgColor: 'bg-orange-500/10',
-          borderColor: 'border-orange-500/30',
+          iconColor: 'text-arda-accent',
+          bgColor: 'bg-arda-warning-soft',
+          borderColor: 'border-arda-warning-border',
           label: 'High Velocity',
           timeText: `${profile.dailyBurnRate.toFixed(1)} units/day`,
         };

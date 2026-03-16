@@ -64,26 +64,26 @@ export const ReorderAlerts: React.FC<ReorderAlertsProps> = ({
       case 'red':
         return {
           icon: Icons.AlertCircle,
-          iconColor: 'text-red-400',
-          bgColor: 'bg-red-500/10',
-          borderColor: 'border-red-500/30',
-          textColor: 'text-red-400',
+          iconColor: 'text-arda-danger-text',
+          bgColor: 'bg-arda-danger-bg',
+          borderColor: 'border-arda-danger-border',
+          textColor: 'text-arda-danger-text',
         };
       case 'orange':
         return {
           icon: Icons.Clock,
-          iconColor: 'text-orange-400',
-          bgColor: 'bg-orange-500/10',
-          borderColor: 'border-orange-500/30',
-          textColor: 'text-orange-400',
+          iconColor: 'text-arda-warning-text',
+          bgColor: 'bg-arda-warning-bg',
+          borderColor: 'border-arda-warning-border',
+          textColor: 'text-arda-warning-text',
         };
       case 'yellow':
         return {
           icon: Icons.Clock,
-          iconColor: 'text-yellow-400',
-          bgColor: 'bg-yellow-500/10',
-          borderColor: 'border-yellow-500/30',
-          textColor: 'text-yellow-400',
+          iconColor: 'text-arda-warning-text',
+          bgColor: 'bg-arda-warning-soft',
+          borderColor: 'border-arda-warning-border',
+          textColor: 'text-arda-warning-text',
         };
     }
   };
@@ -102,7 +102,7 @@ export const ReorderAlerts: React.FC<ReorderAlertsProps> = ({
     return (
       <div className="p-4 rounded-lg border border-arda-border bg-white">
         <div className="flex items-center gap-2 mb-2">
-          <Icons.CheckCircle2 className="w-5 h-5 text-green-400" />
+          <Icons.CheckCircle2 className="w-5 h-5 text-arda-success-text" />
           <h3 className="text-sm font-semibold text-arda-text-primary">Reorder Alerts</h3>
         </div>
         <p className="text-xs text-arda-text-muted">No items need reordering in the next 14 days.</p>
@@ -113,9 +113,9 @@ export const ReorderAlerts: React.FC<ReorderAlertsProps> = ({
   return (
     <div className="p-4 rounded-lg border border-arda-border bg-white">
       <div className="flex items-center gap-2 mb-3">
-        <Icons.AlertCircle className="w-5 h-5 text-orange-400" />
+        <Icons.AlertCircle className="w-5 h-5 text-arda-warning-text" />
         <h3 className="text-sm font-semibold text-arda-text-primary">Reorder Alerts</h3>
-        <span className="text-xs px-2 py-0.5 bg-orange-500/20 text-orange-400 rounded-full">
+        <span className="rounded-full bg-arda-warning-soft px-2 py-0.5 text-xs text-arda-warning-text">
           {alertItems.length}
         </span>
       </div>

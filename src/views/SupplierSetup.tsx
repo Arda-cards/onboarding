@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Icons } from '../components/Icons';
 import { ExtractedOrder } from '../types';
 import {
+  API_BASE_URL,
   discoverApi,
   jobsApi,
   JobStatus,
@@ -23,74 +24,6 @@ import {
   PRIORITY_SUPPLIER_SCAN_DOMAINS,
 } from './supplierSetupUtils';
 
-// Lean manufacturing wisdom - displayed while we ironically batch-process emails
-const LEAN_WISDOM = [
-  {
-    quote: "The irony of batch-processing your emails to teach you about single-piece flow is not lost on us.",
-    attribution: "— Arda Engineering, probably",
-  },
-  {
-    quote: "Batch processing: Because nothing says 'efficiency' like making 49 emails wait for the 50th.",
-    attribution: "— Every ERP System Ever",
-  },
-  {
-    quote: "In the time it takes to batch 100 orders, you could have flowed 100 orders. But here we are.",
-    attribution: "— Taiichi Ohno, if he saw this loading screen",
-  },
-  {
-    quote: "A batch in process is inventory in disguise. Speaking of which, we're currently 'inventorying' your inbox.",
-    attribution: "— The Toyota Production System",
-  },
-  {
-    quote: "Single-piece flow means doing one thing at a time. We're doing all your emails at once. Do as we say, not as we code.",
-    attribution: "— Software Engineering Proverb",
-  },
-  {
-    quote: "The best time to stop batching was 20 years ago. The second best time is after this loading screen finishes.",
-    attribution: "— Ancient Lean Proverb",
-  },
-  {
-    quote: "Every email we batch-process right now is a little lesson in why you shouldn't batch-process.",
-    attribution: "— The Arda Paradox",
-  },
-  {
-    quote: "If Ohno saw this loading spinner, he'd probably suggest we process one email, deliver the insight, then get the next one.",
-    attribution: "— Things We Know But Don't Do",
-  },
-  {
-    quote: "WIP limits are great! We're currently ignoring ours. Don't be like us.",
-    attribution: "— Kanban's Disappointed Dad Voice",
-  },
-  {
-    quote: "Small batches reduce lead time. Anyway, here's 500 emails at once.",
-    attribution: "— Arda's Growth Team",
-  },
-  {
-    quote: "The goal of lean is to eliminate waste. This loading screen is technically waste. We're working on it.",
-    attribution: "— Our Product Roadmap, Probably",
-  },
-  {
-    quote: "Flow efficiency > resource efficiency. Unless you're an email parser. Then it's complicated.",
-    attribution: "— DevOps Philosophy",
-  },
-  {
-    quote: "Muda, Mura, Muri: Waste, Unevenness, Overburden. This scan has all three. Your shop floor shouldn't.",
-    attribution: "— TPS for Hypocrites",
-  },
-  {
-    quote: "The seven wastes include 'waiting.' You're welcome.",
-    attribution: "— This Loading Screen",
-  },
-  {
-    quote: "The seven wastes also include 'wasted human potential.' So. Yeah. There's a lot of other stuff we could be doing here.",
-    attribution: "— This Loading Screen",
-  },
-  {
-    quote: "One-piece flow would be: scan email → show insight → repeat. But our PM wanted a 'wow moment.' So here we batch.",
-    attribution: "— Honest Engineering Notes",
-  },
-];
-
 // Module-level cache for discovery results to handle StrictMode remounts
 // When the first mount's API call completes, results are cached here
 // so the second mount can use them instead of making another call
@@ -99,13 +32,16 @@ let moduleDiscoveryResult: DiscoveredSupplier[] | null = null;
 const SESSION_EXPIRED_MESSAGE = 'Session expired. Please sign in again.';
 const GMAIL_REQUIRED_MESSAGE = 'Connect Gmail to start email analysis.';
 
-// Background progress type for parent components
-interface BackgroundEmailProgress {
+export interface BackgroundEmailProgress {
   isActive: boolean;
+  phase: 'connecting_gmail' | 'scanning_amazon' | 'scanning_priority' | 'optional_suppliers' | 'ready';
+  title: string;
   supplier: string;
   processed: number;
   total: number;
   currentTask?: string;
+  lastCompleted?: string;
+  nextAction: string;
 }
 
 // State that can be preserved when navigating away
@@ -146,19 +82,15 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   const [showWelcome, setShowWelcome] = useState(!hasRestoredState);
   const [celebratingMilestone, setCelebratingMilestone] = useState<string | null>(null);
   const [achievedMilestones, setAchievedMilestones] = useState<Set<string>>(new Set());
-  
-  // Lean wisdom rotation
-  const [wisdomIndex, setWisdomIndex] = useState(() => Math.floor(Math.random() * LEAN_WISDOM.length));
-  
+
   // Discovery progress messages for better feedback
   const [discoveryMessageIndex, setDiscoveryMessageIndex] = useState(0);
   const DISCOVERY_MESSAGES = useMemo(() => [
-    'Scanning your inbox for suppliers...',
-    'Looking for order confirmations...',
+    'Scanning recent supplier emails...',
     'Identifying supplier domains...',
-    'Analyzing email patterns...',
-    'Finding shipping notifications...',
-    'Detecting invoice emails...',
+    'Checking order confirmations...',
+    'Looking for invoices and receipts...',
+    'Preparing optional supplier suggestions...',
   ], []);
 
   // Amazon processing state (starts immediately if no initial state)
@@ -211,8 +143,6 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   const [hasStartedOtherImport, setHasStartedOtherImport] = useState<boolean>(
     initialState?.hasStartedOtherImport || false,
   );
-  const [showContinueAnytimePopup, setShowContinueAnytimePopup] = useState(false);
-  const [hasShownContinueAnytimePopup, setHasShownContinueAnytimePopup] = useState(false);
 
   const getErrorMessage = useCallback((error: unknown, fallback: string): string => {
     if (isSessionExpiredError(error)) {
@@ -372,15 +302,6 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     }
   }, [amazonJobId, priorityJobId]);
 
-  // Rotate lean wisdom (every 10 seconds, always running)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setWisdomIndex(prev => (prev + 1) % LEAN_WISDOM.length);
-    }, 10000);
-    
-    return () => clearInterval(interval);
-  }, [hasRestoredState]);
-  
   // Rotate discovery messages while scanning (every 2.5 seconds)
   useEffect(() => {
     if (!isDiscovering) return;
@@ -634,15 +555,14 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   }, [priorityJobId, isPriorityComplete, pollPriorityStatus]);
 
   // Notify parent when user can leave email step.
-  // If additional suppliers exist, require explicit import start before proceeding.
   useEffect(() => {
-    const canProceed = hasDiscovered && (!hasSelectableOtherSuppliers || hasStartedOtherImport);
+    const canProceed = hasDiscovered && isAmazonComplete && isPriorityComplete;
 
     onCanProceed?.(canProceed);
   }, [
-    hasSelectableOtherSuppliers,
     hasDiscovered,
-    hasStartedOtherImport,
+    isAmazonComplete,
+    isPriorityComplete,
     onCanProceed,
   ]);
 
@@ -749,11 +669,6 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       return; // Nothing additional to scan
     }
 
-    if (!hasShownContinueAnytimePopup) {
-      setShowContinueAnytimePopup(true);
-      setHasShownContinueAnytimePopup(true);
-    }
-    
     setIsScanning(true);
     setJobStatus(null);
     setOtherScanError(null);
@@ -770,7 +685,6 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
   }, [
     enabledSuppliers,
     getErrorMessage,
-    hasShownContinueAnytimePopup,
     hasStartedOtherImport,
     currentJobId,
     isScanning,
@@ -807,48 +721,107 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
     () => Boolean((!isAmazonComplete && amazonJobId) || isPriorityProcessing || isScanning),
     [isAmazonComplete, amazonJobId, isPriorityProcessing, isScanning],
   );
-  // Report progress to parent component for background display
-  useEffect(() => {
-    if (!onProgressUpdate) return;
-    
-    // Determine active scanning progress
-    if (isScanning && jobStatus?.progress) {
-      onProgressUpdate({
+
+  const backgroundProgress = useMemo<BackgroundEmailProgress>(() => {
+    if (!isGmailConnected) {
+      return {
+        isActive: false,
+        phase: 'connecting_gmail',
+        title: 'Connect Gmail',
+        supplier: 'Gmail',
+        processed: 0,
+        total: 0,
+        nextAction: 'Go back one step and connect Gmail to start email import.',
+      };
+    }
+
+    if (!isAmazonComplete && amazonStatus?.progress) {
+      return {
         isActive: true,
-        supplier: 'Other Suppliers',
-        processed: jobStatus.progress.processed || 0,
-        total: jobStatus.progress.total || 0,
-        currentTask: jobStatus.progress.currentTask,
-      });
-    } else if (isPriorityProcessing && priorityStatus?.progress) {
-      onProgressUpdate({
-        isActive: true,
-        supplier: 'McMaster-Carr & Uline',
-        processed: priorityStatus.progress.processed || 0,
-        total: priorityStatus.progress.total || 0,
-        currentTask: priorityStatus.progress.currentTask,
-      });
-    } else if (!isAmazonComplete && amazonStatus?.progress) {
-      onProgressUpdate({
-        isActive: true,
+        phase: 'scanning_amazon',
+        title: 'Scanning Amazon',
         supplier: 'Amazon',
         processed: amazonStatus.progress.processed || 0,
         total: amazonStatus.progress.total || 0,
-        currentTask: amazonStatus.progress.currentTask,
-      });
-    } else if (!isAnyProcessing) {
-      onProgressUpdate(null);
+        currentTask: amazonStatus.progress.currentTask || amazonStatus.currentEmail?.subject || undefined,
+        nextAction: 'You can continue once Amazon and priority suppliers finish.',
+      };
     }
+
+    if (isPriorityProcessing && priorityStatus?.progress) {
+      return {
+        isActive: true,
+        phase: 'scanning_priority',
+        title: 'Scanning priority suppliers',
+        supplier: 'McMaster-Carr & Uline',
+        processed: priorityStatus.progress.processed || 0,
+        total: priorityStatus.progress.total || 0,
+        currentTask: priorityStatus.progress.currentTask || priorityStatus.currentEmail?.subject || undefined,
+        lastCompleted: isAmazonComplete ? 'Amazon' : undefined,
+        nextAction: 'You can continue after priority suppliers finish, or start optional supplier imports next.',
+      };
+    }
+
+    if (isScanning && jobStatus?.progress) {
+      return {
+        isActive: true,
+        phase: 'optional_suppliers',
+        title: 'Scanning optional suppliers',
+        supplier: 'Additional suppliers',
+        processed: jobStatus.progress.processed || 0,
+        total: jobStatus.progress.total || 0,
+        currentTask: jobStatus.progress.currentTask || jobStatus.currentEmail?.subject || undefined,
+        lastCompleted: 'Amazon and priority suppliers',
+        nextAction: 'This scan keeps running if you move to the next step.',
+      };
+    }
+
+    if (hasSelectableOtherSuppliers) {
+      return {
+        isActive: false,
+        phase: 'ready',
+        title: 'Ready for optional suppliers',
+        supplier: 'Optional suppliers',
+        processed: selectedOtherCount,
+        total: supplierCount,
+        lastCompleted: 'Amazon and priority suppliers',
+        nextAction: hasStartedOtherImport
+          ? 'Optional supplier import has started and will keep running in the background.'
+          : 'Select any additional suppliers you want to scan, or continue to the next step.',
+      };
+    }
+
+    return {
+      isActive: false,
+      phase: 'ready',
+      title: 'Ready to continue',
+      supplier: 'Email import',
+      processed: totalOrders,
+      total: totalOrders,
+      lastCompleted: 'Amazon and priority suppliers',
+      nextAction: 'Continue to the next step whenever you are ready.',
+    };
   }, [
-    onProgressUpdate, 
-    isScanning, 
-    jobStatus, 
-    isPriorityProcessing, 
-    priorityStatus, 
-    isAmazonComplete, 
-    amazonStatus, 
-    isAnyProcessing
+    amazonStatus,
+    hasSelectableOtherSuppliers,
+    hasStartedOtherImport,
+    isAmazonComplete,
+    isGmailConnected,
+    isPriorityProcessing,
+    isScanning,
+    jobStatus,
+    priorityStatus,
+    selectedOtherCount,
+    supplierCount,
+    totalOrders,
   ]);
+
+  // Report progress to parent component for background display
+  useEffect(() => {
+    if (!onProgressUpdate) return;
+
+    onProgressUpdate(backgroundProgress);
+  }, [backgroundProgress, onProgressUpdate]);
 
   const milestoneMessage = useMemo(
     () => (celebratingMilestone ? getMilestoneMessage(celebratingMilestone) : null),
@@ -928,22 +901,60 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       {showWelcome && (
         <div className="text-center py-8 animate-fade-in">
           <div className="inline-flex items-center gap-2 bg-arda-accent/10 text-arda-accent px-4 py-2 rounded-full text-sm font-medium mb-4">
-            <Icons.Sparkles className="w-4 h-4" />
-            Email sync started
+            <Icons.Mail className="w-4 h-4" />
+            Email import in progress
           </div>
           <h1 className="text-3xl font-bold text-arda-text-primary mb-3">
-            We’re scanning your inbox
+            Import your first items from email
           </h1>
           <p className="text-arda-text-secondary max-w-lg mx-auto">
-            We’re finding orders, tracking spend, and identifying replenishment patterns.
-            This usually takes about 30 seconds.
+            We are connecting Gmail, scanning Amazon and priority suppliers, and preparing optional suppliers for review.
+            You can continue once the required scans finish.
           </p>
         </div>
       )}
 
-      {/* Live Stats Bar - The "wow" moment */}
+      <div className="rounded-2xl border border-arda-info-border bg-arda-info-bg p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-sm font-semibold text-arda-info-text">
+              <Icons.Activity className="w-4 h-4" />
+              {backgroundProgress.title}
+            </div>
+            <p className="mt-1 text-sm text-arda-text-primary">
+              {backgroundProgress.currentTask || backgroundProgress.supplier}
+            </p>
+            <p className="mt-2 text-sm text-arda-info-text">
+              {backgroundProgress.nextAction}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm min-w-0 lg:min-w-[24rem]">
+            <div className="rounded-xl border border-arda-info-border bg-white px-3 py-2">
+              <div className="text-[11px] uppercase tracking-wide text-arda-info">Phase</div>
+              <div className="mt-1 font-semibold text-arda-text-primary">{backgroundProgress.title}</div>
+            </div>
+            <div className="rounded-xl border border-arda-info-border bg-white px-3 py-2">
+              <div className="text-[11px] uppercase tracking-wide text-arda-info">Progress</div>
+              <div className="mt-1 font-semibold text-arda-text-primary">
+                {backgroundProgress.total > 0
+                  ? `${backgroundProgress.processed} / ${backgroundProgress.total}`
+                  : 'Waiting for scan results'}
+              </div>
+            </div>
+            <div className="rounded-xl border border-arda-info-border bg-white px-3 py-2">
+              <div className="text-[11px] uppercase tracking-wide text-arda-info">Last completed</div>
+              <div className="mt-1 font-semibold text-arda-text-primary">
+                {backgroundProgress.lastCompleted || 'Connecting Gmail'}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Live Stats Bar */}
       {(allItems.length > 0 || totalOrders > 0) && (
-        <div className={`bg-gradient-to-r from-arda-accent to-blue-600 rounded-2xl p-6 text-white shadow-lg ${isGmailConnected ? '' : 'opacity-60'}`}>
+        <div className={`bg-gradient-to-r from-arda-accent to-arda-accent-hover rounded-2xl p-6 text-white shadow-lg ${isGmailConnected ? '' : 'opacity-60'}`}>
           <div className="grid grid-cols-4 gap-6 text-center">
             <div>
               <div className="text-4xl font-bold">{allItems.length}</div>
@@ -965,12 +976,10 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
             </div>
           </div>
           
-          {/* Value teaser */}
           {allItems.length >= 5 && (
             <div className="mt-4 pt-4 border-t border-white/20 text-center">
               <p className="text-white/90 text-sm">
-                💡 <span className="font-medium">Insight preview:</span> We're already seeing patterns in your ordering. 
-                Set up Kanban cards to automate replenishment.
+                You can continue now and keep reviewing items while the rest of email import finishes in the background.
               </p>
             </div>
           )}
@@ -984,8 +993,8 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
             <h1 className="text-2xl font-bold text-arda-text-primary">Importing Your Orders</h1>
             <p className="text-arda-text-secondary mt-1">
               {isAnyProcessing 
-                ? 'Discovering items from your suppliers...'
-                : 'Ready to set up your inventory'}
+                ? 'Tracking supplier scans and preparing items for review.'
+                : 'Required email import is done. Optional supplier imports can continue in the background.'}
             </p>
           </div>
         </div>
@@ -994,7 +1003,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       {!isGmailConnected && (
         <div className="border border-arda-border rounded-2xl p-6 bg-arda-bg-secondary">
           <div className="flex items-start gap-4">
-            <div className="w-12 h-12 rounded-xl bg-gray-400 text-white flex items-center justify-center">
+            <div className="w-12 h-12 rounded-xl bg-arda-accent text-white flex items-center justify-center">
               <Icons.Mail className="w-6 h-6" />
             </div>
             <div className="flex-1">
@@ -1002,6 +1011,16 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
               <p className="text-sm text-arda-text-secondary mt-1">
                 {gmailStatusError || 'Go back to the Welcome step and click "Connect Gmail & start sync" to link your Google account, or skip this step.'}
               </p>
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.href = `${API_BASE_URL}/auth/google?returnTo=email`;
+                }}
+                className="mt-4 inline-flex items-center gap-2 btn-arda-primary !rounded-lg"
+              >
+                <Icons.Link className="w-4 h-4" />
+                Connect Gmail
+              </button>
             </div>
           </div>
         </div>
@@ -1010,17 +1029,17 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       {/* Amazon Processing Card - Premium look */}
       <div className={`border-2 rounded-2xl p-6 transition-all ${
         amazonError
-          ? 'bg-red-50 border-red-200'
+          ? 'bg-arda-danger-bg border-arda-danger-border'
           : isAmazonComplete 
             ? amazonOrders.length > 0
-              ? 'bg-green-50 border-green-300 shadow-md' 
-              : 'bg-gray-50 border-gray-200'
-            : 'bg-orange-50 border-orange-200 shadow-sm'
+              ? 'bg-arda-success-bg border-arda-success-border shadow-md' 
+              : 'bg-arda-bg-secondary border-arda-border'
+            : 'bg-arda-warning-bg border-arda-warning-border shadow-sm'
       }`}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
             <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-              isAmazonComplete ? 'bg-green-500' : 'bg-orange-500'
+              isAmazonComplete ? 'bg-arda-success' : 'bg-arda-accent'
             }`}>
               {amazonError ? (
                 <Icons.AlertCircle className="w-6 h-6 text-white" />
@@ -1032,7 +1051,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
             </div>
             <div>
               <h3 className="text-xl font-bold text-arda-text-primary">Amazon</h3>
-              <p className={`text-sm ${amazonError ? 'text-red-600' : 'text-arda-text-secondary'}`}>
+              <p className={`text-sm ${amazonError ? 'text-arda-danger-text' : 'text-arda-text-secondary'}`}>
                 {amazonError 
                   ? amazonError
                   : !isAmazonComplete 
@@ -1047,7 +1066,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
           
           {amazonProgress && !isAmazonComplete && !amazonError && (
             <div className="text-right">
-              <div className="text-2xl font-bold text-orange-600">
+              <div className="text-2xl font-bold text-arda-accent">
                 {Math.round(amazonProgressPercent)}%
               </div>
               <div className="text-xs text-arda-text-muted">
@@ -1060,9 +1079,9 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         {/* Amazon Progress Bar */}
         {!isAmazonComplete && amazonProgress && !amazonError && (
           <div className="mb-4">
-            <div className="h-3 bg-orange-100 rounded-full overflow-hidden">
+            <div className="h-3 bg-arda-warning-soft rounded-full overflow-hidden">
               <div 
-                className="h-full bg-gradient-to-r from-orange-500 to-orange-400 transition-all duration-300 rounded-full"
+                className="h-full bg-gradient-to-r from-arda-accent to-arda-accent-hover transition-all duration-300 rounded-full"
                 style={{ width: `${amazonProgressPercent}%` }}
               />
             </div>
@@ -1077,17 +1096,17 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
                 order.items.map((item, itemIdx) => (
                   <div 
                     key={`${orderIdx}-${itemIdx}`} 
-                    className="bg-white border border-gray-200 rounded-xl p-3 flex items-center gap-3 hover:shadow-md transition-shadow"
+                    className="bg-white border border-arda-border rounded-xl p-3 flex items-center gap-3 hover:shadow-md transition-shadow"
                   >
                     {item.amazonEnriched?.imageUrl ? (
                       <img 
                         src={item.amazonEnriched.imageUrl} 
                         alt="" 
-                        className="w-14 h-14 object-contain flex-shrink-0 rounded-lg bg-gray-50"
+                        className="w-14 h-14 object-contain flex-shrink-0 rounded-lg bg-arda-bg-secondary"
                       />
                     ) : (
-                      <div className="w-14 h-14 bg-orange-50 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <Icons.Package className="w-7 h-7 text-orange-400" />
+                      <div className="w-14 h-14 bg-arda-warning-bg rounded-lg flex items-center justify-center flex-shrink-0">
+                        <Icons.Package className="w-7 h-7 text-arda-accent" />
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
@@ -1096,7 +1115,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
                       </div>
                       <div className="flex items-center gap-2 mt-1">
                         {(item.unitPrice ?? 0) > 0 && (
-                          <span className="text-sm text-green-600 font-bold">
+                          <span className="text-sm text-arda-success-text font-bold">
                             ${(item.unitPrice ?? 0).toFixed(2)}
                           </span>
                         )}
@@ -1116,15 +1135,15 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
       {/* McMaster-Carr & Uline Card */}
       <div className={`border-2 rounded-2xl p-6 transition-all ${
         priorityError
-          ? 'bg-red-50 border-red-200'
+          ? 'bg-arda-danger-bg border-arda-danger-border'
           : isPriorityComplete 
-            ? 'bg-green-50 border-green-300 shadow-md'
-            : 'bg-blue-50 border-blue-200 shadow-sm'
+            ? 'bg-arda-success-bg border-arda-success-border shadow-md'
+            : 'bg-arda-info-bg border-arda-info-border shadow-sm'
       }`}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-4">
             <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-              isPriorityComplete ? 'bg-green-500' : 'bg-blue-500'
+              isPriorityComplete ? 'bg-arda-success' : 'bg-arda-info'
             }`}>
               {priorityError ? (
                 <Icons.AlertCircle className="w-6 h-6 text-white" />
@@ -1136,7 +1155,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
             </div>
             <div>
               <h3 className="text-xl font-bold text-arda-text-primary">Industrial Suppliers</h3>
-              <p className={`text-sm ${priorityError ? 'text-red-600' : 'text-arda-text-secondary'}`}>
+              <p className={`text-sm ${priorityError ? 'text-arda-danger-text' : 'text-arda-text-secondary'}`}>
                 {prioritySummaryText}
               </p>
             </div>
@@ -1144,7 +1163,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
           
           {priorityProgress && !isPriorityComplete && !priorityError && (
             <div className="text-right">
-              <div className="text-2xl font-bold text-blue-600">
+              <div className="text-2xl font-bold text-arda-info-text">
                 {Math.round(priorityProgressPercent)}%
               </div>
               <div className="text-xs text-arda-text-muted">
@@ -1157,9 +1176,9 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         {/* Progress Bar */}
         {!isPriorityComplete && priorityProgress && !priorityError && (
           <div className="mb-4">
-            <div className="h-3 bg-blue-100 rounded-full overflow-hidden">
+            <div className="h-3 bg-arda-info-soft rounded-full overflow-hidden">
               <div 
-                className="h-full bg-gradient-to-r from-blue-500 to-blue-400 transition-all duration-300 rounded-full"
+                className="h-full bg-gradient-to-r from-arda-info to-arda-info-text transition-all duration-300 rounded-full"
                 style={{ width: `${priorityProgressPercent}%` }}
               />
             </div>
@@ -1174,10 +1193,10 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
                 order.items.map((item, itemIdx) => (
                   <div 
                     key={`${orderIdx}-${itemIdx}`} 
-                    className="bg-white border border-gray-200 rounded-xl p-3 flex items-center gap-3"
+                    className="bg-white border border-arda-border rounded-xl p-3 flex items-center gap-3"
                   >
-                    <div className="w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center flex-shrink-0">
-                      <Icons.Package className="w-5 h-5 text-blue-500" />
+                    <div className="w-10 h-10 bg-arda-info-bg rounded-lg flex items-center justify-center flex-shrink-0">
+                      <Icons.Package className="w-5 h-5 text-arda-info" />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium text-arda-text-primary line-clamp-1">
@@ -1185,12 +1204,12 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
                       </div>
                       <div className="flex items-center gap-2 mt-0.5">
                         {(item.unitPrice ?? 0) > 0 && (
-                          <span className="text-sm text-blue-600 font-bold">
+                          <span className="text-sm text-arda-info-text font-bold">
                             ${(item.unitPrice ?? 0).toFixed(2)}
                           </span>
                         )}
                         {item.quantity > 1 && (
-                          <span className="text-xs text-arda-text-muted bg-gray-100 px-1.5 py-0.5 rounded">
+                          <span className="text-xs text-arda-text-muted bg-arda-bg-tertiary px-1.5 py-0.5 rounded">
                             x{item.quantity}
                           </span>
                         )}
@@ -1207,38 +1226,20 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         )}
       </div>
 
-      {/* Lean Wisdom - Always visible */}
-      <div>
-        <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-xl p-5">
-          <div className="flex items-start gap-4">
-            <div className="flex-shrink-0 w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center">
-              <Icons.Lightbulb className="w-5 h-5 text-amber-600" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-amber-900 mb-1">
-                {isAnyProcessing ? 'While you wait, a word about batching...' : 'A word about batching...'}
-              </p>
-              <blockquote className="text-amber-800 italic text-sm leading-relaxed">
-                "{LEAN_WISDOM[wisdomIndex].quote}"
-              </blockquote>
-              <p className="text-xs text-amber-600 mt-2 font-medium">
-                {LEAN_WISDOM[wisdomIndex].attribution}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-
       {/* Additional Suppliers Section */}
-      <div className="border-2 border-gray-200 rounded-2xl p-6">
+      <div className="border-2 border-arda-border rounded-2xl p-6">
         <div className="flex items-center justify-between mb-4">
           <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-arda-border bg-arda-bg-secondary px-3 py-1 text-xs font-medium text-arda-text-secondary mb-2">
+              <Icons.Clock className="w-3.5 h-3.5" />
+              Optional
+            </div>
             <h3 className="text-xl font-bold text-arda-text-primary">Other Suppliers</h3>
             <p className="text-sm text-arda-text-secondary">
               {isDiscovering 
-                ? 'Discovering...' 
+                ? 'Scanning for additional supplier domains...' 
                 : hasStartedOtherImport
-                  ? 'Import started. Continue when ready.'
+                  ? 'Optional supplier import started. You can continue while it runs.'
                   : `${supplierCount} additional suppliers found`}
             </p>
           </div>
@@ -1248,10 +1249,10 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
               onClick={handleScanSuppliers}
               disabled={selectedOtherCount === 0 || hasStartedOtherImport}
               className={[
-                "px-5 py-2.5 rounded-xl font-medium transition-all flex items-center gap-2",
+                "btn-arda-primary !px-5 !py-2.5 !rounded-xl transition-all flex items-center gap-2",
                 selectedOtherCount > 0 && !hasStartedOtherImport
-                  ? "bg-arda-accent hover:bg-arda-accent-hover text-white"
-                  : "bg-arda-border text-arda-text-muted cursor-not-allowed"
+                  ? ""
+                  : "bg-arda-border hover:bg-arda-border text-arda-text-muted cursor-not-allowed"
               ].join(" ")}
             >
               <Icons.Download className="w-4 h-4" />
@@ -1265,15 +1266,15 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
         </div>
 
         {otherScanError && !isScanning && (
-          <div className="mb-4 bg-red-50 border border-red-200 rounded-xl p-4">
+          <div className="mb-4 bg-arda-danger-bg border border-arda-danger-border rounded-xl p-4">
             <div className="flex items-center gap-3">
-              <Icons.AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0" />
+              <Icons.AlertCircle className="w-5 h-5 text-arda-danger flex-shrink-0" />
               <div>
-                <span className="font-medium text-red-700">
+                <span className="font-medium text-arda-danger-text">
                   {otherScanError}
                 </span>
-                <p className="text-sm text-red-600 mt-1">
-                  Continue stays disabled until supplier import starts. Select suppliers and try again.
+                <p className="mt-1 text-sm text-arda-danger-text">
+                  Select any suppliers you want to include, then start the optional import or continue without them.
                 </p>
               </div>
             </div>
@@ -1282,16 +1283,16 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
         {/* Scanning Progress */}
         {isScanning && jobStatus && (
-          <div className="mb-4 bg-blue-50 border border-blue-200 rounded-xl p-4">
+          <div className="mb-4 bg-arda-info-bg border border-arda-info-border rounded-xl p-4">
             <div className="flex items-center gap-3 mb-2">
-              <Icons.Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
-              <span className="font-medium text-blue-700">
+              <Icons.Loader2 className="w-5 h-5 text-arda-info animate-spin" />
+              <span className="font-medium text-arda-info-text">
                 {jobStatus.progress?.currentTask || 'Processing...'}
               </span>
             </div>
-            <div className="h-2 bg-blue-100 rounded-full overflow-hidden">
+            <div className="h-2 bg-arda-info-soft rounded-full overflow-hidden">
               <div 
-                className="h-full bg-blue-500 transition-all duration-300"
+                className="h-full bg-arda-info transition-all duration-300"
                 style={{ 
                   width: `${(jobStatus.progress?.processed || 0) / Math.max(jobStatus.progress?.total || 1, 1) * 100}%` 
                 }}
@@ -1308,7 +1309,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
                         key={`${orderIdx}-${itemIdx}`} 
                         className="bg-white rounded-lg px-3 py-2 text-sm flex items-center gap-2"
                       >
-                        <Icons.Package className="w-4 h-4 text-green-500 flex-shrink-0" />
+                        <Icons.Package className="w-4 h-4 text-arda-success flex-shrink-0" />
                         <span className="truncate text-arda-text-primary">{item.name}</span>
                       </div>
                     ))
@@ -1321,14 +1322,14 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
         {/* Discovery Error Message */}
         {discoverError && !isDiscovering && (
-          <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <div className="mb-4 bg-arda-warning-bg border border-arda-warning-border rounded-xl p-4">
             <div className="flex items-center gap-3">
-              <Icons.AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0" />
+              <Icons.AlertCircle className="w-5 h-5 text-arda-warning flex-shrink-0" />
               <div>
-                <span className="font-medium text-amber-700">
+                <span className="font-medium text-arda-warning-text">
                   {discoverError === SESSION_EXPIRED_MESSAGE ? SESSION_EXPIRED_MESSAGE : 'Could not fully discover suppliers'}
                 </span>
-                <p className="text-sm text-amber-600 mt-1">
+                <p className="text-sm text-arda-warning mt-1">
                   {discoverError === SESSION_EXPIRED_MESSAGE
                     ? 'Please sign in again to continue importing suppliers.'
                     : 'Showing available suppliers. You can still select and import from the list below.'}
@@ -1350,7 +1351,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
                   flex flex-col items-center justify-center text-center
                   ${isEnabled 
                     ? 'bg-white border-arda-accent shadow-md scale-105' 
-                    : 'bg-gray-50 border-gray-200 hover:border-gray-300 opacity-60 hover:opacity-100'
+                    : 'bg-arda-bg-secondary border-arda-border hover:border-arda-border-hover opacity-60 hover:opacity-100'
                   }
                 `}
               >
@@ -1379,9 +1380,9 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
             {/* Animated progress message */}
             <div className="flex items-center justify-center gap-3">
               <div className="relative">
-                <Icons.Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
+                <Icons.Loader2 className="w-6 h-6 text-arda-info animate-spin" />
                 <div className="absolute inset-0 animate-ping opacity-30">
-                  <Icons.Loader2 className="w-6 h-6 text-blue-500" />
+                  <Icons.Loader2 className="w-6 h-6 text-arda-info" />
                 </div>
               </div>
               <span className="text-arda-text-secondary font-medium transition-opacity duration-300">
@@ -1390,10 +1391,10 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
             </div>
             
             {/* Scanning animation - shows activity */}
-            <div className="bg-gradient-to-r from-blue-50 to-purple-50 border border-blue-100 rounded-xl p-4">
+            <div className="bg-gradient-to-r from-arda-info-bg to-arda-bg-secondary border border-arda-info-border rounded-xl p-4">
               <div className="flex items-center gap-2 mb-3">
-                <Icons.Search className="w-4 h-4 text-blue-500 animate-pulse" />
-                <span className="text-sm font-medium text-blue-700">
+                <Icons.Search className="w-4 h-4 text-arda-info animate-pulse" />
+                <span className="text-sm font-medium text-arda-info-text">
                   {DISCOVERY_MESSAGES[discoveryMessageIndex]}
                 </span>
               </div>
@@ -1409,7 +1410,7 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
                         animationDelay: `${i * 150}ms`,
                       }}
                     />
-                    <div className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" style={{ animationDelay: `${i * 200}ms` }} />
+                    <div className="w-2 h-2 rounded-full bg-arda-info animate-pulse" style={{ animationDelay: `${i * 200}ms` }} />
                   </div>
                 ))}
               </div>
@@ -1420,11 +1421,11 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
               {[0, 1, 2, 3, 4, 5].map((i) => (
                 <div
                   key={i}
-                  className="aspect-square p-3 rounded-xl border-2 border-gray-100 bg-gray-50 flex flex-col items-center justify-center animate-pulse"
+                  className="aspect-square p-3 rounded-xl border-2 border-arda-border bg-arda-bg-secondary flex flex-col items-center justify-center animate-pulse"
                   style={{ animationDelay: `${i * 100}ms` }}
                 >
-                  <div className="w-8 h-8 rounded-lg bg-gray-200 mb-2" />
-                  <div className="w-16 h-3 rounded bg-gray-200" />
+                  <div className="w-8 h-8 rounded-lg bg-arda-border mb-2" />
+                  <div className="w-16 h-3 rounded bg-arda-border" />
                 </div>
               ))}
             </div>
@@ -1435,9 +1436,9 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
 
       {/* Insights Preview Card - Tease value */}
       {allItems.length >= 10 && (
-        <div className="bg-gradient-to-br from-purple-50 to-blue-50 border-2 border-purple-200 rounded-2xl p-6">
+        <div className="bg-gradient-to-br from-arda-info-bg to-arda-bg-secondary border-2 border-arda-info-border rounded-2xl p-6">
           <div className="flex items-start gap-4">
-            <div className="w-12 h-12 bg-purple-500 rounded-xl flex items-center justify-center flex-shrink-0">
+            <div className="w-12 h-12 bg-arda-info rounded-xl flex items-center justify-center flex-shrink-0">
               <Icons.BarChart3 className="w-6 h-6 text-white" />
             </div>
             <div className="flex-1">
@@ -1448,67 +1449,22 @@ export const SupplierSetup: React.FC<SupplierSetupProps> = ({
                 Based on your {allItems.length} items, Arda will help you:
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="bg-white/70 rounded-lg p-3">
-                  <div className="text-lg font-bold text-purple-600">🔄</div>
+                <div className="bg-white/70 border border-arda-border rounded-lg p-3">
+                  <div className="text-lg font-bold text-arda-info-text">🔄</div>
                   <div className="text-sm font-medium text-arda-text-primary">Auto-Reorder</div>
                   <div className="text-xs text-arda-text-muted">Set up Kanban cards</div>
                 </div>
-                <div className="bg-white/70 rounded-lg p-3">
-                  <div className="text-lg font-bold text-blue-600">📈</div>
+                <div className="bg-white/70 border border-arda-border rounded-lg p-3">
+                  <div className="text-lg font-bold text-arda-info-text">📈</div>
                   <div className="text-sm font-medium text-arda-text-primary">Track Velocity</div>
                   <div className="text-xs text-arda-text-muted">See consumption patterns</div>
                 </div>
-                <div className="bg-white/70 rounded-lg p-3">
-                  <div className="text-lg font-bold text-green-600">💰</div>
+                <div className="bg-white/70 border border-arda-border rounded-lg p-3">
+                  <div className="text-lg font-bold text-arda-success-text">💰</div>
                   <div className="text-sm font-medium text-arda-text-primary">Optimize Spend</div>
                   <div className="text-xs text-arda-text-muted">Find savings opportunities</div>
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showContinueAnytimePopup && (
-        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="continue-anytime-title"
-            className="bg-white rounded-2xl shadow-xl border border-blue-100 w-full max-w-md p-6"
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div className="flex items-start gap-3">
-                <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0">
-                  <Icons.Clock className="w-4 h-4 text-blue-700" />
-                </div>
-                <div>
-                  <h2 id="continue-anytime-title" className="text-base font-semibold text-blue-900">
-                    Continue anytime
-                  </h2>
-                  <p className="text-sm text-blue-800 mt-1">
-                    Email import keeps running in the background after you move to the next step. We’ll keep adding
-                    items as scans finish.
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                aria-label="Close continue anytime popup"
-                onClick={() => setShowContinueAnytimePopup(false)}
-                className="text-arda-text-muted hover:text-arda-text-primary transition-colors"
-              >
-                <Icons.X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="mt-5 flex justify-end">
-              <button
-                type="button"
-                onClick={() => setShowContinueAnytimePopup(false)}
-                className="px-4 py-2 rounded-lg bg-arda-accent hover:bg-arda-accent-hover text-white font-medium transition-colors"
-              >
-                Got it
-              </button>
             </div>
           </div>
         </div>

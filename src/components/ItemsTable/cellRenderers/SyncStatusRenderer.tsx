@@ -12,16 +12,16 @@ export const SyncStatusRenderer = (props: SyncStatusRendererProps) => {
 
   switch (status) {
     case 'syncing':
-      return <Icons.Loader2 className="w-4 h-4 text-orange-500 animate-spin" />;
+      return <Icons.Loader2 className="w-4 h-4 text-arda-warning animate-spin" />;
     case 'success':
-      return <Icons.CheckCircle2 className="w-4 h-4 text-green-500" />;
+      return <Icons.CheckCircle2 className="w-4 h-4 text-arda-success" />;
     case 'error':
       return (
         <span title={syncState?.error}>
-          <Icons.AlertCircle className="w-4 h-4 text-red-500" />
+          <Icons.AlertCircle className="w-4 h-4 text-arda-danger" />
         </span>
       );
     default:
-      return <span className="w-4 h-4 rounded-full border-2 border-dashed border-gray-300 inline-block" />;
+      return <span className="inline-block w-4 h-4 rounded-full border-2 border-dashed border-arda-border" />;
   }
 };

@@ -51,8 +51,8 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth, onLogi
   return (
     <div className="relative min-h-screen arda-mesh flex items-center justify-center p-6">
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute -top-10 left-6 w-48 h-48 rounded-full bg-orange-400/15 blur-3xl animate-float" />
-        <div className="absolute bottom-0 right-12 w-64 h-64 rounded-full bg-blue-500/15 blur-3xl animate-float" />
+        <div className="absolute -top-10 left-6 w-48 h-48 rounded-full bg-arda-accent/15 blur-3xl animate-float" />
+        <div className="absolute bottom-0 right-12 w-64 h-64 rounded-full bg-arda-info/15 blur-3xl animate-float" />
       </div>
 
       <div className="relative z-10 w-full max-w-5xl grid lg:grid-cols-2 gap-8 items-center">
@@ -92,7 +92,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth, onLogi
               <p className="text-sm uppercase tracking-wide text-arda-text-muted">Sign in</p>
               <h2 className="text-2xl font-bold text-arda-text-primary">Continue with Arda</h2>
             </div>
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-orange-500 to-orange-600 flex items-center justify-center shadow-arda-lg">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-arda-accent to-arda-accent-hover flex items-center justify-center shadow-arda-lg">
               <Icons.Inbox className="w-6 h-6 text-white" />
             </div>
           </div>
@@ -111,7 +111,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth, onLogi
           <div className="space-y-4">
             {onCheckingAuth ? (
               <div className="flex flex-col items-center py-6">
-                <div className="animate-spin w-10 h-10 border-2 border-orange-500 border-t-transparent rounded-full mb-4" />
+                <div className="animate-spin w-10 h-10 border-2 border-arda-accent border-t-transparent rounded-full mb-4" />
                 <span className="text-arda-text-muted">Checking authentication...</span>
               </div>
             ) : (
@@ -123,7 +123,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth, onLogi
                       placeholder="Full name"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
-                      className="w-full px-4 py-3 rounded-xl border border-arda-border bg-white/90 text-arda-text-primary focus:outline-none focus:ring-2 focus:ring-orange-400"
+                      className="w-full px-4 py-3 rounded-xl border border-arda-border bg-white/90 text-arda-text-primary focus:outline-none focus:ring-2 focus:ring-arda-accent"
                       required
                     />
                   )}
@@ -132,7 +132,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth, onLogi
                     placeholder="Email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-arda-border bg-white/90 text-arda-text-primary focus:outline-none focus:ring-2 focus:ring-orange-400"
+                    className="w-full px-4 py-3 rounded-xl border border-arda-border bg-white/90 text-arda-text-primary focus:outline-none focus:ring-2 focus:ring-arda-accent"
                     required
                   />
                   <input
@@ -140,11 +140,11 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth, onLogi
                     placeholder="Password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl border border-arda-border bg-white/90 text-arda-text-primary focus:outline-none focus:ring-2 focus:ring-orange-400"
+                    className="w-full px-4 py-3 rounded-xl border border-arda-border bg-white/90 text-arda-text-primary focus:outline-none focus:ring-2 focus:ring-arda-accent"
                     required
                   />
                   {error && (
-                    <div className="text-sm text-red-600">{error}</div>
+                    <div className="text-sm text-arda-danger-text">{error}</div>
                   )}
                   <button
                     type="submit"
@@ -163,7 +163,7 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onCheckingAuth, onLogi
 
                 <button
                   onClick={handleGoogleLogin}
-                  className="w-full flex items-center justify-center gap-3 bg-white hover:bg-gray-50 text-arda-text-primary font-semibold py-3 px-4 rounded-xl transition-all shadow-arda-lg hover:shadow-arda-hover border border-arda-border"
+                  className="w-full btn-arda-outline !py-3 !rounded-xl flex items-center justify-center gap-3 shadow-arda-lg hover:shadow-arda-hover"
                 >
                   <svg className="w-5 h-5" viewBox="0 0 24 24" aria-hidden="true">
                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>

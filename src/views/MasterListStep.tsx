@@ -32,6 +32,27 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
     () => items.filter(item => syncStateById[item.id]?.status === 'success'),
     [items, syncStateById],
   );
+  const sourceCounts = useMemo(() => (
+    items.reduce<Record<MasterListItem['source'], number>>((counts, item) => {
+      counts[item.source] += 1;
+      return counts;
+    }, {
+      email: 0,
+      url: 0,
+      barcode: 0,
+      photo: 0,
+      csv: 0,
+    })
+  ), [items]);
+  const failedCount = useMemo(
+    () => items.filter(item => syncStateById[item.id]?.status === 'error').length,
+    [items, syncStateById],
+  );
+  const attentionCount = useMemo(
+    () => items.filter(item => item.needsAttention).length,
+    [items],
+  );
+  const unsyncedApprovedCount = Math.max(items.length - syncedItems.length, 0);
 
   const hasSyncInProgress = useMemo(
     () => isBulkSyncing || Object.values(syncStateById).some(state => state.status === 'syncing'),
@@ -69,20 +90,42 @@ export const MasterListStep: React.FC<MasterListStepProps> = ({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4 text-sm">
-          <span className="font-medium">{items.length} items</span>
-          <span className="text-green-600">{syncedItems.length} synced</span>
-          {items.filter(i => syncStateById[i.id]?.status === 'error').length > 0 && (
-            <span className="text-red-600">
-              {items.filter(i => syncStateById[i.id]?.status === 'error').length} failed
-            </span>
-          )}
-          {items.filter(i => i.needsAttention).length > 0 && (
-            <span className="text-orange-600">
-              {items.filter(i => i.needsAttention).length} need attention
-            </span>
-          )}
+      <div className="rounded-2xl border border-arda-border bg-white/90 p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-center gap-4 text-sm flex-wrap">
+            <span className="font-medium">{items.length} items</span>
+            <span className="text-arda-success-text">{syncedItems.length} synced</span>
+            {failedCount > 0 && (
+              <span className="text-arda-danger-text">{failedCount} failed</span>
+            )}
+            {attentionCount > 0 && (
+              <span className="text-arda-warning-text">{attentionCount} need attention</span>
+            )}
+            <span className="text-arda-info-text">{unsyncedApprovedCount} unsynced approved items</span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs min-w-0 lg:min-w-[30rem]">
+            <div className="rounded-xl bg-arda-bg-secondary px-3 py-2">
+              <div className="text-arda-text-muted uppercase tracking-wide">Email</div>
+              <div className="mt-1 font-semibold text-arda-text-primary">{sourceCounts.email}</div>
+            </div>
+            <div className="rounded-xl bg-arda-bg-secondary px-3 py-2">
+              <div className="text-arda-text-muted uppercase tracking-wide">URL</div>
+              <div className="mt-1 font-semibold text-arda-text-primary">{sourceCounts.url}</div>
+            </div>
+            <div className="rounded-xl bg-arda-bg-secondary px-3 py-2">
+              <div className="text-arda-text-muted uppercase tracking-wide">Barcode</div>
+              <div className="mt-1 font-semibold text-arda-text-primary">{sourceCounts.barcode}</div>
+            </div>
+            <div className="rounded-xl bg-arda-bg-secondary px-3 py-2">
+              <div className="text-arda-text-muted uppercase tracking-wide">Photo</div>
+              <div className="mt-1 font-semibold text-arda-text-primary">{sourceCounts.photo}</div>
+            </div>
+            <div className="rounded-xl bg-arda-bg-secondary px-3 py-2">
+              <div className="text-arda-text-muted uppercase tracking-wide">CSV</div>
+              <div className="mt-1 font-semibold text-arda-text-primary">{sourceCounts.csv}</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>

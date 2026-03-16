@@ -1,6 +1,14 @@
 import { useCallback, useMemo, useRef } from 'react';
 import { AgGridReact } from 'ag-grid-react';
-import type { ColDef, GridReadyEvent, CellValueChangedEvent, GetRowIdParams, RowClassRules } from 'ag-grid-community';
+import type {
+  ColDef,
+  GridReadyEvent,
+  CellValueChangedEvent,
+  GetRowIdParams,
+  RowClassRules,
+  RowSelectionOptions,
+  SelectionColumnDef,
+} from 'ag-grid-community';
 import { themeQuartz } from 'ag-grid-community';
 import './gridSetup';
 import './ardaGridTheme.css';
@@ -78,19 +86,6 @@ export const ItemsGrid: React.FC<ItemsGridProps> = ({
 
   const columnDefs = useMemo<ColDef<MasterListItem>[]>(
     () => [
-      {
-        headerCheckboxSelection: true,
-        checkboxSelection: true,
-        width: 44,
-        maxWidth: 44,
-        pinned: 'left',
-        suppressMenu: true,
-        resizable: false,
-        sortable: false,
-        filter: false,
-        editable: false,
-        lockPosition: true,
-      },
       {
         headerName: 'Source',
         field: 'source',
@@ -246,6 +241,30 @@ export const ItemsGrid: React.FC<ItemsGridProps> = ({
     [mode, syncStateById, onSyncSingle, onRemoveItem],
   );
 
+  const rowSelection = useMemo<RowSelectionOptions<MasterListItem>>(
+    () => ({
+      mode: 'multiRow',
+      checkboxes: true,
+      headerCheckbox: true,
+      enableClickSelection: false,
+    }),
+    [],
+  );
+
+  const selectionColumnDef = useMemo<SelectionColumnDef>(
+    () => ({
+      width: 44,
+      maxWidth: 44,
+      pinned: 'left',
+      resizable: false,
+      sortable: false,
+      suppressMovable: true,
+      lockPosition: true,
+      suppressHeaderMenuButton: true,
+    }),
+    [],
+  );
+
   const defaultColDef = useMemo<ColDef>(
     () => ({
       resizable: true,
@@ -270,17 +289,17 @@ export const ItemsGrid: React.FC<ItemsGridProps> = ({
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Header bar */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 bg-gray-50/50">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-arda-border bg-arda-bg-secondary/70">
         <div className="flex items-center gap-3">
-          <h3 className="text-sm font-semibold text-gray-700">Item Ledger</h3>
-          <span className="text-xs text-gray-500">{items.length} items</span>
+          <h3 className="text-sm font-semibold text-arda-text">Item Ledger</h3>
+          <span className="text-xs text-arda-text-muted">{items.length} items</span>
           {Object.values(syncStateById).filter((s) => s.status === 'success').length > 0 && (
-            <span className="text-xs text-green-600">
+            <span className="text-xs text-arda-success-text">
               {Object.values(syncStateById).filter((s) => s.status === 'success').length} synced
             </span>
           )}
           {Object.values(syncStateById).filter((s) => s.status === 'error').length > 0 && (
-            <span className="text-xs text-red-600">
+            <span className="text-xs text-arda-danger-text">
               {Object.values(syncStateById).filter((s) => s.status === 'error').length} failed
             </span>
           )}
@@ -302,13 +321,13 @@ export const ItemsGrid: React.FC<ItemsGridProps> = ({
           rowData={items}
           columnDefs={columnDefs}
           defaultColDef={defaultColDef}
+          selectionColumnDef={selectionColumnDef}
           getRowId={getRowId}
           rowClassRules={rowClassRules}
           onCellValueChanged={onCellValueChanged}
           onGridReady={onGridReady}
           // Selection
-          rowSelection="multiple"
-          suppressRowClickSelection
+          rowSelection={rowSelection}
           // Editing
           singleClickEdit
           stopEditingWhenCellsLoseFocus
@@ -321,7 +340,7 @@ export const ItemsGrid: React.FC<ItemsGridProps> = ({
           suppressColumnVirtualisation={items.length < 100}
           rowBuffer={10}
           // Empty state
-          overlayNoRowsTemplate='<div class="p-8 text-center text-gray-400"><div class="text-lg mb-1">No items yet</div><div class="text-sm">Items will appear here as you collect them from each step.</div></div>'
+          overlayNoRowsTemplate='<div class="p-8 text-center text-arda-text-muted"><div class="text-lg mb-1">No items yet</div><div class="text-sm">Items will appear here as you collect them from each step.</div></div>'
         />
       </div>
     </div>

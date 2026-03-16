@@ -2,8 +2,8 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Icons } from '../components/Icons';
 import { ExtractedOrder } from '../types';
 import { buildVelocityProfiles, normalizeItemName } from '../utils/inventoryLogic';
-import { SupplierSetup, EmailScanState } from './SupplierSetup';
-import { UrlScrapeStep } from './UrlScrapeStep';
+import { SupplierSetup, EmailScanState, BackgroundEmailProgress } from './SupplierSetup';
+import { UrlScrapeStep, UrlReviewState } from './UrlScrapeStep';
 import { BarcodeScanStep } from './BarcodeScanStep';
 import { PhotoCaptureStep } from './PhotoCaptureStep';
 import { CSVUploadStep, CSVItem, CSVFooterState } from './CSVUploadStep';
@@ -32,6 +32,8 @@ interface EmailItem {
 
 // Onboarding step definitions
 export type OnboardingStep = 'welcome' | 'email' | 'integrations' | 'url' | 'barcode' | 'photo' | 'csv' | 'masterlist';
+type StepGroup = 'required' | 'optional';
+type DerivedStepStatus = 'not_started' | 'in_progress' | 'ready' | 'optional' | 'done';
 
 interface StepConfig {
   id: OnboardingStep;
@@ -41,7 +43,34 @@ interface StepConfig {
   tipsTitle: string;
   tips: string[];
   icon: keyof typeof Icons;
+  group: StepGroup;
+  estimatedTime: string;
+  bestFor: string;
+  valueLabel: string;
 }
+
+export interface OnboardingCompletionSummary {
+  totalItems: number;
+  syncedItems: number;
+  unsyncedItems: number;
+  needsAttentionItems: number;
+  sourceCounts: Record<MasterListItem['source'], number>;
+}
+
+interface OnboardingDraftState {
+  currentStep: OnboardingStep;
+  completedSteps: OnboardingStep[];
+  hasStartedEmailSync: boolean;
+  emailOrders: ExtractedOrder[];
+  urlItems: UrlScrapedItem[];
+  scannedBarcodes: ScannedBarcode[];
+  csvItems: CSVItem[];
+  emailScanState?: EmailScanState;
+  emailBackgroundProgress?: BackgroundEmailProgress | null;
+  urlReviewState?: UrlReviewState;
+}
+
+const ONBOARDING_DRAFT_STORAGE_KEY = 'orderPulse_onboardingDraft';
 
 const ONBOARDING_STEPS: StepConfig[] = [
   {
@@ -56,6 +85,10 @@ const ONBOARDING_STEPS: StepConfig[] = [
       'Review and sync items to Arda.',
     ],
     icon: 'Sparkles',
+    group: 'required',
+    estimatedTime: '1 min',
+    bestFor: 'New accounts',
+    valueLabel: 'Choose the fastest import path',
   },
   {
     id: 'email',
@@ -69,6 +102,10 @@ const ONBOARDING_STEPS: StepConfig[] = [
       'Select any extra suppliers to import.',
     ],
     icon: 'Mail',
+    group: 'required',
+    estimatedTime: '2-4 min',
+    bestFor: 'Recent purchase history',
+    valueLabel: 'Import your first items automatically',
   },
   {
     id: 'integrations',
@@ -82,6 +119,10 @@ const ONBOARDING_STEPS: StepConfig[] = [
       'Continue when ready.',
     ],
     icon: 'Building2',
+    group: 'optional',
+    estimatedTime: '1-2 min',
+    bestFor: 'Purchase order data',
+    valueLabel: 'Pull orders from accounting tools',
   },
   {
     id: 'url',
@@ -96,6 +137,10 @@ const ONBOARDING_STEPS: StepConfig[] = [
       'Import approved rows to the master list.',
     ],
     icon: 'Link',
+    group: 'optional',
+    estimatedTime: '2-5 min',
+    bestFor: 'Supplier websites and catalog links',
+    valueLabel: 'Turn product links into items',
   },
   {
     id: 'barcode',
@@ -109,6 +154,10 @@ const ONBOARDING_STEPS: StepConfig[] = [
       'Confirm items appear below.',
     ],
     icon: 'Barcode',
+    group: 'optional',
+    estimatedTime: '1-3 min',
+    bestFor: 'Items already on shelves',
+    valueLabel: 'Capture barcode-based inventory',
   },
   {
     id: 'photo',
@@ -122,6 +171,10 @@ const ONBOARDING_STEPS: StepConfig[] = [
       'Confirm details before continuing.',
     ],
     icon: 'Camera',
+    group: 'optional',
+    estimatedTime: '2-4 min',
+    bestFor: 'Labels or bins without clean data',
+    valueLabel: 'Extract item details from photos',
   },
   {
     id: 'csv',
@@ -135,6 +188,10 @@ const ONBOARDING_STEPS: StepConfig[] = [
       'Approve items to import.',
     ],
     icon: 'FileSpreadsheet',
+    group: 'optional',
+    estimatedTime: '2-4 min',
+    bestFor: 'Existing spreadsheets',
+    valueLabel: 'Bulk import tabular inventory',
   },
   {
     id: 'masterlist',
@@ -148,8 +205,32 @@ const ONBOARDING_STEPS: StepConfig[] = [
       'Complete setup when ready.',
     ],
     icon: 'ListChecks',
+    group: 'required',
+    estimatedTime: '2 min',
+    bestFor: 'Final review',
+    valueLabel: 'Clean up and sync approved items',
   },
 ];
+
+const emptySourceCounts = (): Record<MasterListItem['source'], number> => ({
+  email: 0,
+  url: 0,
+  barcode: 0,
+  photo: 0,
+  csv: 0,
+});
+
+const loadOnboardingDraft = (): OnboardingDraftState | null => {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const raw = window.localStorage.getItem(ONBOARDING_DRAFT_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as OnboardingDraftState;
+  } catch {
+    return null;
+  }
+};
 
 const ItemsGrid = lazy(async () => {
   const module = await import('../components/ItemsTable/ItemsGrid');
@@ -255,7 +336,7 @@ export interface ReconciliationItem {
 }
 
 interface OnboardingFlowProps {
-  onComplete: (items: MasterListItem[]) => void;
+  onComplete: (summary: OnboardingCompletionSummary) => void;
   onSkip: () => void;
   userProfile?: { name?: string; email?: string };
   initialReturnTo?: string | null;
@@ -269,6 +350,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   userProfile,
   initialReturnTo,
 }) => {
+  const persistedDraft = useMemo(() => loadOnboardingDraft(), []);
   const hasIntegrationCallback = (() => {
     const params = new URLSearchParams(window.location.search);
     return Boolean(params.get('integration_provider') && params.get('integration_status'));
@@ -279,24 +361,25 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   const [currentStep, setCurrentStep] = useState<OnboardingStep>(() => {
     if (hasEmailReturnTo) return 'email';
     if (hasIntegrationCallback) return 'integrations';
+    if (persistedDraft?.currentStep) return persistedDraft.currentStep;
     return 'welcome';
   });
   const [completedSteps, setCompletedSteps] = useState<Set<OnboardingStep>>(() => {
     if (hasEmailReturnTo) return new Set<OnboardingStep>(['welcome']);
     if (hasIntegrationCallback) return new Set<OnboardingStep>(['welcome', 'email']);
-    return new Set();
+    return new Set(persistedDraft?.completedSteps ?? []);
   });
-  const [hasStartedEmailSync, setHasStartedEmailSync] = useState(hasEmailReturnTo);
+  const [hasStartedEmailSync, setHasStartedEmailSync] = useState(hasEmailReturnTo || persistedDraft?.hasStartedEmailSync || false);
   const [tipsOpenForStep, setTipsOpenForStep] = useState<OnboardingStep | null>(null);
   const tipsWrapperRef = useRef<HTMLDivElement | null>(null);
   
   // Data from each step
-  const [emailOrders, setEmailOrders] = useState<ExtractedOrder[]>([]);
+  const [emailOrders, setEmailOrders] = useState<ExtractedOrder[]>(persistedDraft?.emailOrders ?? []);
   const emailItems = useMemo(() => buildEmailItemsFromOrders(emailOrders), [emailOrders]);
-  const [urlItems, setUrlItems] = useState<UrlScrapedItem[]>([]);
-  const [scannedBarcodes, setScannedBarcodes] = useState<ScannedBarcode[]>([]);
+  const [urlItems, setUrlItems] = useState<UrlScrapedItem[]>(persistedDraft?.urlItems ?? []);
+  const [scannedBarcodes, setScannedBarcodes] = useState<ScannedBarcode[]>(persistedDraft?.scannedBarcodes ?? []);
   const [capturedPhotos, setCapturedPhotos] = useState<CapturedPhoto[]>([]);
-  const [csvItems, setCsvItems] = useState<CSVItem[]>([]);
+  const [csvItems, setCsvItems] = useState<CSVItem[]>(persistedDraft?.csvItems ?? []);
   const [csvFooterState, setCsvFooterState] = useState<CSVFooterState>({
     approvedCount: 0,
     canContinue: false,
@@ -326,11 +409,20 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
 
   // Track when user can proceed from email step (Amazon + priority done)
   const [canProceedFromEmail, setCanProceedFromEmail] = useState(false);
-  const [canProceedFromUrl, setCanProceedFromUrl] = useState(true);
-  const [urlReviewBlockMessage, setUrlReviewBlockMessage] = useState<string | null>(null);
+  const [urlReviewState, setUrlReviewState] = useState<UrlReviewState>(
+    persistedDraft?.urlReviewState ?? {
+      pendingReviewCount: 0,
+      unimportedApprovedCount: 0,
+      totalRows: 0,
+      canContinue: true,
+    },
+  );
   
   // Preserve email scan state for navigation
-  const [emailScanState, setEmailScanState] = useState<EmailScanState | undefined>(undefined);
+  const [emailScanState, setEmailScanState] = useState<EmailScanState | undefined>(persistedDraft?.emailScanState);
+  const [emailBackgroundProgress, setEmailBackgroundProgress] = useState<BackgroundEmailProgress | null>(
+    persistedDraft?.emailBackgroundProgress ?? null,
+  );
   
   // Mobile session ID for syncing
   const [mobileSessionId] = useState(() => 
@@ -357,6 +449,21 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   );
 
   const { syncStateById, setSyncStateById, syncSingleItem, syncSelectedItems, isBulkSyncing } = useSyncToArda(masterItems);
+  const sourceCounts = useMemo(() => (
+    masterItems.reduce<Record<MasterListItem['source'], number>>((counts, item) => {
+      counts[item.source] += 1;
+      return counts;
+    }, emptySourceCounts())
+  ), [masterItems]);
+  const syncedItemsCount = useMemo(
+    () => masterItems.filter(item => syncStateById[item.id]?.status === 'success').length,
+    [masterItems, syncStateById],
+  );
+  const unsyncedApprovedItemsCount = Math.max(masterItems.length - syncedItemsCount, 0);
+  const needsAttentionCount = useMemo(
+    () => masterItems.filter(item => item.needsAttention).length,
+    [masterItems],
+  );
 
   const isPanelVisible = masterItems.length > 0;
 
@@ -364,8 +471,8 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
     <div
       className={
         mode === 'panel'
-          ? 'flex h-full min-h-[420px] items-center justify-center bg-slate-50/70 text-sm text-slate-500'
-          : 'flex min-h-[60vh] items-center justify-center bg-slate-50/70 text-sm text-slate-500'
+          ? 'flex h-full min-h-[420px] items-center justify-center bg-arda-bg-secondary text-sm text-arda-text-muted'
+          : 'flex min-h-[60vh] items-center justify-center bg-arda-bg-secondary text-sm text-arda-text-muted'
       }
     >
       Loading inventory grid...
@@ -413,6 +520,14 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
     };
   }, [currentStep]);
   const tipsOpen = tipsOpenForStep === currentStep;
+  const requiredSteps = useMemo(
+    () => ONBOARDING_STEPS.filter(step => step.group === 'required' && step.id !== 'welcome'),
+    [],
+  );
+  const firstIncompleteRequiredStep = useMemo(
+    () => requiredSteps.find(step => !completedSteps.has(step.id) && step.id !== currentStep)?.id ?? null,
+    [completedSteps, currentStep, requiredSteps],
+  );
 
   useEffect(() => {
     if (!tipsOpen) return;
@@ -437,6 +552,60 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
       document.removeEventListener('pointerdown', handlePointerDown);
     };
   }, [tipsOpen]);
+
+  const urlReviewBlockMessage = useMemo(() => {
+    if (urlReviewState.canContinue || urlReviewState.totalRows === 0) {
+      return null;
+    }
+    if (urlReviewState.pendingReviewCount > 0) {
+      return `Review or delete the remaining URL rows before continuing (${urlReviewState.pendingReviewCount} still need attention).`;
+    }
+    if (urlReviewState.unimportedApprovedCount > 0) {
+      return `Import approved URL rows before continuing (${urlReviewState.unimportedApprovedCount} still waiting).`;
+    }
+    return 'Review and import URL rows before continuing.';
+  }, [urlReviewState]);
+
+  useEffect(() => {
+    const draftState: OnboardingDraftState = {
+      currentStep,
+      completedSteps: Array.from(completedSteps),
+      hasStartedEmailSync,
+      emailOrders,
+      urlItems,
+      scannedBarcodes,
+      csvItems,
+      emailScanState,
+      emailBackgroundProgress,
+      urlReviewState,
+    };
+
+    const hasMeaningfulDraft = hasStartedEmailSync
+      || completedSteps.size > 0
+      || currentStep !== 'welcome'
+      || emailOrders.length > 0
+      || urlItems.length > 0
+      || scannedBarcodes.length > 0
+      || csvItems.length > 0;
+
+    if (!hasMeaningfulDraft) {
+      window.localStorage.removeItem(ONBOARDING_DRAFT_STORAGE_KEY);
+      return;
+    }
+
+    window.localStorage.setItem(ONBOARDING_DRAFT_STORAGE_KEY, JSON.stringify(draftState));
+  }, [
+    completedSteps,
+    currentStep,
+    csvItems,
+    emailBackgroundProgress,
+    emailOrders,
+    emailScanState,
+    hasStartedEmailSync,
+    scannedBarcodes,
+    urlItems,
+    urlReviewState,
+  ]);
   
   // Check if can go back
   const canGoBack = currentStepIndex > 0;
@@ -444,7 +613,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   const canGoForward = currentStep === 'email'
     ? canProceedFromEmail
     : currentStep === 'url'
-      ? canProceedFromUrl
+      ? urlReviewState.canContinue
       : true;
 
   // Handle step completion
@@ -517,44 +686,31 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   // Handle master list completion
   const handleMasterListComplete = useCallback(() => {
     handleStepComplete('masterlist');
-    const syncedItems = masterItems.filter(item => syncStateById[item.id]?.status === 'success');
-    onComplete(syncedItems);
-  }, [handleStepComplete, masterItems, onComplete, syncStateById]);
+    onComplete({
+      totalItems: masterItems.length,
+      syncedItems: syncedItemsCount,
+      unsyncedItems: Math.max(masterItems.length - syncedItemsCount, 0),
+      needsAttentionItems: needsAttentionCount,
+      sourceCounts,
+    });
+  }, [handleStepComplete, masterItems.length, needsAttentionCount, onComplete, sourceCounts, syncedItemsCount]);
 
   // Handle when user can proceed from email step (key suppliers done)
   const handleCanProceedFromEmail = useCallback((canProceed: boolean) => {
     setCanProceedFromEmail(canProceed);
   }, []);
 
-  const handleUrlReviewStateChange = useCallback((state: {
-    pendingReviewCount: number;
-    unimportedApprovedCount: number;
-    totalRows: number;
-    canContinue: boolean;
-  }) => {
-    setCanProceedFromUrl(state.canContinue);
-    if (state.canContinue || state.totalRows === 0) {
-      setUrlReviewBlockMessage(null);
-      return;
-    }
-    if (state.pendingReviewCount > 0) {
-      setUrlReviewBlockMessage(
-        `Review every scraped row before continuing (${state.pendingReviewCount} still pending).`,
-      );
-      return;
-    }
-    if (state.unimportedApprovedCount > 0) {
-      setUrlReviewBlockMessage(
-        `Import approved rows before continuing (${state.unimportedApprovedCount} still not imported).`,
-      );
-      return;
-    }
-    setUrlReviewBlockMessage('Review and import URL rows before continuing.');
+  const handleUrlReviewStateChange = useCallback((state: UrlReviewState) => {
+    setUrlReviewState(state);
   }, []);
 
   // Preserve email scan state for navigation
   const handleEmailScanStateChange = useCallback((state: EmailScanState) => {
     setEmailScanState(state);
+  }, []);
+
+  const handleEmailProgressUpdate = useCallback((progress: BackgroundEmailProgress | null) => {
+    setEmailBackgroundProgress(progress);
   }, []);
 
   const handleStartEmailSync = useCallback(() => {
@@ -589,20 +745,30 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
     }
   }, [currentStepIndex, currentStep, handleStepComplete]);
 
-  // Get step status
-  const getStepStatus = (stepId: OnboardingStep): 'completed' | 'current' | 'upcoming' => {
-    if (completedSteps.has(stepId)) return 'completed';
-    if (currentStep === stepId) return 'current';
-    return 'upcoming';
+  const getStepStatus = (stepId: OnboardingStep): DerivedStepStatus => {
+    if (completedSteps.has(stepId)) return 'done';
+    if (currentStep === stepId) return 'in_progress';
+
+    const step = ONBOARDING_STEPS.find(candidate => candidate.id === stepId);
+    if (!step) return 'not_started';
+
+    if (step.group === 'optional') {
+      return 'optional';
+    }
+
+    if (firstIncompleteRequiredStep === stepId) {
+      return 'ready';
+    }
+
+    return 'not_started';
   };
 
   const renderFooterNavigation = () => {
-    const handleSkip = () => {
-      if (currentStep === 'welcome') {
-        handleSkipEmailSync();
-        return;
-      }
+    if (currentStep === 'welcome') {
+      return null;
+    }
 
+    const handleSkip = () => {
       if (currentStep === 'csv') {
         const skip = csvFooterState.onSkip === noop
           ? () => handleCSVComplete([])
@@ -621,11 +787,6 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
     };
 
     const handleContinue = () => {
-      if (currentStep === 'welcome') {
-        handleStartEmailSync();
-        return;
-      }
-
       if (currentStep === 'csv') {
         csvFooterState.onContinue();
         return;
@@ -639,13 +800,17 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
       goForward();
     };
 
-    const continueDisabled = currentStep === 'welcome'
-      ? false
-      : currentStep === 'csv'
-        ? !csvFooterState.canContinue
-        : currentStep === 'masterlist'
-          ? !masterListFooterState.canComplete
-          : !canGoForward;
+    const continueLabel = currentStep === 'masterlist'
+      ? unsyncedApprovedItemsCount > 0
+        ? 'Finish for now'
+        : 'Complete setup'
+      : 'Continue';
+
+    const continueDisabled = currentStep === 'csv'
+      ? !csvFooterState.canContinue
+      : currentStep === 'masterlist'
+        ? !masterListFooterState.canComplete
+        : !canGoForward;
 
     return (
       <div
@@ -693,25 +858,11 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
               type="button"
               onClick={handleContinue}
               disabled={continueDisabled}
-              title={currentStep === 'email'
-                ? 'Continuing won’t stop email scanning. Import keeps running in the background.'
-                : undefined}
-              className={[
-                'flex items-center gap-2 px-4 py-2 rounded-arda font-semibold text-sm transition-colors',
-                !continueDisabled
-                  ? 'bg-arda-accent text-white hover:bg-arda-accent-hover'
-                  : 'bg-arda-border text-arda-text-muted cursor-not-allowed',
-              ].join(' ')}
+              className="btn-arda-primary flex items-center gap-2 disabled:bg-arda-border disabled:text-arda-text-muted disabled:cursor-not-allowed disabled:hover:bg-arda-border"
             >
-              Continue
+              {continueLabel}
               <Icons.ChevronRight className="w-4 h-4" />
             </button>
-
-            {currentStep === 'email' && (
-              <span className="sr-only">
-                Continuing won’t stop email scanning. Import keeps running in the background.
-              </span>
-            )}
           </div>
         </div>
       </div>
@@ -719,62 +870,141 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   };
 
   const renderStepIndicator = () => (
-    <div className="sticky top-0 z-40 border-b border-arda-border/70 bg-white/75 backdrop-blur relative">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-orange-500 to-orange-600 shadow-arda flex items-center justify-center flex-shrink-0">
-            <Icons.Package className="w-4 h-4 text-white" />
+    <div className="sticky top-0 z-40 relative border-b border-arda-border/70 bg-white/75 backdrop-blur">
+      <div className="max-w-6xl mx-auto px-4 py-2.5 sm:px-6">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2.5">
+            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-arda-accent to-arda-accent-hover shadow-arda">
+              <Icons.Package className="w-4 h-4 text-white" />
+            </div>
+            <div className="min-w-0 leading-tight">
+              <div className="text-sm font-semibold text-arda-text-primary">Arda</div>
+              <div className="hidden text-[11px] text-arda-text-muted sm:block">Order Pulse onboarding</div>
+            </div>
           </div>
-          <span className="text-sm font-semibold text-arda-text-primary flex-shrink-0">Arda</span>
-          <div className="min-w-0 flex items-center gap-2">
-            <span className="text-[11px] text-arda-text-muted flex-shrink-0">
+
+          <div className="hidden min-w-0 flex-1 items-center justify-center gap-2 md:flex">
+            <span className="flex-shrink-0 text-[11px] text-arda-text-muted">
               Step {currentStepIndex + 1} of {ONBOARDING_STEPS.length}
             </span>
-            <span className="text-sm font-semibold text-arda-text-primary truncate">
+            <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+              currentStepConfig.group === 'required'
+                ? 'border-arda-warning-border bg-arda-warning-bg text-arda-warning-text'
+                : 'border-arda-border bg-arda-bg-secondary text-arda-text-secondary'
+            }`}>
+              {currentStepConfig.group === 'required' ? 'Required' : 'Optional'}
+            </span>
+            <span className="truncate text-sm font-semibold text-arda-text-primary">
               {currentStepConfig.title}
             </span>
-            <span className="hidden md:block text-xs text-arda-text-secondary truncate">
-              {currentStepConfig.description}
+            <span className="hidden truncate text-xs text-arda-text-secondary xl:block">
+              Next value: {currentStepConfig.valueLabel}
             </span>
+          </div>
+
+          <div className="flex flex-shrink-0 items-center gap-2">
+            <div ref={tipsWrapperRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setTipsOpenForStep(open => (open === currentStep ? null : currentStep))}
+                className="btn-arda-outline text-sm py-1.5 flex items-center gap-2"
+                aria-controls={`onboarding-tips-${currentStep}`}
+                aria-haspopup="dialog"
+              >
+                <Icons.Lightbulb className="w-4 h-4" />
+                <span className="sr-only sm:not-sr-only">Tips</span>
+              </button>
+
+              {tipsOpen && (
+                <div
+                  id={`onboarding-tips-${currentStep}`}
+                  role="dialog"
+                  aria-label={currentStepConfig.tipsTitle}
+                  className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-arda-border bg-white/95 p-3 shadow-lg backdrop-blur z-50"
+                >
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-arda-text-muted">
+                    {currentStepConfig.tipsTitle}
+                  </div>
+                  <ul className="mt-2 list-inside list-disc space-y-1 text-xs text-arda-text-secondary">
+                    {currentStepConfig.tips.map((tip, index) => (
+                      <li key={`${currentStep}-${index}`}>{tip}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            {userProfile?.email && (
+              <div className="hidden sm:flex items-center gap-2 rounded-xl border border-arda-border bg-white/70 px-2.5 py-1.5 text-xs text-arda-text-secondary">
+                <Icons.Mail className="w-3.5 h-3.5 text-arda-text-muted" />
+                <span className="max-w-[14rem] truncate">{userProfile.email}</span>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={onSkip}
+              className="rounded-xl border border-transparent px-2.5 py-1.5 text-xs font-medium text-arda-text-muted transition-colors hover:border-arda-border hover:bg-white/70 hover:text-arda-text-primary"
+            >
+              Exit
+            </button>
           </div>
         </div>
 
-        <div className="hidden lg:flex items-center gap-1.5 flex-1 justify-center px-4">
+        <div className="mt-2 flex min-w-0 items-center gap-2 md:hidden">
+          <span className="flex-shrink-0 text-[11px] text-arda-text-muted">
+            Step {currentStepIndex + 1} of {ONBOARDING_STEPS.length}
+          </span>
+          <span className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-medium ${
+            currentStepConfig.group === 'required'
+              ? 'border-arda-warning-border bg-arda-warning-bg text-arda-warning-text'
+              : 'border-arda-border bg-arda-bg-secondary text-arda-text-secondary'
+          }`}>
+            {currentStepConfig.group === 'required' ? 'Required' : 'Optional'}
+          </span>
+          <span className="truncate text-sm font-semibold text-arda-text-primary">
+            {currentStepConfig.title}
+          </span>
+        </div>
+
+        <div className="mt-2 hidden items-center justify-center gap-1.5 lg:flex">
           {ONBOARDING_STEPS.map((step, index) => {
             const status = getStepStatus(step.id);
             const Icon = Icons[step.icon] || Icons.Circle;
-            const isInteractive = status === 'completed' || status === 'current';
-            const isCompleted = status === 'completed';
-            const isCurrent = status === 'current';
+            const isInteractive = status === 'done' || status === 'in_progress';
+            const isCompleted = status === 'done';
+            const isCurrent = status === 'in_progress';
 
             return (
               <div key={step.id} className="flex items-center">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (isInteractive) {
-                        setTipsOpenForStep(null);
-                        setCurrentStep(step.id);
-                      }
-                    }}
-                    disabled={!isInteractive}
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (isInteractive) {
+                      setTipsOpenForStep(null);
+                      setCurrentStep(step.id);
+                    }
+                  }}
+                  disabled={!isInteractive}
                   className={[
-                    'w-7 h-7 rounded-full border flex items-center justify-center transition-colors',
-                    isCompleted ? 'bg-arda-accent border-orange-600 text-white' : '',
-                    isCurrent ? 'bg-orange-500 border-orange-600 text-white' : '',
-                    status === 'upcoming' ? 'bg-white/80 border-arda-border text-arda-text-muted' : '',
-                    isInteractive ? 'hover:bg-orange-50' : 'opacity-50 cursor-not-allowed',
+                    'flex h-7 w-7 items-center justify-center rounded-full border transition-colors',
+                    isCompleted ? 'border-arda-accent-hover bg-arda-accent text-white' : '',
+                    isCurrent ? 'border-arda-accent-hover bg-arda-accent text-white' : '',
+                    status === 'ready' ? 'border-arda-warning-border bg-arda-warning-bg text-arda-warning-text' : '',
+                    status === 'optional' ? 'border-arda-border bg-arda-bg-secondary text-arda-text-secondary' : '',
+                    status === 'not_started' ? 'border-arda-border bg-white/80 text-arda-text-muted' : '',
+                    isInteractive ? 'hover:bg-arda-accent/10' : 'cursor-not-allowed opacity-50',
                   ].join(' ')}
                   aria-current={isCurrent ? 'step' : undefined}
-                  title={step.title}
+                  title={`${step.title} • ${step.group === 'required' ? 'Required' : 'Optional'}`}
                 >
                   {isCompleted ? <Icons.Check className="w-3 h-3" /> : <Icon className="w-3 h-3" />}
                 </button>
                 {index < ONBOARDING_STEPS.length - 1 && (
                   <div
                     className={[
-                      'w-6 h-[2px] mx-1 rounded-full',
-                      completedSteps.has(step.id) ? 'bg-orange-400' : 'bg-arda-border',
+                      'mx-1 h-[2px] w-6 rounded-full',
+                      completedSteps.has(step.id) ? 'bg-arda-accent' : 'bg-arda-border',
                     ].join(' ')}
                   />
                 )}
@@ -782,59 +1012,11 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
             );
           })}
         </div>
-
-        <div className="flex items-center gap-2 flex-shrink-0">
-          <div ref={tipsWrapperRef} className="relative">
-            <button
-              type="button"
-              onClick={() => setTipsOpenForStep(open => (open === currentStep ? null : currentStep))}
-              className="btn-arda-outline text-sm py-1.5 flex items-center gap-2"
-              aria-controls={`onboarding-tips-${currentStep}`}
-              aria-haspopup="dialog"
-            >
-              <Icons.Lightbulb className="w-4 h-4" />
-              <span className="sr-only sm:not-sr-only">Tips</span>
-            </button>
-
-            {tipsOpen && (
-              <div
-                id={`onboarding-tips-${currentStep}`}
-                role="dialog"
-                aria-label={currentStepConfig.tipsTitle}
-                className="absolute right-0 top-full mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-arda-border bg-white/95 backdrop-blur shadow-lg p-3 z-50"
-              >
-                <div className="text-[11px] font-semibold text-arda-text-muted uppercase tracking-wide">
-                  {currentStepConfig.tipsTitle}
-                </div>
-                <ul className="mt-2 text-xs text-arda-text-secondary space-y-1 list-disc list-inside">
-                  {currentStepConfig.tips.map((tip, index) => (
-                    <li key={`${currentStep}-${index}`}>{tip}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-
-          {userProfile?.email && (
-            <div className="hidden sm:flex items-center gap-2 text-xs text-arda-text-secondary bg-white/70 border border-arda-border rounded-xl px-2.5 py-1.5">
-              <Icons.Mail className="w-3.5 h-3.5 text-arda-text-muted" />
-              <span className="max-w-[14rem] truncate">{userProfile.email}</span>
-            </div>
-          )}
-
-          <button
-            type="button"
-            onClick={onSkip}
-            className="text-xs font-medium text-arda-text-muted hover:text-arda-text-primary hover:bg-white/70 border border-transparent hover:border-arda-border rounded-xl px-2.5 py-1.5 transition-colors"
-          >
-            Exit
-          </button>
-        </div>
       </div>
 
-      <div className="absolute inset-x-0 bottom-0 h-1 bg-arda-bg-tertiary overflow-hidden">
+      <div className="absolute inset-x-0 bottom-0 h-1 overflow-hidden bg-arda-bg-tertiary">
         <div
-          className="h-full bg-gradient-to-r from-orange-400 to-orange-500 transition-all duration-300"
+          className="h-full bg-gradient-to-r from-arda-accent to-arda-accent-hover transition-all duration-300"
           style={{ width: `${((currentStepIndex + 1) / ONBOARDING_STEPS.length) * 100}%` }}
           role="progressbar"
           aria-label="Onboarding progress"
@@ -843,12 +1025,76 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
     </div>
   );
 
+  const renderEmailStatusCard = () => {
+    if (!hasStartedEmailSync) return null;
+    if (currentStep === 'welcome') return null;
+
+    const progress = emailBackgroundProgress ?? {
+      isActive: currentStep === 'email',
+      phase: 'ready' as const,
+      title: 'Email import in progress',
+      supplier: 'Email import',
+      processed: emailOrders.length,
+      total: emailOrders.length,
+      nextAction: 'If you continue now, email import keeps running and new items will still appear in review.',
+    };
+
+    const title = currentStep === 'email'
+      ? 'Continue whenever you are ready'
+      : progress.isActive
+        ? 'Email import still running in the background'
+        : 'Email import summary';
+
+    return (
+      <div className="fixed inset-x-0 bottom-16 z-30 px-4 sm:px-6 pointer-events-none">
+        <div className="max-w-6xl mx-auto">
+          <div className="pointer-events-auto rounded-2xl border border-arda-info-border bg-white/95 px-4 py-3 shadow-lg backdrop-blur">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-semibold text-arda-info-text">
+                  <Icons.Mail className="w-4 h-4" />
+                  {title}
+                </div>
+                <p className="mt-1 text-sm text-arda-text-primary">
+                  {progress.title}
+                  {progress.total > 0
+                    ? ` • ${progress.processed}/${progress.total}`
+                    : ''}
+                </p>
+                <p className="mt-1 text-xs text-arda-text-secondary">
+                  {progress.currentTask || progress.nextAction}
+                </p>
+              </div>
+              <div className="rounded-xl bg-arda-info-bg px-3 py-2 text-xs text-arda-info-text">
+                {currentStep === 'email'
+                  ? 'If you continue now, email import keeps running and new items will still appear in review.'
+                  : progress.nextAction}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // Render current step content (keep SupplierSetup mounted so background imports continue)
   const renderStepContent = () => (
     <>
       {currentStep === 'welcome' && (
         <OnboardingWelcomeStep
-          steps={ONBOARDING_STEPS.filter(step => step.id !== 'welcome')}
+          steps={ONBOARDING_STEPS
+            .filter(step => step.id !== 'welcome')
+            .map(step => ({
+              id: step.id,
+              title: step.title,
+              description: step.description,
+              icon: step.icon,
+              group: step.group,
+              estimatedTime: step.estimatedTime,
+              bestFor: step.bestFor,
+              valueLabel: step.valueLabel,
+              status: getStepStatus(step.id),
+            }))}
           userProfile={userProfile}
           onStartEmailSync={handleStartEmailSync}
           onSkipEmail={handleSkipEmailSync}
@@ -861,6 +1107,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
           <SupplierSetup
             onScanComplete={handleEmailOrdersUpdate}
             onSkip={() => handleStepComplete('email')}
+            onProgressUpdate={handleEmailProgressUpdate}
             onCanProceed={handleCanProceedFromEmail}
             onStateChange={handleEmailScanStateChange}
             initialState={emailScanState}
@@ -872,7 +1119,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
               <div>
                 <h3 className="text-lg font-semibold text-arda-text-primary">Start email sync</h3>
                 <p className="text-sm text-arda-text-secondary mt-1">
-                  Email scanning will run in the background while you continue.
+                  Email scanning will run in the background while you continue. Amazon and priority suppliers are the required path.
                 </p>
               </div>
               <button
@@ -894,7 +1141,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
       {currentStep === 'url' && (
         <div className="space-y-3">
           {urlReviewBlockMessage && (
-            <div className="rounded-xl border border-orange-200 bg-orange-50 text-orange-900 text-xs px-3 py-2">
+            <div className="rounded-xl border border-arda-warning-border bg-arda-warning-bg px-3 py-2 text-xs text-arda-warning-text">
               {urlReviewBlockMessage}
             </div>
           )}
@@ -977,8 +1224,8 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
   return (
     <div className="relative min-h-screen arda-mesh flex flex-col">
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute -top-10 left-10 w-56 h-56 rounded-full bg-orange-400/15 blur-3xl animate-float" />
-        <div className="absolute top-32 right-12 w-72 h-72 rounded-full bg-blue-500/10 blur-3xl animate-float" />
+        <div className="absolute -top-10 left-10 w-56 h-56 rounded-full bg-arda-accent/15 blur-3xl animate-float" />
+        <div className="absolute top-32 right-12 w-72 h-72 rounded-full bg-arda-info/10 blur-3xl animate-float" />
       </div>
       {/* Step indicator */}
       {renderStepIndicator()}
@@ -1035,6 +1282,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({
         </div>
       </div>
 
+      {renderEmailStatusCard()}
       {renderFooterNavigation()}
     </div>
   );

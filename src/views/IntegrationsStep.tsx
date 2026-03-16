@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { InstructionCard } from '../components/InstructionCard';
 import { Icons } from '../components/Icons';
 import {
   IntegrationConnection,
@@ -211,17 +212,45 @@ export const IntegrationsStep: React.FC = () => {
   }), []);
 
   return (
-    <div className="space-y-4">
-      <section className="border-2 border-emerald-200 bg-emerald-50 rounded-2xl p-6 space-y-4">
-        <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      <InstructionCard
+        title="What to do"
+        icon="Building2"
+        steps={[
+          'Connect QuickBooks or Xero if you want PO data.',
+          'Start a sync to pull history.',
+          'Continue when ready.',
+        ]}
+      />
+
+      <section className="arda-glass rounded-2xl border border-arda-border/80 p-6">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-arda-warning-border bg-arda-warning-bg text-arda-accent">
+            <Icons.Zap className="w-5 h-5" />
+          </div>
           <div>
+            <h2 className="text-lg font-semibold text-arda-text-primary">Integrations</h2>
+            <p className="mt-1 max-w-3xl text-sm text-arda-text-secondary">
+              Connect accounting platforms here. Step 1 now focuses only on email discovery.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-4 rounded-2xl border-2 border-arda-success-border bg-arda-success-bg p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-arda-success-border bg-white px-3 py-1 text-xs font-medium text-arda-success-text">
+              <Icons.Clock className="w-3.5 h-3.5" />
+              Optional
+            </div>
             <h3 className="text-xl font-bold text-arda-text-primary">Accounting Integrations</h3>
             <p className="text-sm text-arda-text-secondary">
-              Import purchase orders from QuickBooks and Xero into Orders.
+              Import purchase orders from QuickBooks or Xero if email is not your only source.
             </p>
           </div>
           {isLoading && (
-            <div className="flex items-center gap-2 text-emerald-700 text-sm">
+            <div className="flex items-center gap-2 text-arda-success-text text-sm">
               <Icons.Loader2 className="w-4 h-4 animate-spin" />
               Refreshing
             </div>
@@ -229,13 +258,13 @@ export const IntegrationsStep: React.FC = () => {
         </div>
 
         {notice && (
-          <div className="bg-emerald-100 border border-emerald-300 rounded-lg px-3 py-2 text-sm text-emerald-800">
+          <div className="bg-arda-success-soft border border-arda-success-border rounded-lg px-3 py-2 text-sm text-arda-success-text">
             {notice}
           </div>
         )}
 
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
+          <div className="bg-arda-danger-bg border border-arda-danger-border rounded-lg px-3 py-2 text-sm text-arda-danger-text">
             {error}
           </div>
         )}
@@ -273,19 +302,20 @@ export const IntegrationsStep: React.FC = () => {
             const disconnectActionKey = connection ? `disconnect:${connection.id}` : '';
 
             return (
-              <div key={provider} className="bg-white border border-emerald-200 rounded-xl p-4 space-y-3">
+              <div key={provider} className="bg-white border border-arda-success-border rounded-xl p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <Icons.Link className="w-4 h-4 text-emerald-700" />
+                    <Icons.Link className="w-4 h-4 text-arda-success-text" />
                     <span className="font-semibold text-arda-text-primary">{providerLabel}</span>
                   </div>
                   <span className={`text-xs px-2 py-1 rounded-full ${
-                    isConnected ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
+                    isConnected ? 'bg-arda-success-soft text-arda-success-text' : 'bg-arda-bg-tertiary text-arda-text-secondary'
                   }`}>
                     {statusText}
                   </span>
                 </div>
 
+                <p className="text-sm font-medium text-arda-text-primary">Import purchase orders</p>
                 <p className="text-xs text-arda-text-secondary">{runSummary}</p>
 
                 <div className="flex items-center gap-2">
@@ -294,7 +324,7 @@ export const IntegrationsStep: React.FC = () => {
                       type="button"
                       onClick={() => void handleConnect(provider)}
                       disabled={actionKey !== null}
-                      className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium disabled:opacity-60 disabled:cursor-not-allowed"
+                      className="btn-arda-primary !px-3 !py-2 !rounded-lg text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       {actionKey === connectActionKey ? 'Connecting...' : connection?.status === 'reauth_required' ? `Reconnect ${providerLabel}` : `Connect ${providerLabel}`}
                     </button>
@@ -304,7 +334,7 @@ export const IntegrationsStep: React.FC = () => {
                         type="button"
                         onClick={() => connection && void handleSync(connection.id)}
                         disabled={actionKey !== null}
-                        className="px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1"
+                        className="btn-arda-primary !px-3 !py-2 !rounded-lg text-sm disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1"
                       >
                         <Icons.RefreshCw className={`w-3.5 h-3.5 ${actionKey === syncActionKey ? 'animate-spin' : ''}`} />
                         {actionKey === syncActionKey ? 'Syncing...' : 'Sync now'}
@@ -313,7 +343,7 @@ export const IntegrationsStep: React.FC = () => {
                         type="button"
                         onClick={() => connection && void handleDisconnect(connection.id)}
                         disabled={actionKey !== null}
-                        className="px-3 py-2 rounded-lg border border-gray-300 text-sm font-medium text-arda-text-secondary hover:bg-gray-50 disabled:opacity-60 disabled:cursor-not-allowed"
+                        className="btn-arda-outline !px-3 !py-2 !rounded-lg text-sm text-arda-text-secondary disabled:opacity-60 disabled:cursor-not-allowed"
                       >
                         {actionKey === disconnectActionKey ? 'Disconnecting...' : 'Disconnect'}
                       </button>
@@ -326,38 +356,47 @@ export const IntegrationsStep: React.FC = () => {
         </div>
       </section>
 
-      {(Object.keys(grouped) as Array<keyof typeof grouped>).map(category => {
-        const config = CATEGORY_CONFIG[category];
-        const CategoryIcon = config.icon;
+      <section className="bg-white border border-arda-border rounded-2xl p-5 shadow-sm space-y-4">
+        <div>
+          <h3 className="text-base font-semibold text-arda-text-primary">Coming soon</h3>
+          <p className="mt-1 text-sm text-arda-text-secondary">
+            These integrations are planned, but they are not actionable in onboarding yet.
+          </p>
+        </div>
 
-        return (
-          <section key={category} className="bg-white border border-arda-border rounded-2xl p-5 shadow-sm">
-            <div className="flex items-center gap-2 mb-4">
-              <CategoryIcon className="w-4 h-4 text-arda-accent" />
-              <h3 className="text-sm font-semibold text-arda-text-primary">{config.title}</h3>
-            </div>
+        {(Object.keys(grouped) as Array<keyof typeof grouped>).map(category => {
+          const config = CATEGORY_CONFIG[category];
+          const CategoryIcon = config.icon;
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {grouped[category].map(integration => (
-                <article
-                  key={integration.name}
-                  className="rounded-xl border border-arda-border bg-arda-bg-secondary/30 p-3"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-medium text-sm text-arda-text-primary">{integration.name}</p>
-                    <span className="text-[11px] font-medium rounded-full border border-arda-border px-2 py-0.5 text-arda-text-muted">
-                      Coming soon
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-arda-text-secondary leading-relaxed">
-                    {integration.description}
-                  </p>
-                </article>
-              ))}
-            </div>
-          </section>
-        );
-      })}
+          return (
+            <section key={category} className="rounded-2xl border border-arda-border bg-arda-bg-secondary/20 p-5">
+              <div className="mb-4 flex items-center gap-2">
+                <CategoryIcon className="w-4 h-4 text-arda-accent" />
+                <h3 className="text-sm font-semibold text-arda-text-primary">{config.title}</h3>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {grouped[category].map(integration => (
+                  <article
+                    key={integration.name}
+                    className="rounded-xl border border-arda-border bg-white p-3 opacity-80"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-arda-text-primary">{integration.name}</p>
+                      <span className="rounded-full border border-arda-border px-2 py-0.5 text-[11px] font-medium text-arda-text-muted">
+                        Coming soon
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs leading-relaxed text-arda-text-secondary">
+                      {integration.description}
+                    </p>
+                  </article>
+                ))}
+              </div>
+            </section>
+          );
+        })}
+      </section>
     </div>
   );
 };

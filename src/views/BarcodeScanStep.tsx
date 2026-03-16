@@ -304,7 +304,7 @@ export const BarcodeScanStep: React.FC<BarcodeScanStepProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] gap-4 items-stretch">
           <div className="space-y-3">
             <div className="flex items-center gap-3">
-              <div className="w-11 h-11 bg-orange-50 rounded-2xl flex items-center justify-center border border-orange-100">
+              <div className="w-11 h-11 bg-arda-warning-bg rounded-2xl flex items-center justify-center border border-arda-warning-border">
                 <Icons.Barcode className="w-5 h-5 text-arda-accent" />
               </div>
               <div>
@@ -324,7 +324,7 @@ export const BarcodeScanStep: React.FC<BarcodeScanStepProps> = ({
                 className={[
                   'input-arda font-mono text-lg',
                   'pr-10',
-                  isListening ? 'bg-orange-50 ring-2 ring-arda-accent border-transparent' : '',
+                  isListening ? 'bg-arda-warning-bg ring-2 ring-arda-accent border-transparent' : '',
                 ].join(' ')}
                 onFocus={() => setIsListening(true)}
                 onBlur={() => setTimeout(() => setIsListening(false), 200)}
@@ -339,9 +339,9 @@ export const BarcodeScanStep: React.FC<BarcodeScanStepProps> = ({
             {recentScan && (
               <div className={[
                 'flex items-center gap-2 px-3 py-2 rounded-xl text-sm border',
-                lookupStatus === 'loading' ? 'bg-orange-50 text-orange-700 border-orange-200' : '',
-                lookupStatus === 'success' ? 'bg-green-50 text-green-700 border-green-200' : '',
-                lookupStatus === 'error' ? 'bg-red-50 text-red-700 border-red-200' : '',
+                lookupStatus === 'loading' ? 'bg-arda-warning-bg text-arda-warning-text border-arda-warning-border' : '',
+                lookupStatus === 'success' ? 'bg-arda-success-bg text-arda-success-text border-arda-success-border' : '',
+                lookupStatus === 'error' ? 'bg-arda-danger-bg text-arda-danger-text border-arda-danger-border' : '',
                 lookupStatus === 'idle' ? 'bg-arda-bg-secondary text-arda-text-secondary border-arda-border' : '',
               ].join(' ')}>
                 {lookupStatus === 'loading' && <Icons.Loader2 className="w-4 h-4 animate-spin" />}
@@ -498,7 +498,7 @@ export const BarcodeScanStep: React.FC<BarcodeScanStepProps> = ({
                       </div>
                     )}
                     {item.matchedToEmailItem && (
-                      <div className="inline-flex items-center gap-1 text-green-600">
+                      <div className="inline-flex items-center gap-1 text-arda-success-text">
                         <Icons.Link className="w-3 h-3" />
                         <span>Matched</span>
                       </div>

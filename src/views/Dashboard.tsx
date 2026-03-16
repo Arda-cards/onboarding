@@ -60,9 +60,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ orders, inventory, onReord
   const getUrgencyColor = (dateStr: string): { text: string; bg: string } => {
     const date = new Date(dateStr);
     const daysUntil = Math.ceil((date.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    if (daysUntil <= 2) return { text: 'text-red-500', bg: 'bg-red-500' };
-    if (daysUntil <= 4) return { text: 'text-orange-500', bg: 'bg-orange-500' };
-    return { text: 'text-yellow-500', bg: 'bg-yellow-500' };
+    if (daysUntil <= 2) return { text: 'text-arda-danger', bg: 'bg-arda-danger' };
+    if (daysUntil <= 4) return { text: 'text-arda-warning', bg: 'bg-arda-warning' };
+    return { text: 'text-arda-warning', bg: 'bg-arda-warning' };
   };
 
   return (
@@ -97,8 +97,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ orders, inventory, onReord
 
       {/* Fastest Mover Highlight */}
       {fastestMover && fastestMover.dailyBurnRate > 0 && (
-        <div className="bg-gradient-to-r from-orange-50 to-amber-50 border border-orange-200 rounded-xl p-4 flex items-center gap-4">
-          <div className="bg-orange-100 p-3 rounded-lg">
+        <div className="bg-arda-bg-secondary border border-arda-border rounded-xl p-4 flex items-center gap-4">
+          <div className="bg-arda-accent/10 p-3 rounded-lg">
             <Icons.TrendingUp className="w-6 h-6 text-arda-accent" />
           </div>
           <div className="flex-1">
@@ -241,7 +241,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ orders, inventory, onReord
               orders.slice(0, 5).map((order) => (
                 <div key={order.id} className="flex items-center justify-between border-b border-arda-border pb-3 last:border-0 last:pb-0">
                   <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center">
+                    <div className="w-8 h-8 rounded-lg bg-arda-accent/10 flex items-center justify-center">
                       <Icons.Inbox className="w-4 h-4 text-arda-accent" />
                     </div>
                     <div>
@@ -266,14 +266,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ orders, inventory, onReord
                 <div className="text-sm text-arda-text-muted">All stock levels healthy.</div>
              )}
              {inventory.filter(i => i.recommendedOrderQty > 5).slice(0, 5).map(item => (
-               <div key={item.id} className="bg-red-50 p-3 rounded-lg border border-red-100 flex items-center justify-between group hover:shadow-arda transition-shadow">
+               <div key={item.id} className="bg-arda-danger-bg p-3 rounded-lg border border-arda-danger-border flex items-center justify-between group hover:shadow-arda transition-shadow">
                  <div className="truncate flex-1 pr-2">
                    <div className="text-sm text-arda-text-primary font-medium truncate">{item.name}</div>
                    <div className="text-xs text-arda-danger">Low Stock Alert</div>
                  </div>
                  <button 
                   onClick={() => onReorder(item)}
-                  className="bg-arda-accent hover:bg-arda-accent-hover text-white w-8 h-8 rounded-lg flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 shadow-lg shadow-orange-500/20"
+                  className="bg-arda-accent hover:bg-arda-accent-hover text-white w-8 h-8 rounded-lg flex items-center justify-center transition-all opacity-0 group-hover:opacity-100 shadow-lg shadow-arda-accent/20"
                   title="Quick Reorder"
                  >
                    <Icons.Send className="w-4 h-4" />
@@ -303,7 +303,7 @@ interface StatsCardProps {
 const StatsCard: React.FC<StatsCardProps> = ({ title, value, icon, trend, subtitle, highlight }) => {
   const Icon = Icons[icon];
   return (
-    <div className={`p-6 rounded-xl border shadow-arda ${highlight ? 'bg-orange-50 border-orange-200' : 'bg-white border-arda-border'}`}>
+    <div className={`p-6 rounded-xl border shadow-arda ${highlight ? 'bg-arda-accent/5 border-arda-accent/20' : 'bg-white border-arda-border'}`}>
       <div className="flex justify-between items-start mb-2">
         <span className="text-arda-text-secondary text-sm font-medium">{title}</span>
         <Icon className={`w-5 h-5 ${highlight ? 'text-arda-accent' : 'text-arda-text-muted'}`} />

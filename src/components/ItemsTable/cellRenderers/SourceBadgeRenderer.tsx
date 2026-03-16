@@ -3,11 +3,11 @@ import { Icons } from '../../Icons';
 import type { MasterListItem } from '../types';
 
 const sourceConfig: Record<MasterListItem['source'], { icon: keyof typeof Icons; label: string; bg: string }> = {
-  email: { icon: 'Mail', label: 'Email', bg: 'bg-blue-50 text-blue-600' },
-  url: { icon: 'Link', label: 'URL', bg: 'bg-purple-50 text-purple-600' },
-  barcode: { icon: 'Barcode', label: 'UPC', bg: 'bg-green-50 text-green-600' },
-  photo: { icon: 'Camera', label: 'Photo', bg: 'bg-orange-50 text-orange-600' },
-  csv: { icon: 'FileSpreadsheet', label: 'CSV', bg: 'bg-gray-50 text-gray-600' },
+  email: { icon: 'Mail', label: 'Email', bg: 'bg-arda-info-bg text-arda-info-text' },
+  url: { icon: 'Link', label: 'URL', bg: 'bg-arda-bg-secondary text-arda-text-secondary' },
+  barcode: { icon: 'Barcode', label: 'UPC', bg: 'bg-arda-success-bg text-arda-success-text' },
+  photo: { icon: 'Camera', label: 'Photo', bg: 'bg-arda-warning-bg text-arda-warning-text' },
+  csv: { icon: 'FileSpreadsheet', label: 'CSV', bg: 'bg-arda-bg-secondary text-arda-text-secondary' },
 };
 
 export const SourceBadgeRenderer = (props: CustomCellRendererProps<MasterListItem>) => {

@@ -34,27 +34,27 @@ const getNodeColors = (type: JourneyNodeType) => {
   switch (type) {
     case 'email':
       return {
-        iconBg: 'bg-blue-500/20',
-        iconColor: 'text-blue-400',
-        border: 'border-blue-500/30',
+        iconBg: 'bg-arda-info-soft',
+        iconColor: 'text-arda-info-text',
+        border: 'border-arda-info-border',
       };
     case 'order':
       return {
-        iconBg: 'bg-green-500/20',
-        iconColor: 'text-green-400',
-        border: 'border-green-500/30',
+        iconBg: 'bg-arda-success-soft',
+        iconColor: 'text-arda-success-text',
+        border: 'border-arda-success-border',
       };
     case 'lineItem':
       return {
-        iconBg: 'bg-purple-500/20',
-        iconColor: 'text-purple-400',
-        border: 'border-purple-500/30',
+        iconBg: 'bg-arda-bg-secondary',
+        iconColor: 'text-arda-text-secondary',
+        border: 'border-arda-border',
       };
     case 'velocity':
       return {
-        iconBg: 'bg-orange-500/20',
-        iconColor: 'text-orange-400',
-        border: 'border-orange-500/30',
+        iconBg: 'bg-arda-warning-soft',
+        iconColor: 'text-arda-warning-text',
+        border: 'border-arda-warning-border',
       };
     default:
       return {
@@ -118,7 +118,7 @@ const TreeNodeComponent: React.FC<TreeNodeProps> = ({
           hover:bg-arda-bg-tertiary hover:scale-[1.01]
           ${level === 0 ? 'bg-arda-bg-secondary' : ''}
           ${isFocused ? 'ring-2 ring-arda-accent ring-offset-2 ring-offset-white bg-arda-bg-tertiary' : ''}
-          ${isNew ? 'animate-pulse ring-2 ring-green-400/50 ring-offset-2 ring-offset-white' : ''}
+          ${isNew ? 'animate-pulse ring-2 ring-arda-success-border ring-offset-2 ring-offset-white' : ''}
         `}
         style={{ paddingLeft: `${level * 20 + 8}px` }}
         onClick={handleClick}
@@ -156,7 +156,7 @@ const TreeNodeComponent: React.FC<TreeNodeProps> = ({
           w-7 h-7 rounded-lg flex items-center justify-center
           transition-all duration-200 ease-in-out
           ${colors.iconBg}
-          ${isNew ? 'animate-pulse shadow-lg shadow-green-400/30' : ''}
+          ${isNew ? 'animate-pulse shadow-lg shadow-arda-success-border' : ''}
         `}>
           <Icon className={`w-4 h-4 transition-colors duration-200 ${colors.iconColor}`} />
         </div>
