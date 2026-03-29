@@ -30,7 +30,7 @@
     "express": "^4.21.0",
     "express-rate-limit": "^7.5.1",
     "express-session": "^1.18.0",
-    "googleapis": "^140.0.1",
+    "googleapis": "^171.4.0",
     "helmet": "^7.1.0",
     "ioredis": "^5.4.1",
     "pdf-parse": "^2.2.2",
