@@ -22,7 +22,7 @@
     "googleapis": "^160.0.0",
     "jsdom": "^28.1.0",
     "pino": "^10.3.1",
-    "redis": "^5.8.2"
+    "redis": "^5.12.1"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",
